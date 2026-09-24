@@ -13,6 +13,7 @@ import { setLanePlan } from './lanes.js';
 import { CrossTraffic } from './crosstraffic.js';
 import { placeHazards, HazardView } from './hazards.js';
 import { Animals, ANIMALS } from './animals.js';
+import { Parked } from './parked.js';
 import { Flagger } from './flagger.js';
 import { trafficContact, applyTrafficHit } from './traffic.js';
 import { buildLighting, followSun } from './lighting.js';
@@ -169,6 +170,7 @@ let flagger = null;        // the starter in the road with the chequered flag
 let crossTraffic = null;   // cars coming across at the crossroads
 let hazardView = null;     // oil slicks and gravel on the deck
 let animals = null;        // cows and deer on the rural roads
+let parked = null;         // cars at the kerb in town
 let roadGroup = null, roadsideGroup = null;   // rebuilt when a course's lane layout differs (lanes.js)
 let raceCounter = 0;       // races started this session, so a replayed event gets a new outfit
 
@@ -476,6 +478,7 @@ async function init() {
   trackDress = new TrackDress(scene);
   try { flagger = new Flagger(scene); } catch (e) { console.warn('[riderash] flagger:', e); flagger = null; }
   try { hazardView = new HazardView(scene); } catch (e) { console.warn('[riderash] hazards:', e); }
+  try { parked = new Parked(scene); window.__PARKED__ = parked; } catch (e) { console.warn('[riderash] parked:', e); }
   try { animals = new Animals(scene); window.__ANIMALS__ = animals; } catch (e) { console.warn('[riderash] animals:', e); }
   try { crossTraffic = new CrossTraffic(scene); window.__CROSS__ = crossTraffic; } catch (e) { console.warn('[riderash] cross traffic:', e); crossTraffic = null; }
   world.traffic = traffic;
@@ -1672,6 +1675,25 @@ function stepGame(dt) {
     state.lastHazard = hz;
   }
 
+  // PARKED CARS: solid; a side scrape is a scrape, hitting the back of one
+  // at speed is a wipeout
+  if (parked) for (const rd of world.parts) {
+    const f = rd.fighter;
+    if (!rd.phys || !f || f.down) continue;
+    const v = parked.collide(rd.phys);
+    if (v < 1) continue;
+    const isP = rd === player;
+    if (isP) audio.oneShot('impact', Math.min(1, v / 12), 1.1);
+    if (v > 9 && !(f.invuln > 0)) {
+      const who = isP ? 'player' : (rd.name || 'rival');
+      (state.wrecksBy = state.wrecksBy || {})[who] = (state.wrecksBy[who] || 0) + 1;
+      if ((f.hold || f.heldBy) && f._endHold) f._endHold('break', hooks);
+      f.down = true; f.downTimer = CFG.WRECK_TIME; f.active = null; f.invuln = CFG.INVULN_AFTER;
+      state.trafficWrecks = (state.trafficWrecks || 0) + 1;
+      if (isP) { state.warn = 'PARKED CAR!'; state.shake = Math.min(1.4, state.shake + 0.8); hooks.onImpact?.(1.0); }
+    } else if (isP) state.warn = 'SCRAPE';
+  }
+
   // COWS AND DEER: in the road on the rural courses
   if (animals && !window.__TRAFFIC_OFF__) {
     animals.update(dt, spine, player.phys.s, state.finishS, state.countdown <= 0);
@@ -1914,6 +1936,7 @@ window.__START__ = () => {
   // a different starter outfit every race (window.__FLAGGER_OUTFIT__ pins one)
   if (crossTraffic) crossTraffic.reset();
   if (animals) animals.reset();
+  try { if (parked) parked.build(spine, state.finishS); } catch (e) { console.warn('[riderash] parked:', e); }
   try { window.__HAZARDS__ = placeHazards(spine, state.finishS); if (hazardView) hazardView.build(); } catch (e) { console.warn('[riderash] hazards:', e); }
   if (flagger) {
     flagger.reset(window.__FLAGGER_OUTFIT__ != null ? window.__FLAGGER_OUTFIT__ : (career.state.race || 0) + (career.state.wins || 0) * 3 + raceCounter++);

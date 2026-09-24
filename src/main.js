@@ -1741,7 +1741,7 @@ function stepGame(dt) {
   if (animals && !window.__TRAFFIC_OFF__) {
     animals.update(dt, spine, player.phys.s, state.finishS, state.countdown <= 0);
     const k = animals.ahead(player.phys);
-    if (k && k !== state.lastAnimal) state.warn = k === 'cow' ? 'COW!' : 'DEER!';
+    if (k && k !== state.lastAnimal) state.warn = k === 'cow' ? 'COW!' : k === 'moose' ? 'MOOSE!!' : 'DEER!';
     state.lastAnimal = k;
     for (const rd of world.parts) {
       const f = rd.fighter;
@@ -1753,7 +1753,7 @@ function stepGame(dt) {
       const vol = isP ? 1 : Math.max(0, 1 - dist / 140);
       if (vol > 0.03) audio.oneShot('impact', vol, 0.8);
       rd.phys.speed *= 0.4;
-      if (hit.closing < ANIMALS.HIT_WIPE) { if (isP) state.warn = 'BUMPED A ' + hit.animal.userData.kind.toUpperCase(); continue; }
+      if (hit.closing < (hit.animal.userData.kind === 'moose' ? 4 : ANIMALS.HIT_WIPE)) { if (isP) state.warn = 'BUMPED A ' + hit.animal.userData.kind.toUpperCase(); continue; }
       const who = isP ? 'player' : (rd.name || 'rival');
       (state.wrecksBy = state.wrecksBy || {})[who] = (state.wrecksBy[who] || 0) + 1;
       if ((f.hold || f.heldBy) && f._endHold) f._endHold('break', hooks);

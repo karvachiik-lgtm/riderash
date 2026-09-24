@@ -7,7 +7,7 @@ import { cloneWithJoints } from './rigclone.js';
 import { mergeJoints } from '../assetlib.js';
 // See rivals.js: colour into vertices, the tyre/saddle colour kept separate.
 const MERGE_OPTS = { vertexColors: true, allNodes: true, keepColour: (h) => h === 0x1b1b1e };
-import { clearAxes, poseSeated, poseCombat, solveSeat } from './riderpose.js';
+import { clearAxes, poseSeated, poseRideDynamics, poseCombat, solveSeat } from './riderpose.js';
 import { Dismount, ST } from './dismount.js';
 import { paintBike } from './kit.js';
 
@@ -614,6 +614,7 @@ export class Player {
     // by speed. ONE implementation for the player, the pack and the showroom:
     // see riderpose.poseSeated for the rival hand drift this closed.
     poseSeated(j, tuck);
+    poseRideDynamics(j, this.phys, this.time, 0);
 
     // ---- attack poses ----
     //

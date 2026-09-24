@@ -615,6 +615,53 @@ export function animateChain(joints, speed, ph, time, seed = 0) {
  * striking one onto its trajectory and the rest back onto grips and pegs. So a
  * punch that twists the chest no longer drags the other hand off the bars.
  */
+/**
+ * RIDING DYNAMICS -- what a rider's body does on a moving machine, layered on
+ * the solved seat (after poseSeated, BEFORE poseCombat, which re-solves the
+ * hands onto the grips from wherever the torso ends up).
+ *
+ *   cornering   the torso hangs off INTO the lean, the head counter-rolls to
+ *               keep the eyes level and turns to look through the bend;
+ *   braking     weight thrown forward over the tank; hard throttle presses the
+ *               body back;
+ *   bumps       the suspension's travel bobs the torso;
+ *   speed       head down behind the screen at racing speed; slow, the body
+ *               sits up and breathes.
+ *
+ * Signs follow the rig: +x on the torso leans FORWARD, +z rolls toward the
+ * rider's right, +y on the neck turns the head left. `phys.lean` is + for a
+ * right-hand bend.
+ */
+export function poseRideDynamics(joints, phys, time = 0, seed = 0) {
+  if (!joints || !phys) return;
+  const v = Math.max(0, phys.speed || 0);
+  const lean = phys.lean || 0;
+  const steer = phys.steer || 0;
+  const aL = phys.longAccel || 0;
+  const bump = (phys.suspFront || 0) + (phys.suspRear || 0);
+  const T = joints.torso, N = joints.neck, H = joints.head;
+  const fast = Math.min(1, v / 40);
+  if (T && T.rotation) {
+    T.rotation.z += lean * 0.42;                              // hang off into the bend
+    T.rotation.y += -steer * 0.10 * (1 - fast * 0.5);         // shoulders open into the turn
+    T.rotation.x += THREE.MathUtils.clamp(-aL * 0.018, -0.10, 0.16);   // brake: forward, throttle: back
+    T.rotation.x += bump * 0.9;                               // compressions push the chest down
+    if (v < 6) T.rotation.x += Math.sin(time * 2.1 + seed) * 0.015;    // breathing at a standstill
+  }
+  if (N && N.rotation) {
+    N.rotation.z += -lean * 0.55;                             // eyes level through the lean
+    N.rotation.y += -steer * 0.28 - lean * 0.18;              // look where you are going
+    N.rotation.x += fast * 0.12;                              // head down behind the screen
+  }
+  if (H && H.rotation) {
+    H.rotation.z += -lean * 0.15;
+    H.rotation.x += Math.sin(time * 9.5 + seed * 3) * 0.006 * fast;   // buffeting at speed
+  }
+  // the torso moved: hands back onto the grips (poseCombat re-solves again if
+  // it runs; a rider who is not fighting still needs his hands on the bars)
+  if (joints.__ik && joints.__ikOn) solveLimbs(joints, null);
+}
+
 const CHAIN_STOW = 0.45;   // s the chain stays out after a swing (see poseCombat)
 export function poseCombat(joints, f, phys, time, attacksTable) {
   if (!joints || !f) return;

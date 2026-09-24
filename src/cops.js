@@ -37,7 +37,7 @@ import { trafficEscape } from './trafficavoid.js';
 import { cloneWithJoints } from './rigclone.js';
 import { paintBike } from './kit.js';
 import { mergeJoints } from '../assetlib.js';
-import { clearAxes, poseSeated, poseCombat, solveSeat } from './riderpose.js';
+import { clearAxes, poseSeated, poseRideDynamics, poseCombat, solveSeat, solveLimbs } from './riderpose.js';
 import { Fighter, ATTACKS } from './combat.js';
 import { Dismount } from './dismount.js';
 
@@ -225,6 +225,7 @@ export class Cop {
     this.t += dt;
     if (!racing || !this.enabled) return null;
     const pp = player.phys, p = this.phys;
+    this.player = pp;
 
     if (this.state === 'off') {
       if (this.t >= this.nextAt) this._park(player, finishS);
@@ -364,7 +365,33 @@ export class Cop {
     if (j) {
       clearAxes(j);
       poseSeated(j, Math.min(1, p.speed / 45));
+      if (this.state === 'parked') this._poseParked(j);
+      else poseRideDynamics(j, p, this.t, 7);
       if (chasing) poseCombat(j, this.fighter, p, this.t, ATTACKS);
+    }
+  }
+
+  // PARKED: on the side stand, sat up, a boot down on the road on the stand
+  // side, head turning to watch you come. The bike leans onto the stand.
+  _poseParked(j) {
+    const p = this.phys;
+    if (this.bike) this.bike.rotation.z = -0.10;          // leaning onto its stand (left)
+    if (j.torso) j.torso.rotation.x -= 0.18;              // sat up, not tucked
+    const pl = this.player;
+    if (pl && j.neck) {
+      // look at the player: bearing in the bike's frame, clamped to a neck's range
+      const dx = pl.pos.x - p.pos.x, dz = pl.pos.z - p.pos.z;
+      const rel = Math.atan2(dx, dz) - p.yaw;
+      const a = Math.atan2(Math.sin(rel), Math.cos(rel));
+      j.neck.rotation.y += THREE.MathUtils.clamp(a, -1.1, 1.1) * 0.8;
+    }
+    const ik = j.__ik;
+    if (ik && this.bike) {
+      // left boot on the tarmac beside the bike (bike +x is the rider's left)
+      const foot = this.bike.localToWorld(new THREE.Vector3(0.42, 0.02, 0.05 + CFG.SEAT_Z));
+      foot.y = p.pos.y + 0.03;
+      j.__ikOn = true;
+      solveLimbs(j, { leftLeg: foot });
     }
   }
 

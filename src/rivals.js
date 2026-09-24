@@ -22,7 +22,7 @@ import { mergeJoints } from '../assetlib.js';
 // Colour into vertices; tyres/saddle keep their own material because main.js
 // gives that colour a matte environment response by looking it up by hex.
 const MERGE_OPTS = { vertexColors: true, allNodes: true, keepColour: (h) => h === 0x1b1b1e };
-import { clearAxes, poseSeated, poseCombat, solveSeat } from './riderpose.js';
+import { clearAxes, poseSeated, poseRideDynamics, poseCombat, solveSeat } from './riderpose.js';
 import { NpcBrain } from './npc.js';
 import { Dismount } from './dismount.js';
 
@@ -782,6 +782,7 @@ export class Rival {
     // the bars with the torso reclined.
     const tuck = Math.min(1, (this.phys ? this.phys.speed : 0) / 45);
     poseSeated(j, tuck);
+    poseRideDynamics(j, this.phys, this._animT || 0, this.id || 0);
 
     // Recoil and idle sway move the torso, so they go BEFORE poseCombat, which
     // re-solves the arms onto the grips by IK from wherever the torso is (see

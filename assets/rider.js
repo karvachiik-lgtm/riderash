@@ -37,7 +37,7 @@ export default function (THREE) {
   // the original rider -- full-face lid, leathers, gloves -- so a spec without a
   // look (an old save, a rival) builds the same body as before, mesh for mesh.
   const L = Object.assign({
-    helmet: 'full', helmetSize: 1, headSize: 1, bust: 1, visor: 'smoke', stripe: 'racing', finish: 'gloss', hair: 'short',
+    helmet: 'full', helmetSize: 1, headSize: 1, bust: 1.4, seat: 1.3, visor: 'smoke', stripe: 'racing', finish: 'gloss', hair: 'short',
     hairColor: 0x2a1d14, beard: 'none', top: 'leather', bottom: 'jeans', pattern: 'plain', figure: 'm',
     hat: 'none', shoes: 'boots', tattoo: 'none', inkColor: 0x1c2433,
     glasses: 'none', chain: 'none', scarf: 'none', scarfColor: 0x8a1f1f, earring: false,
@@ -258,7 +258,28 @@ export default function (THREE) {
     // PROPORTIONS from the figure-drawing canon: hips about 2 heads at their
     // widest (with the thigh tops), waist 1-1.5 heads, waist:hip near 0.7.
     // The ellipsoid is widened side to side only, to meet the thighs.
-    pelvis.add(mk(new THREE.SphereGeometry(S.pelvisW * (sw ? 0.5 : 0.54), 14, 10), bareLegs ? skirtMat : denim, 0, -S.pelvisH * (sw ? 0.1 : 0.05), 0));
+    // THE SEAT, SCULPTED: the rear of the hip mass is pushed out in two
+    // rounded, lifted lobes with a soft centre crease, fullest a little below
+    // the middle -- one surface, no balls. SEAT slider scales it.
+    const hr = S.pelvisW * (sw ? 0.5 : 0.54);
+    const hg = new THREE.SphereGeometry(hr, 22, 16);
+    {
+      const p = hg.attributes.position, B = 0.42 * L.seat;
+      for (let i = 0; i < p.count; i++) {
+        const x = p.getX(i) / hr, y = p.getY(i) / hr, z = p.getZ(i) / hr;
+        if (z > 0.2) continue;                      // the front is left alone
+        const phi = Math.atan2(x, -z);              // 0 = straight back
+        let w = 0;
+        for (const sd of [-1, 1]) {
+          const dp = (phi - sd * 0.5) / 0.55, dy = y + 0.38, sg = dy > 0 ? 0.5 : 0.34;
+          w = Math.max(w, Math.exp(-dp * dp - (dy / sg) * (dy / sg)));
+        }
+        const k = 1 + B * w;
+        p.setXYZ(i, p.getX(i) * (1 + B * w * 0.35), p.getY(i) + w * B * 0.08 * hr, p.getZ(i) * k);
+      }
+      hg.computeVertexNormals();
+    }
+    pelvis.add(mk(hg, bareLegs ? skirtMat : denim, 0, -S.pelvisH * (sw ? 0.1 : 0.05), 0));
     pelvis.children[pelvis.children.length - 1].scale.set(sw ? 1.24 : 1.22, (S.pelvisH / S.pelvisW) * (sw ? 0.85 : 1.0), (S.pelvisD / S.pelvisW) * 0.95);
   }
   if (!bareLegs) {
@@ -271,7 +292,7 @@ export default function (THREE) {
     // THE SKIRT: an open flared cone off the hips, to above the knee (a
     // dress) or mid-thigh (a skirt); a sash where a belt would be
     const len = S.thigh * (BOTTOM === 'dress' ? 0.82 : 0.66), top = S.pelvisW * (FEM ? 0.76 : 0.56);
-    const zs = (S.pelvisD / S.pelvisW) * 1.15 * (FEM ? 0.6 / 0.76 : 1);   // same depth, wider hips
+    const zs = (S.pelvisD / S.pelvisW) * 1.15 * (FEM ? (0.6 / 0.76) * (1 + 0.22 * L.seat) : 1);   // same depth, wider hips
     const sk = add(pelvis, mk(new THREE.CylinderGeometry(top, top * (FEM ? 1.5 : 1.75), len, 16, 2, true), skirtMat, 0, S.pelvisH * 0.3 - len / 2, 0));
     sk.scale.set(1, 1, zs);
     sk.material = skirtMat.clone(); sk.material.side = THREE.DoubleSide;
@@ -285,11 +306,7 @@ export default function (THREE) {
   if (FEM) {
     // hips and seat: two rounded masses on the back of the pelvis block, in
     // whatever covers it, and a little more width over the hip joints
-    const gm = bareLegs ? skirtMat : denim, gr = S.pelvisW * 0.22;
-    for (const s of [-1, 1]) {
-      const gl = add(pelvis, mk(new THREE.SphereGeometry(gr, 12, 8), gm, s * S.pelvisW * 0.24, -S.pelvisH * 0.12, -S.pelvisD * 0.2));
-      gl.scale.set(0.95, 1.0, 0.8);
-    }
+    // (the seat is sculpted into the hip mass above)
   }
 
   // ---- torso, pitched forward into a racing tuck ----
@@ -324,8 +341,74 @@ export default function (THREE) {
     ? [[0.0, 1.0], [0.10, 0.96], [0.36, 0.74], [0.58, 0.86], [0.76, 0.92], [1.0, 0.78]]
     : [[0.0, 0.86], [0.10, 0.90], [0.40, 1.02], [0.62, 1.14], [0.82, 1.24], [1.0, 1.18]];
   const TRUNK_LEN = T * 0.90;
-  const trunkGeo = seg(TRUNK_LEN, TRUNK_PROF);
+  // (the feminine trunk is built dense -- 20 sides, 22 rings -- because its
+  // bust is SCULPTED into it below, and a shape needs vertices to hold it)
+  const densify = (prof, n) => {
+    const out = [];
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      for (let j = 1; j < prof.length; j++) if (t <= prof[j][0] + 1e-9) {
+        const [t0, r0] = prof[j - 1], [t1, r1] = prof[j];
+        const u = (t - t0) / (t1 - t0), e = u * u * (3 - 2 * u);   // smooth between keys
+        out.push([t, r0 + (r1 - r0) * e]); break;
+      }
+    }
+    return out;
+  };
+  const trunkGeo = FEM ? seg(TRUNK_LEN, densify(TRUNK_PROF, 22), 20) : seg(TRUNK_LEN, TRUNK_PROF);
   trunkGeo.rotateX(Math.PI);                  // grow UP from the lumbar joint
+  // THE BUST, SCULPTED INTO THE TORSO. Figure modellers bring the chest out of
+  // the torso mesh rather than attach shapes to it (Polycount's body-topology
+  // notes; every character-modelling series does the same) -- separate spheres
+  // read as balls stuck on, which is what they looked like. So: two lobes
+  // pushed out radially from the front of the lathe, each a teardrop (a long,
+  // gentle slope above the fullest point, a rounder, tighter underside), with
+  // the cleavage between them left lower. BUST slider scales the projection.
+  const bustW = new Float32Array(trunkGeo.attributes.position.count);
+  const trunkT = new Float32Array(trunkGeo.attributes.position.count);
+  if (FEM) {
+    const p = trunkGeo.attributes.position, A = 0.4 * L.bust, TB = 0.73 - 0.015 * (L.bust - 1);
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), y = p.getY(i), z = p.getZ(i), r = Math.hypot(x, z);
+      const t = y / TRUNK_LEN;
+      trunkT[i] = t;
+      if (r < 1e-4) continue;
+      const phi = Math.atan2(x, z);             // 0 = straight ahead
+      let w = 0;
+      for (const sd of [-1, 1]) {
+        const dp = (phi - sd * 0.46) / 0.44, dt = t - TB, sg = dt > 0 ? 0.13 : 0.07;
+        w = Math.max(w, Math.exp(-dp * dp - (dt / sg) * (dt / sg)));
+      }
+      bustW[i] = w;
+      // the small of the back curves in (the S of a standing profile)
+      const bq = (Math.abs(phi) - Math.PI) / 0.9, bt = (t - 0.32) / 0.16;
+      const back = Math.abs(phi) > 2 ? Math.exp(-bq * bq - bt * bt) : 0;
+      const k = 1 + A * w - 0.12 * back;
+      p.setXYZ(i, x * k, y - w * A * 0.03 * TRUNK_LEN, z * k);   // (a touch of natural drop)
+    }
+    trunkGeo.computeVertexNormals();
+  }
+  // Cut a CLOTH SHELL from the sculpted trunk: the triangles whose vertices all
+  // pass `keep`, pushed out by `grow` -- so bikini cups, a crop top or a
+  // bodice follow the exact same shape instead of fighting it.
+  const shellOf = (src, keep, grow) => {
+    const pos = src.attributes.position, uv = src.attributes.uv, idx = src.index;
+    const P2 = [], U2 = [];
+    for (let i = 0; i < idx.count; i += 3) {
+      const tri = [idx.getX(i), idx.getX(i + 1), idx.getX(i + 2)];
+      if (!tri.every(keep)) continue;
+      for (const v of tri) {
+        const x = pos.getX(v), z = pos.getZ(v), r = Math.hypot(x, z) || 1, k = (r + grow) / r;
+        P2.push(x * k, pos.getY(v), z * k);
+        if (uv) U2.push(uv.getX(v), uv.getY(v));
+      }
+    }
+    const g2 = new THREE.BufferGeometry();
+    g2.setAttribute('position', new THREE.Float32BufferAttribute(P2, 3));
+    if (uv) g2.setAttribute('uv', new THREE.Float32BufferAttribute(U2, 2));
+    g2.computeVertexNormals();
+    return g2;
+  };
   const torsoMat = (jacketLike || TOP === 'vest') ? leather : TOP === 'crop' || TOP === 'bikini' ? skin : cotton;
   const trunk = mk(trunkGeo, torsoMat, 0, 0.0, 0);
   // (the feminine torso is wider side to side at the same depth: the canon's
@@ -343,7 +426,11 @@ export default function (THREE) {
     return TRUNK_PROF[TRUNK_PROF.length - 1][1] * TD * 0.5;
   };
   torso.add(trunk);
-  if (TOP === 'crop') {
+  if (TOP === 'crop' && FEM) {
+    // a cropped tee cut from the sculpted trunk: everything above the midriff
+    const band = add(torso, mk(shellOf(trunkGeo, (v) => trunkT[v] > 0.55, 0.035), cotton, 0, 0, 0));
+    band.scale.set(TWx * 0.5, 1, TD * 0.5);
+  } else if (TOP === 'crop') {
     // a cropped tee: the cloth from under the bust up, the midriff bare
     const from = 0.52, prof = [];
     for (const [t, r] of [[1.0, 0], [0.9, 0], [0.75, 0], [0.6, 0], [from, 0]]) {
@@ -355,30 +442,16 @@ export default function (THREE) {
     band.scale.set(TWx * 0.5, 1, TD * 0.5);
   }
   if (FEM) {
-    // THE BUST: two soft masses on the chest, in whatever covers it (a
-    // bikini's cups are the cloth; everything else wears them in the top)
-    // Sized by the BUST slider; shaped as a TEARDROP -- fuller below the
-    // centre, a gentle slope above -- set slightly apart and angled out, the
-    // way a figure reads in profile, instead of a round ball.
-    const k = L.bust, br = TW * 0.145 * k, by = T * (0.69 - 0.02 * (k - 1));
-    const bustMat = TOP === 'bikini' || TOP === 'crop' ? cotton : torsoMat === skin ? cotton : torsoMat;
-    const geo = new THREE.SphereGeometry(br, 16, 12);
-    {
-      const p = geo.attributes.position;
-      for (let i = 0; i < p.count; i++) {
-        const y = p.getY(i) / br, z = p.getZ(i) / br;
-        // lower half fuller and further forward, upper half flatter
-        const lower = Math.max(0, -y), upper = Math.max(0, y);
-        p.setZ(i, p.getZ(i) * (1 + 0.28 * lower - 0.35 * upper) + (z > 0 ? br * 0.1 * lower : 0));
-        p.setY(i, p.getY(i) * (y < 0 ? 0.92 : 1.05));
-      }
-      geo.computeVertexNormals();
+    // bikini cups: the bust lobes, cut from the trunk as a cloth shell
+    if (TOP === 'bikini') {
+      const cups = add(torso, mk(shellOf(trunkGeo, (v) => bustW[v] > 0.3, 0.03), cotton, 0, 0, 0));
+      cups.scale.set(TWx * 0.5, 1, TD * 0.5);
     }
-    for (const s of [-1, 1]) {
-      // sunk well into the chest: only the front third stands proud
-      const b = add(torso, mk(geo, bustMat, s * TWx * 0.14, by, surf(by) - br * 0.5));
-      b.scale.set(1.0, 0.9, 0.7);
-      b.rotation.set(0.12, s * 0.22, 0);
+    // a bodice (dress, swimsuit) ends above the bust: skin over the upper
+    // chest, dipping between the lobes -- a sweetheart line
+    if (TOP === 'dress' || TOP === 'onepiece') {
+      const neck = add(torso, mk(shellOf(trunkGeo, (v) => trunkT[v] > 0.83 + 0.09 * bustW[v] && bustW[v] < 0.5, 0.02), skin, 0, 0, 0));
+      neck.scale.set(TWx * 0.5, 1, TD * 0.5);
     }
     if (TOP === 'bikini') {
       // the underband, and a tie at the back
@@ -410,7 +483,7 @@ export default function (THREE) {
         strap.scale.set(1, (T * 0.085) / (TD * 0.36), 1);
       }
       // the neckline: the bodice stops at the bust, skin above it
-      if (TOP !== 'bikini') {
+      if (TOP !== 'bikini' && !FEM) {
       const top = add(torso, mk(new THREE.CylinderGeometry(TWx * 0.5 * 0.86, TWx * 0.5 * 0.99, T * 0.18, 12, 1, true), skin, 0, T * 0.92, 0));
       top.scale.set(1, 1, TD / TWx);
       }
@@ -854,7 +927,9 @@ export default function (THREE) {
     hip.add(thigh);
     // quad bulk high, narrowing into the knee
     const lk2 = legMat === denim ? 1 : 0.94;            // bare skin sits inside where denim stood
-    thigh.add(mk(seg(S.thigh, [[0.0, R0 * 1.36 * lk2], [0.28, R0 * 1.42 * lk2], [0.7, R0 * 1.18 * lk2], [1.0, R0 * 1.02 * lk2]]), legMat, 0, 0, 0));
+    // (a feminine thigh is full at the top and tapers to a slim knee)
+    const th = FEM ? [1.62, 1.55, 1.18, 0.92] : [1.36, 1.42, 1.18, 1.02];
+    thigh.add(mk(seg(S.thigh, [[0.0, R0 * th[0] * lk2], [0.28, R0 * th[1] * lk2], [0.7, R0 * th[2] * lk2], [1.0, R0 * th[3] * lk2]]), legMat, 0, 0, 0));
     // outseam: a darker welt down the outside of the jeans
     if (legMat === denim) thigh.add(mk(cbox(0.01, S.thigh * 0.84, 0.012, 0.003), seam, s * R0 * 1.30, -S.thigh * 0.5, 0));
     if (shortsOn) {

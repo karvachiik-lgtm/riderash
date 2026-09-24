@@ -2248,6 +2248,7 @@ function openShowroom() {
   // player's real figure rather than a default.
   showroom.spec = playerSpec;
   showroom.open(assets.rider, assets.bike);
+  window.__SHOWROOM_OBJ__ = showroom;   // harness: set angles for screenshots
   document.getElementById('title').classList.remove('on');
 }
 async function closeShowroom(spec) {

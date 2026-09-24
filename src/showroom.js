@@ -411,8 +411,9 @@ export class Showroom {
     const bodyTab = document.querySelector('#panel .tab[data-tab="body"]');
     if (bodyTab && !bodyTab.querySelector('.figure')) {
       const g = grp(bodyTab, 'Figure'); g.classList.add('figure'); chips(g, 'figure');
-      slider(g, 'Bust', 0.7, 1.7, 0.01, () => this.spec.look.bust, (v) => this.set({ look: { bust: v } }), (v) => Math.round(v * 100) + '%');
-      sub(g, 'Bust applies to the feminine figure');
+      slider(g, 'Bust', 0.7, 2.0, 0.01, () => this.spec.look.bust, (v) => this.set({ look: { bust: v } }), (v) => Math.round(v * 100) + '%');
+      slider(g, 'Seat', 0.6, 2.0, 0.01, () => this.spec.look.seat, (v) => this.set({ look: { seat: v } }), (v) => Math.round(v * 100) + '%');
+      sub(g, 'Bust and seat apply to the feminine figure');
     }
 
     // ---- HEAD ----

@@ -255,8 +255,11 @@ export default function (THREE) {
     // a rounded hip instead of the square seat block: an ellipsoid the size
     // of the block, which is what gives the waist-to-hip curve
     const sw = BOTTOM === 'swim';
+    // PROPORTIONS from the figure-drawing canon: hips about 2 heads at their
+    // widest (with the thigh tops), waist 1-1.5 heads, waist:hip near 0.7.
+    // The ellipsoid is widened side to side only, to meet the thighs.
     pelvis.add(mk(new THREE.SphereGeometry(S.pelvisW * (sw ? 0.5 : 0.54), 14, 10), bareLegs ? skirtMat : denim, 0, -S.pelvisH * (sw ? 0.1 : 0.05), 0));
-    pelvis.children[pelvis.children.length - 1].scale.set(1, (S.pelvisH / S.pelvisW) * (sw ? 0.95 : 1.15), (S.pelvisD / S.pelvisW) * 1.02);
+    pelvis.children[pelvis.children.length - 1].scale.set(sw ? 1.42 : 1.36, (S.pelvisH / S.pelvisW) * (sw ? 0.95 : 1.15), (S.pelvisD / S.pelvisW) * 1.02);
   }
   if (!bareLegs) {
     // belt, and a steel buckle at the front
@@ -267,23 +270,24 @@ export default function (THREE) {
   } else if (BOTTOM !== 'swim') {
     // THE SKIRT: an open flared cone off the hips, to above the knee (a
     // dress) or mid-thigh (a skirt); a sash where a belt would be
-    const len = S.thigh * (BOTTOM === 'dress' ? 0.82 : 0.66), top = S.pelvisW * (FEM ? 0.6 : 0.56);
-    const sk = add(pelvis, mk(new THREE.CylinderGeometry(top, top * 1.75, len, 16, 2, true), skirtMat, 0, S.pelvisH * 0.3 - len / 2, 0));
-    sk.scale.set(1, 1, (S.pelvisD / S.pelvisW) * 1.15);
+    const len = S.thigh * (BOTTOM === 'dress' ? 0.82 : 0.66), top = S.pelvisW * (FEM ? 0.76 : 0.56);
+    const zs = (S.pelvisD / S.pelvisW) * 1.15 * (FEM ? 0.6 / 0.76 : 1);   // same depth, wider hips
+    const sk = add(pelvis, mk(new THREE.CylinderGeometry(top, top * (FEM ? 1.5 : 1.75), len, 16, 2, true), skirtMat, 0, S.pelvisH * 0.3 - len / 2, 0));
+    sk.scale.set(1, 1, zs);
     sk.material = skirtMat.clone(); sk.material.side = THREE.DoubleSide;
-    const hemGeo = new THREE.TorusGeometry(top * 1.75, 0.008, 4, 24);
+    const hemGeo = new THREE.TorusGeometry(top * (FEM ? 1.5 : 1.75), 0.008, 4, 24);
     const hem = add(pelvis, mk(hemGeo, BOTTOM === 'dress' ? accent : seam, 0, S.pelvisH * 0.3 - len, 0, Math.PI / 2));
-    hem.scale.set(1, (S.pelvisD / S.pelvisW) * 1.15, 1);
+    hem.scale.set(1, zs, 1);
     const sash = add(pelvis, mk(new THREE.CylinderGeometry(top * 1.02, top * 1.02, S.pelvisH * 0.16, 16), accent, 0, S.pelvisH * 0.42, 0));
-    sash.scale.set(1, 1, (S.pelvisD / S.pelvisW) * 1.15);
+    sash.scale.set(1, 1, zs);
   }
 
   if (FEM) {
     // hips and seat: two rounded masses on the back of the pelvis block, in
     // whatever covers it, and a little more width over the hip joints
-    const gm = bareLegs ? skirtMat : denim, gr = S.pelvisW * 0.25;
+    const gm = bareLegs ? skirtMat : denim, gr = S.pelvisW * 0.29;
     for (const s of [-1, 1]) {
-      const gl = add(pelvis, mk(new THREE.SphereGeometry(gr, 12, 8), gm, s * S.pelvisW * 0.2, -S.pelvisH * 0.12, -S.pelvisD * 0.24));
+      const gl = add(pelvis, mk(new THREE.SphereGeometry(gr, 12, 8), gm, s * S.pelvisW * 0.27, -S.pelvisH * 0.14, -S.pelvisD * 0.24));
       gl.scale.set(0.95, 1.0, 0.8);
     }
   }
@@ -317,14 +321,17 @@ export default function (THREE) {
   // STYLE-LOCK's "exaggerated proportions".
   const TRUNK_PROF = FEM
     // hip, a nipped waist, the bust line, a narrower yoke
-    ? [[0.0, 0.98], [0.10, 0.94], [0.38, 0.76], [0.60, 0.90], [0.78, 1.0], [1.0, 0.84]]
+    ? [[0.0, 1.0], [0.10, 0.96], [0.36, 0.74], [0.58, 0.86], [0.76, 0.92], [1.0, 0.78]]
     : [[0.0, 0.86], [0.10, 0.90], [0.40, 1.02], [0.62, 1.14], [0.82, 1.24], [1.0, 1.18]];
   const TRUNK_LEN = T * 0.90;
   const trunkGeo = seg(TRUNK_LEN, TRUNK_PROF);
   trunkGeo.rotateX(Math.PI);                  // grow UP from the lumbar joint
   const torsoMat = (jacketLike || TOP === 'vest') ? leather : TOP === 'crop' || TOP === 'bikini' ? skin : cotton;
   const trunk = mk(trunkGeo, torsoMat, 0, 0.0, 0);
-  trunk.scale.set(TW * 0.5, 1, TD * 0.5);
+  // (the feminine torso is wider side to side at the same depth: the canon's
+  // 1.3-head waist and 2-head hip on a trunk cut for a 0.9-head waist)
+  const TWx = FEM ? TW * 1.4 : TW;
+  trunk.scale.set(TWx * 0.5, 1, TD * 0.5);
   // the jacket's surface half-depth at height y: details are placed ON it, not
   // at a guessed constant (at a constant they float 3 cm off the waist)
   const surf = (y) => {
@@ -345,7 +352,7 @@ export default function (THREE) {
       prof.push([(1 - t) / (1 - from), rr * 1.05 + r]);
     }
     const band = add(torso, mk(seg(TRUNK_LEN * (1 - from), prof), cotton, 0, TRUNK_LEN, 0));
-    band.scale.set(TW * 0.5, 1, TD * 0.5);
+    band.scale.set(TWx * 0.5, 1, TD * 0.5);
   }
   if (FEM) {
     // THE BUST: two soft masses on the chest, in whatever covers it (a
@@ -368,15 +375,15 @@ export default function (THREE) {
       geo.computeVertexNormals();
     }
     for (const s of [-1, 1]) {
-      const b = add(torso, mk(geo, bustMat, s * TW * 0.155 * (0.9 + 0.1 * k), by, surf(by) - br * 0.28));
+      const b = add(torso, mk(geo, bustMat, s * TWx * 0.15 * (0.9 + 0.1 * k), by, surf(by) - br * 0.28));
       b.scale.set(1.0, 0.95, 0.8);
       b.rotation.set(0.12, s * 0.22, 0);
     }
     if (TOP === 'bikini') {
       // the underband, and a tie at the back
-      const ry = T * 0.62, rr = TW * 0.5 * 0.9;
+      const ry = T * 0.62, rr = TWx * 0.5 * 0.9;
       const ub = add(torso, mk(new THREE.CylinderGeometry(rr, rr * 1.01, T * 0.035, 14, 1, true), cotton, 0, ry, 0));
-      ub.scale.set(1, 1, TD / TW);
+      ub.scale.set(1, 1, TD / TWx);
       ub.material = cotton.clone(); ub.material.side = THREE.DoubleSide;
       add(torso, mk(cbox(0.05, 0.03, 0.02, 0.005), cotton, 0, ry, -(surf(ry) + 0.01), 0, 0, Math.PI / 4));
     }
@@ -403,8 +410,8 @@ export default function (THREE) {
       }
       // the neckline: the bodice stops at the bust, skin above it
       if (TOP !== 'bikini') {
-      const top = add(torso, mk(new THREE.CylinderGeometry(TW * 0.5 * 0.86, TW * 0.5 * 0.99, T * 0.18, 12, 1, true), skin, 0, T * 0.92, 0));
-      top.scale.set(1, 1, TD / TW);
+      const top = add(torso, mk(new THREE.CylinderGeometry(TWx * 0.5 * 0.86, TWx * 0.5 * 0.99, T * 0.18, 12, 1, true), skin, 0, T * 0.92, 0));
+      top.scale.set(1, 1, TD / TWx);
       }
     }
   }
@@ -425,7 +432,7 @@ export default function (THREE) {
   if (zipped) torso.add(mk(cbox(0.02, 0.034, 0.014, 0.004), steel, TW * 0.03, T * 0.70, surf(T * 0.70) + 0.01));   // the pull
   // waistband: the hem of the jacket, a slightly proud ring over the belt
   const hem = mk(new THREE.CylinderGeometry(1, 1, T * 0.08, 8), zipped ? pad : TOP === 'bikini' || TOP === 'crop' ? skin : cottonDk, 0, T * 0.03, 0);
-  hem.scale.set(TW * 0.47, 1, TD * 0.47);
+  hem.scale.set(TWx * 0.47, 1, TD * 0.47);
   torso.add(hem);
   // jacket collar: a short open cone, stood up and open at the front
   const collar = mk(new THREE.CylinderGeometry(S.headR * 0.62, S.headR * 0.78, T * 0.12, 8, 1, true, Math.PI * 0.18, Math.PI * 1.64),

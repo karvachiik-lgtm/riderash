@@ -254,7 +254,7 @@ export function makeLook(l) {
   for (const k of ['earring', 'spikes', 'backpack']) if (typeof l[k] === 'boolean') o[k] = l[k];
   if (Number.isFinite(l.helmetSize)) o.helmetSize = Math.max(0.85, Math.min(1.3, l.helmetSize));
   if (Number.isFinite(l.bust)) o.bust = Math.max(0.7, Math.min(1.7, l.bust));
-  if (Number.isFinite(l.headSize)) o.headSize = Math.max(0.85, Math.min(1.35, l.headSize));
+  if (Number.isFinite(l.headSize)) o.headSize = Math.max(0.85, Math.min(1.8, l.headSize));
   return o;
 }
 

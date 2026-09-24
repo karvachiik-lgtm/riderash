@@ -94,7 +94,7 @@ export function flagOutfitSpec(name) {
   return {
     height: O.height, build: 'lean', shoulderWide: 0.84, limbLong: 1.04,
     colors: { helmet: 0x1a1d20, skin: O.skin, ...O.colors },
-    look: { helmet: 'none', gloves: 'none', figure: 'f', headSize: 1.04, bust: O.bust ?? 1.4, ...O.look },
+    look: { helmet: 'none', gloves: 'none', figure: 'f', headSize: 1.15, bust: O.bust ?? 1.4, ...O.look },
   };
 }
 

@@ -431,7 +431,7 @@ export class Showroom {
       swatches(g, 'look', 'hairColor', PALETTE.hair);
       sub(g, 'Under a full-face lid only a mohawk (as a crest), long hair, a ponytail or dreads show');
       g = grp(H, 'Face');
-      slider(g, 'Head size', 0.85, 1.35, 0.01, () => this.spec.look.headSize, (v) => this.set({ look: { headSize: v } }), (v) => Math.round(v * 100) + '%');
+      slider(g, 'Head size', 0.85, 1.8, 0.01, () => this.spec.look.headSize, (v) => this.set({ look: { headSize: v } }), (v) => Math.round(v * 100) + '%');
       sub(g, 'Facial hair'); chips(g, 'beard');
       sub(g, 'Eyewear'); chips(g, 'glasses');
       sub(g, 'Hat (without a lid)'); chips(g, 'hat');

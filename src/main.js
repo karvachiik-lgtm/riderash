@@ -242,8 +242,14 @@ if (career.rider) {
     shoulderWide: career.rider.shoulderWide,
     limbLong: career.rider.limbLong,
     colors: { ...(CFG.PLAYER_COLORS || {}), ...career.rider.colors },
+    look: career.rider.look,
   });
 }
+// THE PACK AND THE COP WEAR THEIR OWN KIT. They are cloned from a rider asset,
+// and cloning the player's would put the player's mohawk, tattoos and tee on
+// every rival and on the police. Same body, stock wardrobe.
+const npcSpecOf = (sp) => makeSpec({ height: sp.height, build: sp.buildName, shoulderWide: sp.shoulderWide,
+  limbLong: sp.limbLong, colors: sp.colors });
 // Costs no draw calls: it is a 2D canvas over the scene, which matters more in
 // this project than anywhere else because the budget is 900 and we sit at ~810.
 const radar = new Radar(document.getElementById('radar'));
@@ -360,6 +366,7 @@ async function loadAssets() {
   }
   try {
     assets.rider = await ASSET('./assets/rider.js', { spec: playerSpec, ride: RIDING, keepHierarchy: true });
+    assets.npcRider = await ASSET('./assets/rider.js', { spec: npcSpecOf(playerSpec), ride: RIDING, keepHierarchy: true });
     progress(0.85, 'loading rider');
   } catch (e) {
     console.warn('[riderash] rider asset failed:', e);
@@ -2230,6 +2237,9 @@ async function closeShowroom(spec) {
     const rebuilt = await ASSET('./assets/rider.js', { spec: playerSpec, ride: RIDING, keepHierarchy: true });
     if (rebuilt && rebuilt.children && rebuilt.children.length) {
       assets.rider = rebuilt;
+      try {
+        assets.npcRider = await ASSET('./assets/rider.js', { spec: npcSpecOf(playerSpec), ride: RIDING, keepHierarchy: true });
+      } catch (e) { assets.npcRider = null; }
       if (player) {
         player.setRider(rebuilt);
         // Same environment response the load-time rider got in init().

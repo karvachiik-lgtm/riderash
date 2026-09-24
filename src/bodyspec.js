@@ -73,7 +73,7 @@ export const BUILDS = {
  * disagree with each other.
  */
 export function makeSpec({ height = 1.75, build = 'normal', buildScale = null,
-                          shoulderWide = 1, limbLong = 1, colors = {} } = {}) {
+                          shoulderWide = 1, limbLong = 1, colors = {}, look = null } = {}) {
   const B = buildScale != null ? buildScale : (BUILDS[build] || BUILDS.normal).build;
   const H = height;
   const r = (f) => f * H;
@@ -123,6 +123,9 @@ export function makeSpec({ height = 1.75, build = 'normal', buildScale = null,
       skin:   colors.skin   ?? 0x9c7358,
       accent: colors.accent ?? 0xd4622a,
     },
+    // WHAT HE WEARS: style, not stature. Nothing in here moves a joint, so the
+    // seat, the IK and the ragdoll never read it -- only assets/rider.js does.
+    look: makeLook(look),
   };
 
   // ---- SEATED geometry ---------------------------------------------------
@@ -207,13 +210,55 @@ export function makeSpec({ height = 1.75, build = 'normal', buildScale = null,
   return spec;
 }
 
+// ---- LOOK -----------------------------------------------------------------
+// The wardrobe. Every key has a default that reproduces the original rider
+// exactly (full-face lid, leathers, gloves), so an old save or a rival built
+// without a look is the same body it always was. Enumerations are closed lists:
+// a value that is not in the list falls back to the default instead of
+// building something the asset has no geometry for.
+export const LOOK_OPTIONS = {
+  helmet:  ['full', 'open', 'none'],
+  visor:   ['smoke', 'clear', 'gold', 'blue', 'mirror'],
+  stripe:  ['racing', 'twin', 'none'],
+  finish:  ['gloss', 'matte'],
+  hair:    ['short', 'buzz', 'mohawk', 'spikes', 'slick', 'long', 'ponytail', 'bun', 'afro', 'dreads', 'bald'],
+  beard:   ['none', 'stubble', 'goatee', 'moustache', 'full'],
+  top:     ['leather', 'tee', 'tank', 'hoodie', 'vest'],
+  tattoo:  ['none', 'tribal', 'sleeve', 'flames', 'bands', 'neck'],
+  glasses: ['none', 'shades', 'aviator', 'goggles'],
+  chain:   ['none', 'gold', 'silver'],
+  scarf:   ['none', 'bandana'],
+  gloves:  ['full', 'fingerless', 'none'],
+};
+export const LOOK_DEFAULTS = {
+  helmet: 'full', helmetSize: 1.0, headSize: 1.0, visor: 'smoke', stripe: 'racing', finish: 'gloss',
+  hair: 'short', hairColor: 0x2a1d14, beard: 'none',
+  top: 'leather', tattoo: 'none', inkColor: 0x1c2433,
+  glasses: 'none', chain: 'none', scarf: 'none', scarfColor: 0x8a1f1f,
+  earring: false, spikes: false, backpack: false,
+  gloves: 'full', gloveColor: 0x232020, bootColor: 0x1f1c1a,
+};
+/** A complete, valid look from any partial (or junk) input. */
+export function makeLook(l) {
+  const o = { ...LOOK_DEFAULTS };
+  if (!l || typeof l !== 'object') return o;
+  for (const [k, list] of Object.entries(LOOK_OPTIONS)) if (list.includes(l[k])) o[k] = l[k];
+  for (const k of ['hairColor', 'inkColor', 'scarfColor', 'gloveColor', 'bootColor']) {
+    if (Number.isFinite(l[k])) o[k] = (l[k] >>> 0) & 0xffffff;
+  }
+  for (const k of ['earring', 'spikes', 'backpack']) if (typeof l[k] === 'boolean') o[k] = l[k];
+  if (Number.isFinite(l.helmetSize)) o.helmetSize = Math.max(0.85, Math.min(1.3, l.helmetSize));
+  if (Number.isFinite(l.headSize)) o.headSize = Math.max(0.85, Math.min(1.35, l.headSize));
+  return o;
+}
+
 /** Blend two specs, t in 0..1. Used by the showroom sliders for live preview. */
 export function lerpSpec(a, b, t) {
   const o = {};
   for (const k of Object.keys(a)) {
     const va = a[k], vb = b[k];
     if (typeof va === 'number' && typeof vb === 'number') o[k] = va + (vb - va) * t;
-    else if (k === 'colors') o[k] = { ...va };
+    else if (k === 'colors' || k === 'look') o[k] = { ...va };
     else o[k] = va;
   }
   return o;

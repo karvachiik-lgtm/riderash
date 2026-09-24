@@ -1,3 +1,4 @@
+import { makeLook } from './bodyspec.js';
 import { CFG } from './config.js';
 // RideRash — the career.
 //
@@ -233,6 +234,8 @@ function sanitiseRider(r) {
       accent: col(c.accent, 0xd4622a),
       skin:   col(c.skin,   0x9c7358),
     },
+    // the wardrobe: bodyspec.makeLook validates every field on the way in
+    look: makeLook(r.look),
   };
 }
 
@@ -264,6 +267,7 @@ export class Career {
       shoulderWide: spec.shoulderWide,
       limbLong: spec.limbLong,
       colors: spec.colors,
+      look: spec.look,
     });
     if (!s) return;
     this.state.rider = s;

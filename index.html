@@ -146,12 +146,42 @@
      shows is a real dimension of the body on screen, derived from the spec, so
      the interface IS the maths rather than a decoration over it. */
   #showroom { padding:0; align-items:stretch; justify-content:flex-start; }
+  /* NO FADE over the stage: the set and every change to the rider are seen
+     at full strength. The overlay gradient belongs to the menus, not here. */
+  #showroom.screen { background:none; }
+  #showtitle, #showbar, #showfoot { text-shadow:0 1px 3px rgba(0,0,0,.85); }
+  #showtitle { background:linear-gradient(90deg, rgba(8,9,11,.55), rgba(8,9,11,0)); padding:6px 14px 6px 10px; margin-left:-10px; border-radius:3px; }
+  #showfoot { background:linear-gradient(90deg, rgba(8,9,11,.6), rgba(8,9,11,0)); padding:6px 10px; border-radius:3px; }
+  #showbar .emotes button { border-color:#6a5a3a; }
+  .stabs { display:flex; gap:0; position:sticky; top:-22px; z-index:3; margin:-22px -18px 0; padding:10px 8px 0;
+           background:rgba(12,13,15,.97); border-bottom:1px solid #2a2e33; overflow-x:auto; scrollbar-width:none; }
+  .stabs::-webkit-scrollbar { display:none; }
+  .stabs button { flex:1 0 auto; padding:9px 8px 8px; font:inherit; font-size:9px; letter-spacing:.16em; text-transform:uppercase;
+                  background:none; border:0; border-bottom:2px solid transparent; color:#8b9097; cursor:pointer; }
+  .stabs button.sel { color:var(--amber); border-bottom-color:var(--amber); }
+  #panel .tab { display:none; flex-direction:column; gap:18px; }
+  #panel .tab.on { display:flex; }
+  .pgrid { display:grid; grid-template-columns:repeat(3, 1fr); gap:6px; }
+  .pgrid button { padding:8px 4px 7px; font:inherit; font-size:9px; letter-spacing:.08em; text-transform:uppercase;
+                  border:1px solid #3a4047; background:rgba(18,20,23,.8); color:#c9c4bb; cursor:pointer; line-height:1.3; }
+  .pgrid button .dots { display:flex; gap:3px; justify-content:center; margin-bottom:5px; }
+  .pgrid button .dots i { width:10px; height:10px; border-radius:50%; border:1px solid rgba(255,255,255,.18); display:block; }
+  .pgrid button:hover { border-color:#7a838c; }
+  .pgrid button.sel { border-color:var(--amber); color:var(--amber); }
+  .chips { display:flex; flex-wrap:wrap; gap:5px; }
+  .chips .bd { flex:0 0 auto; padding:6px 8px; }
+  .grp .sub { font-size:9px; letter-spacing:.14em; color:#6d7278; text-transform:uppercase; margin-top:4px; }
+  .scn { display:grid; grid-template-columns:repeat(2, 1fr); gap:6px; }
+  .scn button { display:flex; align-items:center; gap:8px; padding:8px; font:inherit; font-size:9px; letter-spacing:.12em;
+                text-transform:uppercase; border:1px solid #3a4047; background:rgba(18,20,23,.8); color:#c9c4bb; cursor:pointer; }
+  .scn button i { width:18px; height:18px; border-radius:2px; display:block; flex:0 0 auto; }
+  .scn button.sel { border-color:var(--amber); color:var(--amber); }
   #showstage { cursor:grab; touch-action:none; user-select:none; }
   #showstage.dragging { cursor:grabbing; }
   #showbar { position:absolute; top:84px; left:26px; right:26px; display:flex;
-             flex-direction:column; gap:6px; max-width:520px; }
+             flex-direction:column; gap:5px; max-width:760px; }
   #showbar .pre { gap:5px; }
-  #showbar .pre button { flex:0 0 auto; min-width:64px; padding:7px 10px; background:rgba(14,16,19,.72); }
+  #showbar .pre button { flex:0 0 auto; min-width:0; padding:6px 10px; background:rgba(14,16,19,.78); }
   #showbar .anims { flex-wrap:wrap; }
   #showfoot { position:absolute; bottom:18px; left:26px; right:26px; text-align:left; }
   #showspec { position:static !important; margin-top:6px; }
@@ -443,7 +473,11 @@
     #showbar .pre::-webkit-scrollbar { display:none; }
     #showbar .pre button { min-width:0; padding:7px 11px; font-size:10px; }
     #showfoot { left:14px; right:14px; bottom:8px; }
-    #showspec { font-size:10px; line-height:1.6; }
+    /* the derived-numbers readout is a desktop luxury: on a phone the stage
+       needs the room, and the fit line above it stays */
+    #showspec { display:none !important; }
+    #showbar { gap:4px; }
+    #showbar .pre button { padding:6px 9px; font-size:9px; }
     #panel { border-left:0; border-top:1px solid #2a2e33; overflow:visible; }
     #panel .kit .sws { width:28px; height:28px; }
     #panel .actions { position:sticky; bottom:0; background:rgba(12,13,15,.96);
@@ -556,6 +590,7 @@
     <div id="showbar">
       <div class="pre" id="s-pose" role="group" aria-label="Stance"></div>
       <div class="pre anims" id="s-anim" role="group" aria-label="Animation"></div>
+      <div class="pre anims emotes" id="s-emote" role="group" aria-label="Emotes"></div>
     </div>
     <div id="showfoot">
       <div id="s-fit"></div>
@@ -563,29 +598,33 @@
     </div>
   </div>
   <div id="panel">
-    <div class="grp">
-      <h3>Presets</h3>
-      <div class="builds presets" id="s-presets"></div>
+    <div class="stabs" id="s-tabs" role="tablist" aria-label="Designer sections"></div>
+    <div class="tab" data-tab="looks">
+      <div class="grp">
+        <h3>Style presets</h3>
+        <div class="pgrid" id="s-presets"></div>
+      </div>
     </div>
-    <div class="grp">
-      <h3>Body</h3>
-      <div class="row2"><label for="s-height">Height</label>
-        <input type="range" id="s-height" min="1.50" max="2.05" step="0.01" value="1.75">
-        <span class="val" id="v-height">1.75 m</span></div>
-      <div class="row2"><label for="s-shoulders">Shoulders</label>
-        <input type="range" id="s-shoulders" min="0.80" max="1.22" step="0.01" value="1.00">
-        <span class="val" id="v-shoulders">1.00</span></div>
-      <div class="row2"><label for="s-limbs">Limbs</label>
-        <input type="range" id="s-limbs" min="0.90" max="1.12" step="0.01" value="1.00">
-        <span class="val" id="v-limbs">1.00</span></div>
-      <div class="builds" id="s-builds" role="group" aria-label="Build"></div>
+    <div class="tab" data-tab="body">
+      <div class="grp">
+        <h3>Body</h3>
+        <div class="row2"><label for="s-height">Height</label>
+          <input type="range" id="s-height" min="1.50" max="2.05" step="0.01" value="1.75">
+          <span class="val" id="v-height">1.75 m</span></div>
+        <div class="row2"><label for="s-shoulders">Shoulders</label>
+          <input type="range" id="s-shoulders" min="0.80" max="1.22" step="0.01" value="1.00">
+          <span class="val" id="v-shoulders">1.00</span></div>
+        <div class="row2"><label for="s-limbs">Limbs</label>
+          <input type="range" id="s-limbs" min="0.90" max="1.12" step="0.01" value="1.00">
+          <span class="val" id="v-limbs">1.00</span></div>
+        <div class="builds" id="s-builds" role="group" aria-label="Build"></div>
+      </div>
+      <div class="grp"><h3>Skin tone</h3><div class="swatches" id="s-skin"></div></div>
     </div>
-    <div class="grp kit">
-      <div><h3>Leathers</h3><div class="swatches" id="s-jacket"></div></div>
-      <div><h3>Pants</h3><div class="swatches" id="s-pants"></div></div>
-      <div><h3>Helmet</h3><div class="swatches" id="s-helmet"></div></div>
-      <div><h3>Accent</h3><div class="swatches" id="s-accent"></div></div>
-    </div>
+    <div class="tab" data-tab="head" id="t-head"></div>
+    <div class="tab" data-tab="outfit" id="t-outfit"></div>
+    <div class="tab" data-tab="chain" id="t-chain"></div>
+    <div class="tab" data-tab="scene" id="t-scene"></div>
     <div class="actions">
       <button class="btn pe" id="s-random">RANDOM</button>
       <button class="btn pe primary" id="s-done">RIDE THIS</button>

@@ -21,7 +21,8 @@
 // frame while the designer is open.
 
 import * as THREE from 'three';
-import { makeSpec, BUILDS } from './bodyspec.js';
+import { makeSpec, BUILDS, makeLook, LOOK_OPTIONS } from './bodyspec.js';
+import { SCENES, buildScene, disposeScene } from './showscenes.js';
 import { cloneWithJoints } from './rigclone.js';
 import { RIDING } from './reach.js';
 import { CFG } from './config.js';
@@ -41,12 +42,39 @@ const CFG_SEAT = { x: CFG.SEAT_X, y: CFG.SEAT_Y, z: CFG.SEAT_Z };
 // The palettes. Leathers and helmets are deliberately limited to plausible
 // motorcycle kit rather than a colour wheel: a designer that lets you make a
 // neon-green helmet makes every screenshot of the game worse.
+// Leathers stay motorcycle-plausible; a TEE or a HOODIE can be any colour a
+// shirt comes in, so the top palette runs from the leathers into brights.
 export const PALETTE = {
-  jacket: [0x2a2624, 0x1f2b3a, 0x4a1f1f, 0x24331f, 0x3a2a12, 0x6b6259, 0xd8d2c4, 0x14282a],
-  pants:  [0x3b4a63, 0x23262a, 0x2f3b2a, 0x4a3a22, 0x5a5f66, 0x1a1d20, 0x6d4a2a],
-  helmet: [0xd8d2c4, 0x1a1d20, 0xd4622a, 0x2f4a6b, 0x8a1f1f, 0x3f5a3a, 0xb9a44a, 0xf0efe8],
-  accent: [0xd4622a, 0xd8d2c4, 0xc4b03a, 0x3f8a6b, 0x8a3f6b, 0x2a6bd4, 0x1a1d20],
+  jacket: [0x2a2624, 0x1f2b3a, 0x4a1f1f, 0x24331f, 0x3a2a12, 0x6b6259, 0xd8d2c4, 0x14282a,
+           0xf0efe8, 0x121314, 0xb3261e, 0x2a4fb0, 0xc8b48a, 0xd46a9a, 0xe08a2a, 0x4a7a4a],
+  pants:  [0x3b4a63, 0x23262a, 0x2f3b2a, 0x4a3a22, 0x5a5f66, 0x1a1d20, 0x6d4a2a, 0xc8b48a, 0xe9e4da],
+  helmet: [0xd8d2c4, 0x1a1d20, 0xd4622a, 0x2f4a6b, 0x8a1f1f, 0x3f5a3a, 0xb9a44a, 0xf0efe8, 0x7a2a8a, 0x2a8a8a],
+  accent: [0xd4622a, 0xd8d2c4, 0xc4b03a, 0x3f8a6b, 0x8a3f6b, 0x2a6bd4, 0x1a1d20, 0xe0302a],
+  skin:   [0xf1c9a5, 0xe0ac87, 0xc68e64, 0x9c7358, 0x7a5236, 0x5a3a24, 0x3f2a1c],
+  hair:   [0x1a1512, 0x3b2616, 0x6b4526, 0xb08850, 0xe0cc8a, 0x9a9a9a, 0xe8e8e8, 0xc23a2a, 0x2a6bd4, 0x3fbf6b, 0xd44aa0],
+  ink:    [0x1c2433, 0x121212, 0x6a1a1a, 0x1a3a5a],
+  glove:  [0x232020, 0x1a1d20, 0x4a1f1f, 0x6b4a2a, 0xd8d2c4],
+  boot:   [0x1f1c1a, 0x3a2a1a, 0x6b4a2a, 0xe9e4da, 0x121314],
+  scarf:  [0x8a1f1f, 0x1f2b3a, 0x121314, 0xd8d2c4, 0x3f5a3a],
 };
+// The wardrobe controls, one row each: [look key, label, choices].
+const CHOICE_LABELS = {
+  full: 'Full-face', open: 'Open-face',
+  smoke: 'Smoke', clear: 'Clear', gold: 'Gold', blue: 'Blue', mirror: 'Mirror',
+  racing: 'Racing', twin: 'Twin', gloss: 'Gloss', matte: 'Matte',
+  short: 'Short', buzz: 'Buzz', mohawk: 'Mohawk', spikes: 'Spikes', slick: 'Slick', long: 'Long',
+  ponytail: 'Ponytail', bun: 'Bun', afro: 'Afro', dreads: 'Dreads', bald: 'Bald',
+  stubble: 'Stubble', goatee: 'Goatee', moustache: 'Tache',
+  leather: 'Leathers', tee: 'T-shirt', tank: 'Tank', hoodie: 'Hoodie', vest: 'Vest',
+  tribal: 'Tribal', sleeve: 'Sleeve', flames: 'Flames', bands: 'Bands', neck: 'Neck',
+  shades: 'Shades', aviator: 'Aviator', goggles: 'Goggles', silver: 'Silver',
+  bandana: 'Bandana', fingerless: 'Fingerless',
+};
+const KEY_LABELS = {
+  helmet: { none: 'No lid' }, beard: { full: 'Full beard', none: 'Clean' },
+  gloves: { full: 'Race gloves', none: 'Bare hands' }, tattoo: { none: 'No ink' },
+};
+const lbl = (key, v) => (KEY_LABELS[key] && KEY_LABELS[key][v]) || CHOICE_LABELS[v] || (v === 'none' ? 'None' : v);
 
 // STANCE: where the body is. ANIMS: what it is doing there. Two rows of
 // buttons, because "on the bike, punching" and "standing, punching" are both
@@ -65,23 +93,71 @@ const ANIMS = [
   { key: 'grab', label: 'Grab' },
   { key: 'hit', label: 'Hit' },
   { key: 'tuck', label: 'Tuck', stance: 'ride' },
+  // EMOTES: original celebration moves, played on foot. Procedural, like every
+  // other motion here -- keyframed by function, no clips.
+  { key: 'wave', label: 'Wave', stance: 'stand', emote: true },
+  { key: 'victory', label: 'Victory', stance: 'stand', emote: true },
+  { key: 'groove', label: 'Groove', stance: 'stand', emote: true },
+  { key: 'robot', label: 'Robot', stance: 'stand', emote: true },
+  { key: 'guitar', label: 'Air guitar', stance: 'stand', emote: true },
+  { key: 'headbang', label: 'Headbang', stance: 'stand', emote: true },
+  { key: 'flex', label: 'Flex', stance: 'stand', emote: true },
+  { key: 'spin', label: 'Spin', stance: 'stand', emote: true },
 ];
 // Loop lengths (s), each ending in a short rest so the motion reads as a move.
 // The chain's loop is long enough to watch it settle and sway after the crack
 // (a 1.6 m chain takes ~1.5 s to stop swinging).
-const LOOP = { idle: 4, walk: 1.2, punch: 1.1, kick: 1.3, chain: 2.4, grab: 2.6, hit: 1.6, tuck: 3.2 };
+const LOOP = { idle: 4, walk: 1.2, punch: 1.1, kick: 1.3, chain: 2.4, grab: 2.6, hit: 1.6, tuck: 3.2,
+  wave: 2.4, victory: 2.0, groove: 2.0, robot: 3.2, guitar: 2.4, headbang: 1.6, flex: 3.0, spin: 2.6 };
 
 // One-click starting points, so a player can land on a character and tweak it
 // instead of assembling one from four sliders and a palette.
+// STYLE PRESETS: whole characters -- body, colours and wardrobe -- so a player
+// lands on a look and tweaks it. Original archetypes, not real people.
 export const PRESETS = {
   Racer:   { height: 1.72, build: 'lean',   shoulderWide: 0.94, limbLong: 1.04,
-             colors: { jacket: 0x1f2b3a, pants: 0x23262a, helmet: 0xf0efe8, accent: 0x2a6bd4 } },
+             colors: { jacket: 0x1f2b3a, pants: 0x23262a, helmet: 0xf0efe8, accent: 0x2a6bd4 },
+             look: { stripe: 'twin', visor: 'blue' } },
   Brawler: { height: 1.86, build: 'heavy',  shoulderWide: 1.16, limbLong: 0.98,
-             colors: { jacket: 0x2a2624, pants: 0x3b4a63, helmet: 0x1a1d20, accent: 0xd4622a } },
+             colors: { jacket: 0x2a2624, pants: 0x3b4a63, helmet: 0x1a1d20, accent: 0xd4622a },
+             look: { finish: 'matte', spikes: true } },
   Veteran: { height: 1.78, build: 'stocky', shoulderWide: 1.06, limbLong: 1.00,
-             colors: { jacket: 0x3a2a12, pants: 0x4a3a22, helmet: 0xb9a44a, accent: 0xd8d2c4 } },
+             colors: { jacket: 0x3a2a12, pants: 0x4a3a22, helmet: 0xb9a44a, accent: 0xd8d2c4 },
+             look: { helmet: 'open', beard: 'full', hairColor: 0x9a9a9a, glasses: 'goggles', scarf: 'bandana', scarfColor: 0x8a1f1f } },
   Rookie:  { height: 1.62, build: 'normal', shoulderWide: 0.92, limbLong: 1.02,
-             colors: { jacket: 0x4a1f1f, pants: 0x5a5f66, helmet: 0xd4622a, accent: 0xc4b03a } },
+             colors: { jacket: 0x4a1f1f, pants: 0x5a5f66, helmet: 0xd4622a, accent: 0xc4b03a },
+             look: { backpack: true } },
+  // "just a white tee": the clean, sharp-jaw minimalist
+  'Clean Cut': { height: 1.84, build: 'lean', shoulderWide: 1.08, limbLong: 1.02,
+             colors: { jacket: 0xf0efe8, pants: 0x3b4a63, helmet: 0x1a1d20, accent: 0x1a1d20, skin: 0xe0ac87 },
+             look: { helmet: 'none', top: 'tee', hair: 'slick', hairColor: 0x3b2616, gloves: 'none', bootColor: 0xe9e4da } },
+  // the stadium visionary: all-black oversized hoodie, shades, gold
+  Headliner: { height: 1.74, build: 'normal', shoulderWide: 1.0, limbLong: 1.0,
+             colors: { jacket: 0x121314, pants: 0x1a1d20, helmet: 0x121314, accent: 0xc4b03a, skin: 0x5a3a24 },
+             look: { helmet: 'none', top: 'hoodie', hair: 'buzz', hairColor: 0x1a1512, beard: 'stubble', glasses: 'shades',
+                     chain: 'gold', earring: true, gloves: 'none', bootColor: 0x121314 } },
+  'Street Punk': { height: 1.70, build: 'lean', shoulderWide: 0.96, limbLong: 1.04,
+             colors: { jacket: 0x121314, pants: 0x23262a, helmet: 0x121314, accent: 0xe0302a, skin: 0xf1c9a5 },
+             look: { helmet: 'none', top: 'tank', hair: 'mohawk', hairColor: 0xc23a2a, tattoo: 'sleeve', spikes: true,
+                     gloves: 'fingerless', earring: true, chain: 'silver' } },
+  Outlaw:  { height: 1.82, build: 'heavy', shoulderWide: 1.14, limbLong: 0.98,
+             colors: { jacket: 0x2a2624, pants: 0x3b4a63, helmet: 0x1a1d20, accent: 0x8a1f1f, skin: 0xc68e64 },
+             look: { helmet: 'open', top: 'vest', hair: 'long', hairColor: 0x3b2616, beard: 'full', tattoo: 'tribal',
+                     glasses: 'shades', scarf: 'bandana', scarfColor: 0x1f2b3a, gloves: 'fingerless', finish: 'matte' } },
+  Nomad:   { height: 1.76, build: 'lean', shoulderWide: 0.98, limbLong: 1.06,
+             colors: { jacket: 0xc8b48a, pants: 0x6d4a2a, helmet: 0xd8d2c4, accent: 0x6d4a2a, skin: 0x7a5236 },
+             look: { helmet: 'open', top: 'tee', hair: 'dreads', hairColor: 0x1a1512, glasses: 'goggles', scarf: 'bandana',
+                     scarfColor: 0xd8d2c4, backpack: true, tattoo: 'bands', gloveColor: 0x6b4a2a, bootColor: 0x6b4a2a } },
+  'Night Shift': { height: 1.78, build: 'normal', shoulderWide: 1.0, limbLong: 1.02,
+             colors: { jacket: 0x1f2b3a, pants: 0x121314, helmet: 0x121314, accent: 0x2a8a8a },
+             look: { top: 'hoodie', visor: 'mirror', stripe: 'twin', finish: 'matte', hair: 'ponytail' } },
+  Showboat: { height: 1.80, build: 'stocky', shoulderWide: 1.1, limbLong: 1.0,
+             colors: { jacket: 0xe08a2a, pants: 0xe9e4da, helmet: 0xc4b03a, accent: 0xd46a9a, skin: 0x7a5236 },
+             look: { helmet: 'none', top: 'tee', hair: 'afro', hairColor: 0x1a1512, beard: 'moustache', glasses: 'aviator',
+                     chain: 'gold', earring: true, gloves: 'none', bootColor: 0xe9e4da } },
+  'Speed Demon': { height: 1.68, build: 'lean', shoulderWide: 0.92, limbLong: 1.06,
+             colors: { jacket: 0xb3261e, pants: 0x121314, helmet: 0xb3261e, accent: 0xf0efe8 },
+             look: { visor: 'gold', helmetSize: 1.08, hair: 'mohawk', hairColor: 0xf0efe8, gloveColor: 0x1a1d20 } },
 };
 
 export class Showroom {
@@ -107,7 +183,15 @@ export class Showroom {
     const key = new THREE.DirectionalLight(0xfff4e2, 3.2); key.position.set(2.6, 4.2, 3.4);
     const fill = new THREE.DirectionalLight(0x9db4d0, 1.2); fill.position.set(-3.2, 1.6, 2.2);
     const rim = new THREE.DirectionalLight(0xffb45a, 1.6); rim.position.set(-1.4, 2.4, -3.6);
-    this.scene.add(key, fill, rim, new THREE.HemisphereLight(0xc9d4e0, 0x2a2520, 1.4));
+    const hemi = new THREE.HemisphereLight(0xc9d4e0, 0x2a2520, 1.4);
+    this.scene.add(key, fill, rim, hemi);
+    // the key casts: a rider standing on a set with no shadow floats over it
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    Object.assign(key.shadow.camera, { left: -2.6, right: 2.6, top: 2.8, bottom: -1.2, near: 0.5, far: 14 });
+    key.shadow.bias = -0.0005;
+    this.lights = { key, fill, rim, hemi };
+    this.brightness = 1;
     // AN ENVIRONMENT, because the leathers, helmet and paint are clearcoat PBR
     // materials: with nothing to reflect they rendered as black shapes on a
     // black room. A neutral studio is what a fitting room would be lit by.
@@ -118,16 +202,18 @@ export class Showroom {
       pm.dispose();
     } catch (e) { /* lights alone still show the figure */ }
 
-    // ground: a measured 1 m grid (the ruler) on a lit disc (the stage)
-    const disc = new THREE.Mesh(
-      new THREE.CircleGeometry(2.4, 48),
-      new THREE.MeshStandardMaterial({ color: 0x1c1f23, roughness: 0.9 }),
-    );
-    disc.rotation.x = -Math.PI / 2;
-    disc.position.y = -0.002;
-    this.scene.add(disc);
-    const grid = new THREE.GridHelper(4.8, 24, 0x3a4047, 0x262a2e);
-    this.scene.add(grid);
+    // THE SET: a whole scene behind the figure (src/showscenes.js) -- the old
+    // grey disc and ruler grid are the Studio set now.
+    this.set_ = null;
+    this.sceneKey = 'garage';
+    try { const k = localStorage.getItem('riderash.showscene'); if (SCENES.some((x) => x.key === k)) this.sceneKey = k; } catch (e) { /* no storage */ }
+    // PORTRAIT LENS by default: a long perspective lens, so the set has depth
+    // and the floor is seen. FITTING is the old orthographic view, kept for
+    // comparing proportions (perspective lies about them a little).
+    this.lens = 'portrait';
+    this.focus = 'full';          // full | rider | face
+    this.pcam = new THREE.PerspectiveCamera(24, 1, 0.1, 600);
+    this.useScene(this.sceneKey);
 
     // turntable the figure stands on
     this.turn = new THREE.Group();
@@ -162,6 +248,37 @@ export class Showroom {
     this._peak = 0;             // tip speed peak of the last swing (m/s)
   }
 
+  /** Swap the set behind the figure and relight the stage to match it. */
+  useScene(key) {
+    if (this.set_) { this.scene.remove(this.set_); disposeScene(this.set_); }
+    const { group, light } = buildScene(key);
+    this.sceneKey = SCENES.some((x) => x.key === key) ? key : 'studio';
+    this.set_ = group;
+    this.scene.add(group);
+    this._light = light;
+    this._relight();
+    this.scene.fog = light.fog ? new THREE.Fog(light.fog[0], light.fog[1], light.fog[2]) : null;
+    this.scene.background = new THREE.Color(light.bg ?? 0x16191c);
+    try { localStorage.setItem('riderash.showscene', this.sceneKey); } catch (e) { /* no storage */ }
+    this._frameDirty = true;
+    if (this.el) this._syncUI();
+  }
+
+  _relight() {
+    const L = this._light, k = this.brightness;
+    if (!L) return;
+    const { key, fill, rim, hemi } = this.lights;
+    key.color.setHex(L.key[0]); key.intensity = L.key[1] * k;
+    key.position.fromArray(L.keyPos || [2.6, 4.2, 3.4]);
+    fill.color.setHex(L.fill[0]); fill.intensity = L.fill[1] * k;
+    rim.color.setHex(L.rim[0]); rim.intensity = L.rim[1] * k;
+    hemi.color.setHex(L.hemi[0]); hemi.groundColor.setHex(L.hemi[1]); hemi.intensity = L.hemi[2] * k;
+    this.scene.environmentIntensity = (L.env ?? 0.85) * k;
+  }
+
+  /** The camera the stage is drawn with. */
+  get viewCam() { return this.lens === 'fitting' ? this.camera : this.pcam; }
+
   /**
    * The bike the body is judged against. The RIDER is no longer taken from a
    * prebuilt asset: it is built HERE, from the spec, by the same builder the
@@ -182,7 +299,7 @@ export class Showroom {
       shoulders: $('s-shoulders'), vShoulders: $('v-shoulders'),
       limbs: $('s-limbs'), vLimbs: $('v-limbs'),
       builds: $('s-builds'), stance: $('s-pose'), anims: $('s-anim'),
-      presets: $('s-presets'), done: $('s-done'), random: $('s-random'),
+      presets: $('s-presets'), done: $('s-done'), random: $('s-random'), emotes: $('s-emote'),
       fit: $('s-fit'),
     };
     this._buildControls();
@@ -192,6 +309,7 @@ export class Showroom {
 
   _buildControls() {
     const e = this.el;
+    const hex = (c) => '#' + c.toString(16).padStart(6, '0');
     const btn = (host, cls, label, on, data) => {
       const b = document.createElement('button');
       b.className = cls; b.textContent = label; b.onclick = on;
@@ -199,31 +317,159 @@ export class Showroom {
       host.appendChild(b);
       return b;
     };
+    // Every control registers a sync function; _syncUI runs them all, so a
+    // preset, a randomise or a slider leaves every button showing the truth.
+    this._syncers = [];
+    const grp = (host, title) => {
+      const g = document.createElement('div');
+      g.className = 'grp';
+      if (title) { const h = document.createElement('h3'); h.textContent = title; g.appendChild(h); }
+      host.appendChild(g);
+      return g;
+    };
+    const sub = (host, text) => { const d = document.createElement('div'); d.className = 'sub'; d.textContent = text; host.appendChild(d); };
+    const chips = (host, key, list = LOOK_OPTIONS[key]) => {
+      const row = document.createElement('div'); row.className = 'chips'; host.appendChild(row);
+      for (const v of list) btn(row, 'bd', lbl(key, v), () => this.set({ look: { [key]: v } }), { v });
+      this._syncers.push(() => { for (const b of row.children) b.classList.toggle('sel', b.dataset.v === String(this.spec.look[key])); });
+    };
+    const toggles = (host, keys) => {
+      const row = document.createElement('div'); row.className = 'chips'; host.appendChild(row);
+      for (const [key, label] of keys) btn(row, 'bd', label, () => this.set({ look: { [key]: !this.spec.look[key] } }), { k: key });
+      this._syncers.push(() => { for (const b of row.children) b.classList.toggle('sel', !!this.spec.look[b.dataset.k]); });
+    };
+    // colour row: `where` is 'colors' or 'look'
+    const swatches = (host, where, key, list) => {
+      const row = document.createElement('div'); row.className = 'swatches'; host.appendChild(row);
+      for (const col of list) {
+        const sw = btn(row, 'sws', '', () => this.set({ [where]: { [key]: col } }), { col });
+        sw.style.background = hex(col);
+        sw.setAttribute('aria-label', key + ' ' + hex(col));
+      }
+      this._syncers.push(() => { for (const sw of row.children) sw.classList.toggle('sel', +sw.dataset.col === this.spec[where][key]); });
+    };
+    const slider = (host, label, min, max, step, get, put, fmt) => {
+      const r = document.createElement('div'); r.className = 'row2';
+      r.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><span class="val"></span>`;
+      host.appendChild(r);
+      const [, inp, val] = r.children;
+      inp.addEventListener('input', () => put(parseFloat(inp.value)));
+      this._syncers.push(() => { const v = get(); inp.value = v; val.textContent = fmt(v); });
+    };
+
+    // ---- tabs ----
+    const TABS = [['looks', 'Looks'], ['body', 'Body'], ['head', 'Head'], ['outfit', 'Outfit'], ['chain', 'Chain'], ['scene', 'Scene']];
+    const tabs = document.getElementById('s-tabs');
+    this.tab = 'looks';
+    if (tabs) {
+      tabs.innerHTML = '';
+      for (const [k, label] of TABS) btn(tabs, '', label, () => this.showTab(k), { tab: k });
+    }
+
+    // ---- LOOKS: style presets, each with its colour dots ----
+    if (e.presets) {
+      e.presets.innerHTML = '';
+      for (const [name, P] of Object.entries(PRESETS)) {
+        const b = btn(e.presets, '', '', () => this.applyPreset(name), { preset: name });
+        const dots = document.createElement('span'); dots.className = 'dots';
+        const L = P.look || {};
+        for (const c of [L.helmet === 'none' ? (L.hairColor ?? 0x2a1d14) : P.colors.helmet, P.colors.jacket, P.colors.accent]) {
+          const i = document.createElement('i'); i.style.background = hex(c); dots.appendChild(i);
+        }
+        b.appendChild(dots);
+        b.appendChild(document.createTextNode(name));
+      }
+    }
+
+    // ---- BODY ----
     e.builds.innerHTML = '';
     for (const [key, b] of Object.entries(BUILDS)) {
       btn(e.builds, 'bd', b.label, () => this.set({ build: key }), { build: key });
     }
-    if (e.presets) {
-      e.presets.innerHTML = '';
-      for (const name of Object.keys(PRESETS)) {
-        btn(e.presets, 'bd', name, () => this.applyPreset(name), { preset: name });
-      }
+    const skinHost = document.getElementById('s-skin');
+    if (skinHost) { skinHost.remove(); swatches(document.querySelector('#panel [data-tab="body"] .grp:last-child'), 'colors', 'skin', PALETTE.skin); }
+
+    // ---- HEAD ----
+    const H = document.getElementById('t-head');
+    if (H) {
+      H.innerHTML = '';
+      let g = grp(H, 'Helmet');
+      chips(g, 'helmet');
+      slider(g, 'Size', 0.85, 1.3, 0.01, () => this.spec.look.helmetSize, (v) => this.set({ look: { helmetSize: v } }), (v) => Math.round(v * 100) + '%');
+      swatches(g, 'colors', 'helmet', PALETTE.helmet);
+      sub(g, 'Visor'); chips(g, 'visor');
+      sub(g, 'Stripe'); chips(g, 'stripe');
+      sub(g, 'Finish'); chips(g, 'finish');
+      g = grp(H, 'Hair');
+      chips(g, 'hair');
+      swatches(g, 'look', 'hairColor', PALETTE.hair);
+      sub(g, 'Under a full-face lid only a mohawk (as a crest), long hair, a ponytail or dreads show');
+      g = grp(H, 'Face');
+      slider(g, 'Head size', 0.85, 1.35, 0.01, () => this.spec.look.headSize, (v) => this.set({ look: { headSize: v } }), (v) => Math.round(v * 100) + '%');
+      sub(g, 'Facial hair'); chips(g, 'beard');
+      sub(g, 'Eyewear'); chips(g, 'glasses');
+      toggles(g, [['earring', 'Earrings']]);
     }
-    for (const slot of ['jacket', 'pants', 'helmet', 'accent']) {
-      const host = document.getElementById('s-' + slot);
-      if (!host) continue;
-      host.innerHTML = '';
-      for (const col of PALETTE[slot]) {
-        const sw = btn(host, 'sws', '', () => this.set({ colors: { [slot]: col } }), { col });
-        sw.style.background = '#' + col.toString(16).padStart(6, '0');
-        sw.setAttribute('aria-label', slot + ' #' + col.toString(16).padStart(6, '0'));
-      }
+
+    // ---- OUTFIT ----
+    const O = document.getElementById('t-outfit');
+    if (O) {
+      O.innerHTML = '';
+      let g = grp(O, 'Top');
+      chips(g, 'top');
+      swatches(g, 'colors', 'jacket', PALETTE.jacket);
+      g = grp(O, 'Pants'); swatches(g, 'colors', 'pants', PALETTE.pants);
+      g = grp(O, 'Accent'); swatches(g, 'colors', 'accent', PALETTE.accent);
+      g = grp(O, 'Tattoos');
+      chips(g, 'tattoo');
+      swatches(g, 'look', 'inkColor', PALETTE.ink);
+      sub(g, 'Ink shows on bare skin: pick a T-shirt, tank or vest');
+      g = grp(O, 'Hands and feet');
+      chips(g, 'gloves');
+      swatches(g, 'look', 'gloveColor', PALETTE.glove);
+      sub(g, 'Boots'); swatches(g, 'look', 'bootColor', PALETTE.boot);
+      g = grp(O, 'Accessories');
+      sub(g, 'Neck chain'); chips(g, 'chain');
+      sub(g, 'Scarf'); chips(g, 'scarf');
+      swatches(g, 'look', 'scarfColor', PALETTE.scarf);
+      toggles(g, [['spikes', 'Shoulder spikes'], ['backpack', 'Backpack']]);
     }
+
+    // ---- SCENE ----
+    const SC = document.getElementById('t-scene');
+    if (SC) {
+      SC.innerHTML = '';
+      let g = grp(SC, 'Set');
+      const grid = document.createElement('div'); grid.className = 'scn'; g.appendChild(grid);
+      for (const sc of SCENES) {
+        const b = btn(grid, '', '', () => this.useScene(sc.key), { scene: sc.key });
+        const i = document.createElement('i'); i.style.background = sc.swatch; b.appendChild(i);
+        b.appendChild(document.createTextNode(sc.label));
+      }
+      this._syncers.push(() => { for (const b of grid.children) b.classList.toggle('sel', b.dataset.scene === this.sceneKey); });
+      g = grp(SC, 'Camera');
+      const lens = document.createElement('div'); lens.className = 'chips'; g.appendChild(lens);
+      btn(lens, 'bd', 'Portrait', () => { this.lens = 'portrait'; this._frameDirty = true; this._syncUI(); }, { v: 'portrait' });
+      btn(lens, 'bd', 'Fitting (flat)', () => { this.lens = 'fitting'; this._frameDirty = true; this._syncUI(); }, { v: 'fitting' });
+      this._syncers.push(() => { for (const b of lens.children) b.classList.toggle('sel', b.dataset.v === this.lens); });
+      const foc = document.createElement('div'); foc.className = 'chips'; g.appendChild(foc);
+      for (const [k, label] of [['full', 'Full'], ['rider', 'Rider'], ['face', 'Face']]) {
+        btn(foc, 'bd', label, () => this.setFocus(k), { v: k });
+      }
+      this._syncers.push(() => { for (const b of foc.children) b.classList.toggle('sel', b.dataset.v === this.focus); });
+      slider(g, 'Turntable', 0, 1, 0.01, () => this.spin, (v) => { this.spin = v; }, (v) => (v < 0.01 ? 'off' : v.toFixed(2)));
+      slider(g, 'Light', 0.5, 1.6, 0.01, () => this.brightness, (v) => { this.brightness = v; this._relight(); }, (v) => Math.round(v * 100) + '%');
+    }
+
     e.stance.innerHTML = '';
     for (const st of STANCES) btn(e.stance, '', st.label, () => this.setStance(st.key), { stance: st.key });
     if (e.anims) {
       e.anims.innerHTML = '';
-      for (const a of ANIMS) btn(e.anims, '', a.label, () => this.setAnim(a.key), { anim: a.key });
+      for (const a of ANIMS) if (!a.emote) btn(e.anims, '', a.label, () => this.setAnim(a.key), { anim: a.key });
+    }
+    if (e.emotes) {
+      e.emotes.innerHTML = '';
+      for (const a of ANIMS) if (a.emote) btn(e.emotes, '', a.label, () => this.setAnim(a.key), { anim: a.key });
     }
     // Sliders: `input` fires continuously while dragging. The rebuild is
     // deferred to the next frame (`_dirty`), so a fast drag costs one body per
@@ -235,6 +481,22 @@ export class Showroom {
     e.random.onclick = () => this.randomise();
     e.done.onclick = () => this.close();
     this._buildChainPanel();
+    this.showTab(this.tab);
+  }
+
+  setFocus(k) { this.focus = k; this._focus = null; this._frameDirty = true; this._syncUI(); }
+
+  showTab(k) {
+    this.tab = k;
+    for (const t of document.querySelectorAll('#panel .tab')) t.classList.toggle('on', t.dataset.tab === k);
+    const tabs = document.getElementById('s-tabs');
+    if (tabs) for (const b of tabs.children) b.classList.toggle('sel', b.dataset.tab === k);
+    // the chain tab previews the swing; the head tab moves in on the face
+    if (k === 'chain' && this.anim !== 'chain') this.setAnim('chain');
+    if (this.el && this._syncers) {
+      if (k === 'head' && this.focus === 'full') this.setFocus('face');
+      else if (k !== 'head' && k !== 'scene' && this.focus === 'face') this.setFocus('full');
+    }
   }
 
   /**
@@ -244,7 +506,7 @@ export class Showroom {
    * Fighter swings, and switches the preview to the chain swing.
    */
   _buildChainPanel() {
-    const panel = document.getElementById('panel');
+    const panel = document.getElementById('t-chain') || document.getElementById('panel');
     if (!panel || document.getElementById('s-chain')) return;
     const grp = document.createElement('div');
     grp.className = 'grp'; grp.id = 's-chain';
@@ -266,7 +528,7 @@ export class Showroom {
         <input type="range" id="c-air" min="0" max="45" step="1">
         <span class="val" id="cv-air"></span></div>
       <div id="c-stats" style="font-size:10px;line-height:1.7;color:#7f858c;letter-spacing:.06em"></div>`;
-    const actions = panel.querySelector('.actions');
+    const actions = panel.querySelector(':scope > .actions');
     panel.insertBefore(grp, actions || null);
     const $ = (id) => document.getElementById(id);
     const c = this.el.chain = {
@@ -392,6 +654,7 @@ export class Showroom {
   set(patch) {
     const o = { ...this.spec, ...patch };
     o.colors = { ...this.spec.colors, ...(patch.colors || {}) };
+    o.look = { ...this.spec.look, ...(patch.look || {}) };
     // `build` is the NAME the UI picks; the spec carries it as `buildName`
     // (and `build` as the numeric scale). Take the name from whichever the
     // patch set, so the rebuild never re-derives from a stale one.
@@ -399,17 +662,20 @@ export class Showroom {
       : (patch.buildName || this.spec.buildName);
     this.spec = makeSpec({
       height: o.height, build: buildName,
-      shoulderWide: o.shoulderWide, limbLong: o.limbLong, colors: o.colors,
+      shoulderWide: o.shoulderWide, limbLong: o.limbLong, colors: o.colors, look: o.look,
     });
     this._dirty = true;
+    this._preset = null;
     this._syncUI();
   }
 
   applyPreset(name) {
     const P = PRESETS[name];
     if (!P) return;
-    this.spec = makeSpec({ ...P, colors: { ...P.colors } });
+    // a preset is a whole character: anything it does not name goes back to stock
+    this.spec = makeSpec({ ...P, colors: { skin: 0x9c7358, ...P.colors }, look: makeLook(P.look) });
     this._dirty = true;
+    this._preset = name;
     this._syncUI();
     this._flash(name);
   }
@@ -423,9 +689,22 @@ export class Showroom {
       limbLong: 0.94 + Math.random() * 0.16,
       colors: {
         jacket: pick(PALETTE.jacket), pants: pick(PALETTE.pants),
-        helmet: pick(PALETTE.helmet), accent: pick(PALETTE.accent),
+        helmet: pick(PALETTE.helmet), accent: pick(PALETTE.accent), skin: pick(PALETTE.skin),
+      },
+      // a whole random wardrobe, weighted toward the plausible (most riders
+      // wear a lid; most accessories are off)
+      look: {
+        helmet: pick(['full', 'full', 'open', 'none']), helmetSize: 0.92 + Math.random() * 0.2, headSize: 0.92 + Math.random() * 0.2,
+        visor: pick(LOOK_OPTIONS.visor), stripe: pick(LOOK_OPTIONS.stripe), finish: pick(LOOK_OPTIONS.finish),
+        hair: pick(LOOK_OPTIONS.hair), hairColor: pick(PALETTE.hair), beard: pick(['none', 'none', ...LOOK_OPTIONS.beard]),
+        top: pick(LOOK_OPTIONS.top), tattoo: pick(['none', ...LOOK_OPTIONS.tattoo]), inkColor: pick(PALETTE.ink),
+        glasses: pick(['none', 'none', ...LOOK_OPTIONS.glasses]), chain: pick(['none', 'none', 'gold', 'silver']),
+        scarf: pick(['none', 'none', 'bandana']), scarfColor: pick(PALETTE.scarf),
+        earring: Math.random() < 0.3, spikes: Math.random() < 0.2, backpack: Math.random() < 0.25,
+        gloves: pick(['full', 'full', 'fingerless', 'none']), gloveColor: pick(PALETTE.glove), bootColor: pick(PALETTE.boot),
       },
     });
+    this._preset = null;
     this._dirty = true;
     this._syncUI();
   }
@@ -473,15 +752,14 @@ export class Showroom {
     e.limbs.value = S.limbLong.toFixed(2);
     e.vLimbs.textContent = S.limbLong.toFixed(2);
     for (const b of e.builds.children) b.classList.toggle('sel', b.dataset.build === S.buildName);
-    for (const slot of ['jacket', 'pants', 'helmet', 'accent']) {
-      const host = document.getElementById('s-' + slot);
-      if (host) for (const sw of host.children) sw.classList.toggle('sel', +sw.dataset.col === S.colors[slot]);
-    }
+    for (const f of this._syncers || []) f();
+    if (e.presets) for (const b of e.presets.children) b.classList.toggle('sel', b.dataset.preset === this._preset);
     // THE POSE BUTTONS NEVER SHOWED WHICH ONE WAS ON. `sel` was set once when
     // the buttons were built and never again, so pressing Stand left Tuck lit
     // and the screen looked like it had ignored the click.
     for (const b of e.stance.children) b.classList.toggle('sel', b.dataset.stance === this.stance);
     if (e.anims) for (const b of e.anims.children) b.classList.toggle('sel', b.dataset.anim === this.anim);
+    if (e.emotes) for (const b of e.emotes.children) b.classList.toggle('sel', b.dataset.anim === this.anim);
     // the readout: the derived numbers, which is the whole point of the screen
     if (e.spec) {
       e.spec.innerHTML =
@@ -623,6 +901,10 @@ export class Showroom {
       poseStanding(j, walking ? (t / L) * Math.PI * 2 : 0, walking ? 1 : 0);
       // a walk bobs: the body is highest at mid-stance, twice per cycle
       b.position.y = walking ? Math.abs(Math.sin((t / L) * Math.PI * 2)) * 0.03 : 0;
+      b.rotation.y = 0;
+      if (j.pelvis) j.pelvis.rotation.z = 0;
+      const emote = EMOTES[this.anim];
+      if (emote) { j.__chainAlwaysOut = false; if (j.chain) j.chain.visible = false; emote(j, t, b, this.spec); return; }
     } else {
       poseStanding(j, 0, 0);
       poseCrash(j, t);
@@ -703,17 +985,26 @@ export class Showroom {
     // THE CHAIN CLOSE-UP: frame the rider's upper body and the chain's whole
     // sweep (centred on the chest, sized by the chain's length) instead of the
     // whole bike, and follow the chest smoothly as the turntable carries it.
-    let cx = 0;
+    let cx = 0, cz = 0;
     const j = this.body && this.body.userData.joints;
-    if (this.anim === 'chain' && this.chainCam && j && j.torso) {
-      const p = j.torso.getWorldPosition(new THREE.Vector3());
+    // FOLLOW a part of the body (smoothly, as the turntable carries it): the
+    // chest for the chain close-up, the waist for RIDER, the head for FACE.
+    const follow = (node, dy, half) => {
+      const p = node.getWorldPosition(new THREE.Vector3());
+      p.y += dy;
       if (!this._focus) this._focus = p.clone();
-      else this._focus.lerp(p, 0.08);
+      else this._focus.lerp(p, 0.12);
+      F = { midY: this._focus.y, halfH: half, reach: half };
+      cx = this._focus.x; cz = this._focus.z;
+    };
+    if (this.anim === 'chain' && this.chainCam && j && j.torso) {
       // the torso joint is the waist: the swing lives from the tank to a
       // chain's length above the helmet, so centre ~0.3 m up
-      const half = 0.36 + PLAYER_CHAIN.length * 0.42;
-      F = { midY: this._focus.y + 0.30, halfH: half, reach: half };
-      cx = this._focus.x;
+      follow(j.torso, 0.30, 0.36 + PLAYER_CHAIN.length * 0.42);
+    } else if (this.focus === 'face' && j && j.head) {
+      follow(j.head, this.spec.headH * 0.55, 0.2 + this.spec.headH * 0.55);
+    } else if (this.focus === 'rider' && j && j.torso) {
+      follow(j.torso, this.spec.trunk * 0.35, this.spec.height * 0.46);
     } else this._focus = null;
     // KEEP THE FIGURE OUT FROM UNDER THE CHROME. The title and the stance and
     // animation rows cover the top of the stage and the fit readout the
@@ -734,9 +1025,19 @@ export class Showroom {
     this.camera.bottom = -halfH;
     this.camera.left = -halfW;
     this.camera.right = halfW;
-    this.camera.position.set(cx, midY, 4.6);
-    this.camera.lookAt(cx, midY, 0);
+    this.camera.position.set(cx, midY, cz + 4.6);
+    this.camera.lookAt(cx, midY, cz);
     this.camera.updateProjectionMatrix();
+    // PORTRAIT: the same framing through a long lens -- the distance that makes
+    // the frustum's half-height at the subject equal the ortho half-height, set
+    // back by the turntable's reach so the near side of the bike is not cropped,
+    // and raised a touch so the floor of the set reads.
+    const pc = this.pcam, tf = Math.tan(THREE.MathUtils.degToRad(pc.fov / 2));
+    const dist = halfH / tf + F.reach * 0.6;
+    pc.aspect = aspect;
+    pc.position.set(cx, midY + dist * 0.1, cz + dist);
+    pc.lookAt(cx, midY, cz);
+    pc.updateProjectionMatrix();
     // DRAW ONLY THE STAGE REGION. WebGL's origin is bottom-left, the DOM's is
     // top-left; read the rect so a restyled panel cannot desynchronise them.
     const pr = this.renderer.getPixelRatio ? this.renderer.getPixelRatio() : 1;
@@ -764,7 +1065,7 @@ export class Showroom {
       this.renderer.setScissor(r.x, r.y, r.w, r.h);
       this.renderer.setScissorTest(true);
       this.renderer.clear(true, true, false);
-      this.renderer.render(this.scene, this.camera);
+      this.renderer.render(this.scene, this.viewCam);
     }
   }
 
@@ -776,6 +1077,7 @@ export class Showroom {
     this.spec = makeSpec({
       height: this.spec.height, build: this.spec.buildName,
       shoulderWide: this.spec.shoulderWide, limbLong: this.spec.limbLong, colors: this.spec.colors,
+      look: this.spec.look,
     });
     this._dirty = true;
     this._frameDirty = true;
@@ -793,6 +1095,131 @@ export class Showroom {
 
   get isOpen() { return !!(this.el && this.el.root.classList.contains('on')); }
 }
+
+// ---- EMOTES ----------------------------------------------------------------
+// Original moves, built on one helper: aim an upper arm along a direction (in
+// the torso's frame: +x the rider's left, +y up, +z forward), bend the elbow
+// toward a hint direction by `flex` radians. Writing arm poses as "point the
+// arm there" instead of three Euler angles is what makes eight emotes short
+// enough to read and impossible to mirror by accident.
+const _X = new THREE.Vector3(), _Y = new THREE.Vector3(), _Z = new THREE.Vector3(), _B = new THREE.Matrix4();
+function armAim(j, side, dir, hint, flex) {
+  const A = j[side + 'Arm'] || (j.arms && j.arms[side]);
+  if (!A || !A.upper) return;
+  _Y.set(-dir[0], -dir[1], -dir[2]).normalize();          // the segment hangs down its local -Y
+  _Z.set(hint[0], hint[1], hint[2]).addScaledVector(_Y, -0);
+  _Z.addScaledVector(_Y, -_Z.dot(_Y));
+  if (_Z.lengthSq() < 1e-6) _Z.set(0, 0, 1).addScaledVector(_Y, -_Y.z);
+  _Z.normalize();
+  _X.crossVectors(_Y, _Z);
+  A.upper.quaternion.setFromRotationMatrix(_B.makeBasis(_X, _Y, _Z));
+  if (A.elbow) A.elbow.rotation.set(-flex, 0, 0);          // - flexes toward local +Z
+}
+const lerp3 = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
+const sm = (x) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
+/** Bend both knees by `a` and lower the body so the boots stay on the floor. */
+function squat(j, a, b, S) {
+  for (const side of ['left', 'right']) {
+    const L = j[side + 'Leg'] || (j.legs && j.legs[side]);
+    if (!L) continue;
+    if (L.thigh) L.thigh.rotation.x = -a;                  // thigh forward
+    if (L.knee) L.knee.rotation.x = 2 * a;                 // shin back under the hip
+  }
+  b.position.y -= (S.thigh + S.shin) * (1 - Math.cos(a));
+  if (j.torso) j.torso.rotation.x += a * 0.45;
+}
+const EMOTES = {
+  wave(j, t) {
+    armAim(j, 'right', [-0.85, 0.5, 0.2], [0.2, 1, 0.3], 1.25 + 0.45 * Math.sin(t * 9));
+    armAim(j, 'left', [0.12, -1, 0.05], [0, 0, 1], 0.25);
+    if (j.neck) { j.neck.rotation.z = -0.14; j.neck.rotation.x = -0.06; }
+    if (j.torso) j.torso.rotation.z = 0.06;
+  },
+  victory(j, t, b, S) {
+    const hop = t < 0.9 ? Math.max(0, Math.sin(Math.PI * (t - 0.25) / 0.5)) : 0;
+    const crouch = t < 0.25 ? sm(t / 0.25) * 0.35 : t < 0.75 ? 0 : t < 0.95 ? (1 - sm((t - 0.75) / 0.2)) * 0.25 : 0;
+    b.position.y = hop * 0.16;
+    squat(j, crouch, b, S);
+    for (const [side, s] of [['left', 1], ['right', -1]]) {
+      armAim(j, side, [s * 0.45, 0.88, 0.12], [0, 0, 1], 0.15 + 0.12 * Math.sin(t * 7 + s));
+    }
+    if (j.neck) j.neck.rotation.x = -0.3;
+  },
+  groove(j, t, b, S) {
+    const ph = t * Math.PI * 4;                            // two beats a second
+    if (j.pelvis) j.pelvis.rotation.z = 0.09 * Math.sin(ph / 2);
+    if (j.torso) { j.torso.rotation.z = -0.12 * Math.sin(ph / 2); j.torso.rotation.y = 0.22 * Math.sin(ph / 2); }
+    for (const [side, s] of [['left', 1], ['right', -1]]) {
+      armAim(j, side, [s * 0.4, -0.5 + 0.35 * Math.sin(ph + (s > 0 ? 0 : Math.PI)), 0.65], [0, 1, 0.2], 1.7);
+    }
+    squat(j, 0.1 + 0.12 * (0.5 + 0.5 * Math.cos(ph)), b, S);
+    if (j.neck) j.neck.rotation.x = 0.12 * Math.sin(ph);
+  },
+  robot(j, t, b) {
+    const P = [
+      { l: [[1, 0, 0], [0, 1, 0], 1.57], r: [[-1, 0, 0], [0, -1, 0], 1.57], n: 0.55, y: 0 },
+      { l: [[1, 0, 0], [0, -1, 0], 1.57], r: [[-1, 0, 0], [0, 1, 0], 1.57], n: -0.55, y: 0 },
+      { l: [[0.2, -0.25, 1], [0, 1, 0], 1.57], r: [[-0.2, -0.25, 1], [0, 1, 0], 1.57], n: 0, y: 0.45 },
+      { l: [[0.2, -0.25, 1], [0, 1, 0], 1.57], r: [[-0.2, -0.25, 1], [0, 1, 0], 1.57], n: 0, y: -0.45 },
+      { l: [[0.15, -1, 0], [0, 0, 1], 1.57], r: [[-1, 0, 0], [0, 1, 0], 1.57], n: -0.55, y: 0 },
+      { l: [[0.2, -1, 0], [0, 0, 1], 0.05], r: [[-0.2, -1, 0], [0, 0, 1], 0.05], n: 0, y: 0 },
+    ];
+    const step = 0.5, k = Math.floor(t / step) % P.length, prev = P[(k + P.length - 1) % P.length], cur = P[k];
+    const e = sm(((t % step) / 0.09));                    // SNAP to each pose, then hold dead still
+    armAim(j, 'left', lerp3(prev.l[0], cur.l[0], e), lerp3(prev.l[1], cur.l[1], e), prev.l[2] + (cur.l[2] - prev.l[2]) * e);
+    armAim(j, 'right', lerp3(prev.r[0], cur.r[0], e), lerp3(prev.r[1], cur.r[1], e), prev.r[2] + (cur.r[2] - prev.r[2]) * e);
+    if (j.neck) j.neck.rotation.y = prev.n + (cur.n - prev.n) * e;
+    if (j.torso) j.torso.rotation.y = prev.y + (cur.y - prev.y) * e;
+    b.position.y += (t % step) < 0.09 ? 0.012 : 0;
+  },
+  guitar(j, t, b, S) {
+    if (j.torso) { j.torso.rotation.x = -0.2; j.torso.rotation.z = 0.06; }
+    armAim(j, 'left', [0.62, -0.35, 0.7], [-0.7, 0.3, 0.5], 1.0);
+    armAim(j, 'right', [-0.3, -0.85, 0.4], [0.75, 0.2, 0.7], 1.45 + 0.35 * Math.sin(t * 20));
+    if (j.neck) j.neck.rotation.x = 0.12 + 0.16 * Math.sin(t * 10);
+    for (const [side, s] of [['left', 1], ['right', -1]]) {
+      const L = j[side + 'Leg'] || (j.legs && j.legs[side]);
+      if (L && L.hip) L.hip.rotation.z = s * 0.16;
+    }
+    squat(j, 0.14, b, S);
+  },
+  headbang(j, t, b, S) {
+    const w = t * 11;
+    if (j.neck) j.neck.rotation.x = 0.2 + 0.42 * Math.sin(w);
+    if (j.torso) j.torso.rotation.x = 0.15 + 0.12 * Math.sin(w - 0.6);
+    armAim(j, 'right', [-0.3, 0.92, 0.2], [0, 0, 1], 0.45);          // horns up
+    armAim(j, 'left', [0.35, -0.55 + 0.3 * Math.sin(w), 0.6], [0, 1, 0.1], 1.3);
+    squat(j, 0.16, b, S);
+  },
+  flex(j, t, b, S) {
+    if (t < 1.5) {
+      // double biceps, facing out
+      for (const [side, s] of [['left', 1], ['right', -1]]) armAim(j, side, [s, 0.14, 0.05], [0, 1, 0], 1.95 + 0.08 * Math.sin(t * 14));
+      if (j.torso) j.torso.rotation.x = -0.06;
+      if (j.neck) { j.neck.rotation.x = -0.12; j.neck.rotation.y = 0.3 * sm((t - 0.3) / 0.4); }
+    } else {
+      // the crab: fists together in front, everything tensed
+      for (const [side, s] of [['left', 1], ['right', -1]]) armAim(j, side, [s * 0.4, -0.75, 0.5], [-s, 0, 0.35], 1.35);
+      if (j.neck) j.neck.rotation.x = 0.2;
+      squat(j, 0.22, b, S);
+      if (j.torso) j.torso.rotation.x += 0.15 + 0.03 * Math.sin(t * 30);
+    }
+  },
+  spin(j, t, b, S) {
+    const k = sm(t / 1.1);
+    b.rotation.y = k * Math.PI * 2;
+    if (t < 1.1) {
+      for (const [side, s] of [['left', 1], ['right', -1]]) armAim(j, side, [s, 0.25, 0], [0, 0, 1], 0.15);
+      b.position.y = Math.sin(Math.PI * Math.min(1, t / 1.1)) * 0.06;
+    } else {
+      // land it: point at the camera, other hand on the hip
+      armAim(j, 'right', [-0.25, 0.25, 1], [0, 1, 0], 0.08);
+      armAim(j, 'left', [0.75, -0.6, -0.2], [-0.8, 0.2, 0.3], 1.9);
+      squat(j, 0.1, b, S);
+      if (j.neck) j.neck.rotation.z = -0.12;
+    }
+  },
+};
 
 /** The bike publishes its contacts on whichever node the asset put them. */
 function findContacts(root) {

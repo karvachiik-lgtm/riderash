@@ -124,8 +124,9 @@ export class Cop {
       this.bike.add(this.lampR, this.lampB);
     }
 
-    if (assets.rider && this.bike) {
-      this.rider = cloneWithJoints(assets.rider);
+    const riderSrc = assets.npcRider || assets.rider;
+    if (riderSrc && this.bike) {
+      this.rider = cloneWithJoints(riderSrc);
       this.rider.traverse((n) => {
         if (!n.isMesh || !n.material || Array.isArray(n.material) || !n.material.color) return;
         const hex = n.material.color.getHex();

@@ -33,6 +33,19 @@ export default function (THREE) {
   const R = opts.ride || {};
 
   const C = S.colors;
+  // THE LOOK (src/bodyspec.js makeLook): style, never stature. Its defaults are
+  // the original rider -- full-face lid, leathers, gloves -- so a spec without a
+  // look (an old save, a rival) builds the same body as before, mesh for mesh.
+  const L = Object.assign({
+    helmet: 'full', helmetSize: 1, headSize: 1, visor: 'smoke', stripe: 'racing', finish: 'gloss', hair: 'short',
+    hairColor: 0x2a1d14, beard: 'none', top: 'leather', tattoo: 'none', inkColor: 0x1c2433,
+    glasses: 'none', chain: 'none', scarf: 'none', scarfColor: 0x8a1f1f, earring: false,
+    spikes: false, backpack: false, gloves: 'full', gloveColor: 0x232020, bootColor: 0x1f1c1a,
+  }, S.look || {});
+  const TOP = L.top;
+  const leatherTop = TOP === 'leather';
+  const bareArms = TOP === 'tank' || TOP === 'vest';
+  const faceShown = L.helmet !== 'full';
 
   // ---- materials ----------------------------------------------------------
   // Worn leather is not matte -- a slightly glossy hide with a broad, soft
@@ -55,11 +68,28 @@ export default function (THREE) {
   const denim   = M(C.pants, 0.90, 0.02, true);  denim.name = 'fabric';   // cloth stays matte
   const cuffMat = M(shade(C.pants, 1.25), 0.92, 0.02, true); cuffMat.name = 'fabric';  // turned-up hem shows the lighter inside
   const skin    = M(C.skin, 0.78, 0.0); skin.name = 'plaster';
-  const glass   = P(0x2a333c, 0.05, 0.20, 1.0, 0.01);            // visor: hard gloss
-  const bone    = P(C.helmet, 0.18, 0.08, 1.0, 0.03);            // helmet shell
+  const VISOR = { smoke: [0x2a333c, 0.20], clear: [0x8fa3b3, 0.35], gold: [0xc9a04a, 0.95], blue: [0x2f5fa8, 0.85], mirror: [0xc4ccd4, 1.0] }[L.visor] || [0x2a333c, 0.20];
+  const glass   = P(VISOR[0], 0.05, VISOR[1], 1.0, 0.01);        // visor: hard gloss
+  const bone    = L.finish === 'matte' ? P(C.helmet, 0.62, 0.02, 0.0, 0.8)
+                                       : P(C.helmet, 0.18, 0.08, 1.0, 0.03);   // helmet shell
   const trim    = M(0x1b1b1e, 0.6, 0.05, true); trim.name = 'fabric';   // helmet rubber, soles
-  const boot    = P(0x1f1c1a, 0.52, 0.10, 0.45, 0.32, true); boot.name = 'fabric';
-  const glove   = P(0x232020, 0.62, 0.05, 0.3, 0.4, true); glove.name = 'fabric';
+  const boot    = P(L.bootColor, 0.52, 0.10, 0.45, 0.32, true); boot.name = 'fabric';
+  const glove   = P(L.gloveColor, 0.62, 0.05, 0.3, 0.4, true); glove.name = 'fabric';
+  // Cloth tops (tee, tank, hoodie) are matte cotton in the jacket colour.
+  const cotton  = M(C.jacket, 0.92, 0.0, true); cotton.name = 'fabric';
+  const cottonDk = M(shade(C.jacket, 0.72), 0.94, 0.0, true); cottonDk.name = 'fabric';
+  const hairMat = M(L.hairColor, L.hair === 'slick' ? 0.32 : 0.86, 0.0, true); hairMat.name = 'fabric';
+  const mix = (a, b, k) => new THREE.Color(a).lerp(new THREE.Color(b), k);
+  const stubbleMat = M(mix(C.skin, L.hairColor, 0.55), 0.95, 0.0); stubbleMat.name = 'fabric';
+  const ink = inkMaterial(L.tattoo === 'neck' ? 'none' : L.tattoo);
+  const neckInk = L.tattoo === 'neck' || L.tattoo === 'sleeve' ? inkMaterial('tribal') : null;
+  const gold    = M(0xd9ae4a, 0.28, 0.92); gold.name = 'metal';
+  const silver  = M(0xcfd4d9, 0.22, 0.95); silver.name = 'metal';
+  const dark    = M(0x121416, 0.35, 0.3);
+  const white   = M(0xe9e4da, 0.5, 0.0);
+  const lip     = M(shade(C.skin, 0.62), 0.7, 0.0);
+  const scarfMat = M(L.scarfColor, 0.88, 0.0, true); scarfMat.name = 'fabric';
+  const lensMat = P(0x3a5a7a, 0.05, 0.6, 1, 0.02); lensMat.name = 'lens';
   const accent  = M(C.accent, 0.55, 0.05, true);
   const steel   = M(0x8a9199, 0.34, 0.86); steel.name = 'metal';
 
@@ -98,6 +128,58 @@ export default function (THREE) {
     return new THREE.LatheGeometry(pts, sides, Math.PI / sides);
   };
   const R0 = S.limbR;
+  // LOOK MESHES ARE NOT MEASURED. The rig is normalised by its bounding box
+  // (see the bottom of this file) and a backpack or a ponytail must not slide
+  // the body along the saddle; `lk` tags a mesh the normaliser skips.
+  const lk = (m) => { m.userData.noMeasure = true; return m; };
+  const add = (parent, m) => { parent.add(lk(m)); return m; };
+
+  // TATTOOS: ink painted into a small DataTexture over the skin tone -- pure
+  // code, no canvas, no image. The lathe segments carry UVs with u around the
+  // limb and v down it (0 at the joint), so a pattern is a function of (u, v).
+  function inkMaterial(kind) {
+    if (!kind || kind === 'none') return skin;
+    const W = 64, H = 128, d = new Uint8Array(W * H * 4);
+    const rgb = (h) => [(h >> 16) & 255, (h >> 8) & 255, h & 255];
+    const base = rgb(C.skin), inkC = rgb(L.inkColor), fire = rgb(0xc8401a), gold2 = rgb(0xd09a2a);
+    const TAU = Math.PI * 2;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const u = x / W, v = y / H;
+      let col = null;
+      if (kind === 'tribal') {
+        const t = v - 0.5 - 0.16 * Math.sin(u * TAU * 2);
+        const w = 0.05 + 0.06 * Math.pow(Math.sin(u * TAU * 5), 2);
+        const thorn = Math.abs(v - 0.62 - 0.12 * Math.sin(u * TAU * 3 + 1.3)) < 0.022;
+        if (Math.abs(t) < w || thorn) col = inkC;
+      } else if (kind === 'sleeve') {
+        const n = Math.sin(u * TAU * 3 + v * 9) * Math.sin(v * 15 - u * TAU * 2);
+        const rose = Math.hypot(((u * 4) % 1) - 0.5, ((v * 5) % 1) - 0.5);
+        if (n > 0.32 || Math.abs(n - 0.05) < 0.05 || (rose < 0.18 && Math.abs(rose - 0.1) > 0.035)) col = inkC;
+        if (rose < 0.06) col = fire;
+        if (v < 0.05 || v > 0.93) col = null;
+      } else if (kind === 'flames') {
+        const h = 0.42 + 0.22 * Math.abs(Math.sin(u * TAU * 3)) + 0.07 * Math.sin(u * TAU * 7);
+        if (v > 1 - h) col = v > 1 - h + 0.05 ? (v > 1 - h + 0.16 ? gold2 : fire) : inkC;
+      } else if (kind === 'bands') {
+        const dm = Math.abs(((u * 8) % 1) - 0.5) + Math.abs(v - 0.46) * 5;
+        if (Math.abs(v - 0.34) < 0.03 || Math.abs(v - 0.58) < 0.03 || (dm < 0.3 && dm > 0.16)) col = inkC;
+      }
+      const c = col || base, i = (y * W + x) * 4;
+      // soft edge: ink sits IN the skin, so blend 85%
+      d[i] = col ? c[0] * 0.85 + base[0] * 0.15 : c[0];
+      d[i + 1] = col ? c[1] * 0.85 + base[1] * 0.15 : c[1];
+      d[i + 2] = col ? c[2] * 0.85 + base[2] * 0.15 : c[2];
+      d[i + 3] = 255;
+    }
+    const tex = new THREE.DataTexture(d, W, H);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.magFilter = THREE.LinearFilter;
+    tex.needsUpdate = true;
+    const m = new THREE.MeshStandardMaterial({ color: 0xffffff, map: tex, roughness: 0.74, metalness: 0 });
+    m.name = 'skin_ink';
+    return m;
+  }
 
   // ---- pelvis: the root everything hangs off -------------------------------
   // The spec gives the standing hip height; the rig is built so the PELVIS joint
@@ -145,7 +227,8 @@ export default function (THREE) {
   const TRUNK_LEN = T * 0.90;
   const trunkGeo = seg(TRUNK_LEN, TRUNK_PROF);
   trunkGeo.rotateX(Math.PI);                  // grow UP from the lumbar joint
-  const trunk = mk(trunkGeo, leather, 0, 0.0, 0);
+  const torsoMat = (leatherTop || TOP === 'vest') ? leather : cotton;
+  const trunk = mk(trunkGeo, torsoMat, 0, 0.0, 0);
   trunk.scale.set(TW * 0.5, 1, TD * 0.5);
   // the jacket's surface half-depth at height y: details are placed ON it, not
   // at a guessed constant (at a constant they float 3 cm off the waist)
@@ -168,7 +251,7 @@ export default function (THREE) {
     for (const [t, r] of [[-1.0, 0.0001], [-1.0, 0.62], [-0.8, 0.86], [-0.45, 1.0], [0.45, 1.0], [0.8, 0.86], [1.0, 0.62], [1.0, 0.0001]]) pts.push(new THREE.Vector2(r, t * half));
     const geo = new THREE.LatheGeometry(pts, 8);
     geo.rotateZ(Math.PI / 2);
-    const yoke = mk(geo, leather, 0, T * 0.94, TD * 0.03);
+    const yoke = mk(geo, torsoMat, 0, T * 0.94, TD * 0.03);
     yoke.scale.set(1, T * 0.15, TD * 0.46);
     torso.add(yoke);
   }
@@ -177,17 +260,18 @@ export default function (THREE) {
   // each a short run laid on the jacket surface at its own height
   // (the flat front face is 0.38 of the local radius each side of centre, so
   // every detail stays within |x| < 0.3 r and sits on it)
-  for (const z of [1, -1]) torso.add(mk(cbox(TW * 0.36, 0.012, 0.012, 0.003), seam, 0, T * 0.78, z * (surf(T * 0.78) + 0.004)));
-  for (let k = 0; k < 4; k++) {
+  const zipped = leatherTop || TOP === 'vest';
+  if (zipped) for (const z of [1, -1]) torso.add(mk(cbox(TW * 0.36, 0.012, 0.012, 0.003), seam, 0, T * 0.78, z * (surf(T * 0.78) + 0.004)));
+  for (let k = 0; zipped && k < 4; k++) {
     const y = T * (0.18 + k * 0.15);
     torso.add(mk(cbox(0.012, T * 0.15, 0.012, 0.003), seam, 0, y, -(surf(y) + 0.003)));
     const x = TW * (0.07 - k * 0.018);
     torso.add(mk(cbox(0.02, T * 0.155, 0.01, 0.003), seam, x, y, surf(y) + 0.002, 0, 0, -0.1));
     torso.add(mk(cbox(0.008, T * 0.155, 0.012, 0.002), steel, x, y, surf(y) + 0.006, 0, 0, -0.1));
   }
-  torso.add(mk(cbox(0.02, 0.034, 0.014, 0.004), steel, TW * 0.03, T * 0.70, surf(T * 0.70) + 0.01));   // the pull
+  if (zipped) torso.add(mk(cbox(0.02, 0.034, 0.014, 0.004), steel, TW * 0.03, T * 0.70, surf(T * 0.70) + 0.01));   // the pull
   // waistband: the hem of the jacket, a slightly proud ring over the belt
-  const hem = mk(new THREE.CylinderGeometry(1, 1, T * 0.08, 8), pad, 0, T * 0.03, 0);
+  const hem = mk(new THREE.CylinderGeometry(1, 1, T * 0.08, 8), zipped ? pad : cottonDk, 0, T * 0.03, 0);
   hem.scale.set(TW * 0.47, 1, TD * 0.47);
   torso.add(hem);
   // jacket collar: a short open cone, stood up and open at the front
@@ -195,7 +279,44 @@ export default function (THREE) {
     leather, 0, T * 1.14, TD * 0.02);
   collar.material = leather.clone(); collar.material.side = THREE.DoubleSide; collar.material.name = 'fabric';
   // (theta 0 is +Z, so the 0.36 pi gap left by thetaStart/Length is at the front)
-  torso.add(collar);
+  if (zipped) torso.add(collar);
+  else {
+    // a crew neck: a ribbed band where the cloth meets the neck
+    const crew = add(torso, mk(new THREE.TorusGeometry(S.headR * 0.62, S.headR * 0.09, 5, 12), cottonDk, 0, T * 1.10, TD * 0.03, Math.PI / 2 - 0.2));
+    crew.scale.set(1, 1.15, 1);
+  }
+  if (TOP === 'hoodie') {
+    // the hood lies folded behind the neck, the pouch pocket on the belly,
+    // two drawstrings hanging from the neckline
+    const hood = add(torso, mk(new THREE.SphereGeometry(S.headR * 1.05, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.55), cotton, 0, T * 1.02, -TD * 0.34, -1.25));
+    hood.scale.set(1.05, 0.62, 0.9);
+    hood.material = cotton.clone(); hood.material.side = THREE.DoubleSide;
+    add(torso, mk(cbox(TW * 0.52, T * 0.2, 0.03, 0.01), cottonDk, 0, T * 0.22, surf(T * 0.22) + 0.006));
+    for (const s of [-1, 1]) add(torso, mk(new THREE.CylinderGeometry(0.005, 0.005, T * 0.22, 4), white, s * S.headR * 0.28, T * 0.96, surf(T * 0.96) + 0.008, -0.1));
+  }
+  if (TOP === 'tank') {
+    // armholes cut deep: a darker rib round each one
+    for (const s of [-1, 1]) {
+      const rib = add(torso, mk(new THREE.TorusGeometry(S.limbR * 1.5, 0.008, 4, 10), cottonDk, s * S.shoulderW * 0.64, T * 0.9, TD * 0.02, 0, Math.PI / 2, 0));
+      rib.scale.set(1, 1.3, 1);
+    }
+  }
+  // ---- neck jewellery and scarf, on the chest ----
+  if (L.chain !== 'none') {
+    const met = L.chain === 'gold' ? gold : silver;
+    const ring = add(torso, mk(new THREE.TorusGeometry(S.headR * 0.78, 0.0065, 4, 22), met, 0, T * 1.06, TD * 0.1, Math.PI / 2 - 0.62));
+    ring.scale.set(1.08, 1, 1);
+    const pend = add(torso, mk(cbox(0.03, 0.04, 0.01, 0.004), met, 0, T * 0.93, surf(T * 0.93) + 0.012, 0, 0, Math.PI / 4));
+    pend.rotation.set(-0.15, 0, Math.PI / 4);
+  }
+  if (L.backpack) {
+    const by = T * 0.5;
+    add(torso, mk(cbox(TW * 0.6, T * 0.56, TD * 0.34, 0.03), cottonDk.color.getHex() === dark.color.getHex() ? trim : M(0x2b2a28, 0.85, 0.02, true), 0, by, -(surf(by) + TD * 0.15)));
+    add(torso, mk(cbox(TW * 0.5, T * 0.2, TD * 0.1, 0.02), accent, 0, by - T * 0.12, -(surf(by) + TD * 0.33)));
+    for (const s of [-1, 1]) {
+      add(torso, mk(cbox(0.035, T * 0.62, 0.012, 0.004), trim, s * TW * 0.17, T * 0.62, surf(T * 0.62) + 0.008, 0.08));
+    }
+  }
 
   // ---- head: helmet + visor + neck ----
   const neck = new THREE.Group();
@@ -205,38 +326,218 @@ export default function (THREE) {
   const head = new THREE.Group();
   head.position.set(0, S.neckLen, 0);
   neck.add(head);
+  const HC = new THREE.Vector3(0, S.headH * 0.34, 0);      // the lid's centre
+  const lid = [];                                           // meshes the helmet-size slider scales
+  const helm = (m) => { lid.push(m); return m; };
   // the default helmet: a full-face lid (gear_*.js overlays can replace it)
-  const shell = mk(new THREE.SphereGeometry(S.headR, 14, 10), bone, 0, S.headH * 0.34, 0);
+  if (L.helmet === 'full') {
+  const shell = helm(mk(new THREE.SphereGeometry(S.headR, 14, 10), bone, 0, S.headH * 0.34, 0));
   shell.scale.set(1, 1.08, 1.12);
   head.add(shell);
   // VISOR: a band cut from a slightly larger sphere, so it wraps the face
   // instead of floating in front of it as a flat card
-  const visor = mk(new THREE.SphereGeometry(S.headR * 1.035, 14, 4, Math.PI * 0.5 - 1.0, 2.0, 0.86, 0.90), glass, 0, S.headH * 0.34, 0);
+  const visor = helm(mk(new THREE.SphereGeometry(S.headR * 1.035, 14, 4, Math.PI * 0.5 - 1.0, 2.0, 0.86, 0.90), glass, 0, S.headH * 0.34, 0));
   visor.scale.set(1, 1.08, 1.12);
   visor.material.side = THREE.DoubleSide;
   head.add(visor);
   // chin bar, chamfered, and the rubber neck roll the lid sits on
   // CHIN BAR: the lower front of a larger sphere, pushed forward -- a guard
   // that wraps the jaw. It was a 1.3 x 0.9 head-radius cube on the face.
-  const chin = mk(new THREE.SphereGeometry(S.headR * 1.03, 14, 4, Math.PI * 0.5 - 1.15, 2.3, 1.62, 0.95), bone, 0, S.headH * 0.30, S.headR * 0.05);
+  const chin = helm(mk(new THREE.SphereGeometry(S.headR * 1.03, 14, 4, Math.PI * 0.5 - 1.15, 2.3, 1.62, 0.95), bone, 0, S.headH * 0.30, S.headR * 0.05));
   chin.scale.set(1.0, 1.3, 1.36);   // deeper and further forward than the shell: it has to read as a jaw guard
   chin.material = bone.clone(); chin.material.side = THREE.DoubleSide;
   head.add(chin);
-  const roll = mk(new THREE.CylinderGeometry(S.headR * 0.86, S.headR * 0.80, S.headH * 0.12, 10), trim, 0, -S.headH * 0.30, -S.headR * 0.08);
+  const roll = helm(mk(new THREE.CylinderGeometry(S.headR * 0.86, S.headR * 0.80, S.headH * 0.12, 10), trim, 0, -S.headH * 0.30, -S.headR * 0.08));
   roll.scale.set(1, 1, 1.1);
   head.add(roll);
+  }
+  if (L.helmet === 'open') {
+    // OPEN-FACE: the shell with the face cut out, a short peak, and the chin
+    // strap -- the face and whatever is on it stay in view.
+    const shell = helm(mk(new THREE.SphereGeometry(S.headR, 14, 10, Math.PI * 0.5 + 0.95, Math.PI * 2 - 1.9, Math.PI * 0.3, Math.PI * 0.32), bone, 0, S.headH * 0.34, 0));
+    shell.scale.set(1, 1.08, 1.12);
+    shell.material = bone.clone(); shell.material.side = THREE.DoubleSide;
+    const crown = helm(mk(new THREE.SphereGeometry(S.headR, 14, 5, 0, Math.PI * 2, 0, Math.PI * 0.3), shell.material, 0, S.headH * 0.34, 0));
+    crown.scale.set(1, 1.08, 1.12);
+    const peak = helm(mk(new THREE.SphereGeometry(S.headR * 1.04, 10, 3, Math.PI * 0.5 - 0.7, 1.4, Math.PI * 0.36, 0.1), bone, 0, S.headH * 0.34, S.headR * 0.12));
+    peak.scale.set(1, 1.08, 1.3);
+    peak.material = shell.material;
+    for (const s of [-1, 1]) helm(mk(cbox(0.012, S.headH * 0.5, 0.02, 0.003), trim, s * S.headR * 0.8, S.headH * 0.02, S.headR * 0.1, 0.2));
+    if (L.glasses === 'goggles') {
+      for (const s of [-1, 1]) helm(mk(new THREE.CylinderGeometry(S.headR * 0.2, S.headR * 0.22, S.headR * 0.16, 10), lensMat, s * S.headR * 0.3, S.headH * 0.34 + S.headR * 0.62, S.headR * 0.86, Math.PI / 2 - 0.5));
+    }
+  }
+  if (L.helmet === 'full' && L.glasses === 'goggles') {
+    // goggles pushed up on the lid, strap round the back
+    const strap = helm(mk(new THREE.TorusGeometry(S.headR * 1.1, S.headR * 0.06, 4, 20), dark, 0, S.headH * 0.34 + S.headR * 0.42, 0, Math.PI / 2 - 0.35));
+    strap.scale.set(0.98, 1.1, 1);
+    for (const s of [-1, 1]) helm(mk(new THREE.CylinderGeometry(S.headR * 0.2, S.headR * 0.22, S.headR * 0.16, 10), lensMat, s * S.headR * 0.3, S.headH * 0.34 + S.headR * 0.78, S.headR * 0.78, Math.PI / 2 - 0.75));
+  }
   // helmet stripe, hazard colour -- no glyphs
   // A MERIDIAN BAND cut from a sphere 1.5% larger than the shell, front and
   // back, so the stripe lies ON the lid. It used to be a box 1.46 head-heights
   // tall standing through the shell, which read as a fin / mohawk on top.
-  for (const ph of [Math.PI * 0.5, Math.PI * 1.5]) {
-    const band = mk(new THREE.SphereGeometry(S.headR * 1.015, 3, 8, ph - 0.2, 0.4, 0, Math.PI * 0.62), accent, 0, S.headH * 0.34, 0);
-    band.scale.set(1, 1.08, 1.12);
-    head.add(band);
+  if (L.helmet !== 'none' && L.stripe !== 'none') {
+    // 'racing' is the original single centre stripe; 'twin' two pinstripes
+    const offs = L.stripe === 'twin' ? [-0.2, 0.2] : [0];
+    const w = L.stripe === 'twin' ? 0.1 : 0.4;
+    for (const o of offs) for (const ph of [Math.PI * 0.5, Math.PI * 1.5]) {
+      const tl = L.helmet === 'open' && ph < Math.PI ? 0.3 : 0.62;
+      const band = helm(mk(new THREE.SphereGeometry(S.headR * 1.015, 3, 8, ph + o - w / 2, w, 0, Math.PI * tl), accent, 0, S.headH * 0.34, 0));
+      band.scale.set(1, 1.08, 1.12);
+      head.add(band);
+    }
   }
   // visor pivots
-  for (const s of [-1, 1]) head.add(mk(new THREE.CylinderGeometry(0.016, 0.016, 0.012, 8), steel, s * S.headR * 1.02, S.headH * 0.36, S.headR * 0.28, 0, 0, Math.PI / 2));
+  if (L.helmet === 'full') for (const s of [-1, 1]) head.add(helm(mk(new THREE.CylinderGeometry(0.016, 0.016, 0.012, 8), steel, s * S.headR * 1.02, S.headH * 0.36, S.headR * 0.28, 0, 0, Math.PI / 2)));
+  for (const m of lid) {
+    if (!m.parent) head.add(m);
+    // HELMET SIZE: every lid part scaled about the lid's centre, so a bigger lid
+    // grows round the head instead of floating off it
+    // (a lid is built round the head, so it grows with HEAD SIZE too)
+    // (lid size about the lid's centre, then head size about the neck, which
+    // is the point the bare skull grows from -- so the skull stays inside)
+    if (L.helmetSize !== 1 || L.headSize !== 1) {
+      m.position.sub(HC).multiplyScalar(L.helmetSize).add(HC).multiplyScalar(L.headSize);
+      m.scale.multiplyScalar(L.helmetSize * L.headSize);
+    }
+    // the stock full-face lid is measured as it always was; anything else is look
+    if (L.helmet !== 'full' || L.helmetSize !== 1 || L.headSize !== 1 || m.material === dark || m.material.name === 'lens') lk(m);
+  }
 
+  if (neckInk) neck.children[0].material = neckInk;
+  if (L.scarf === 'bandana') {
+    const knot = add(neck, mk(new THREE.TorusGeometry(S.headR * 0.5, S.headR * 0.16, 6, 12), scarfMat, 0, S.neckLen * 0.25, 0.005, Math.PI / 2));
+    knot.scale.set(1, 1.1, 1);
+    const flap = add(neck, mk(new THREE.ConeGeometry(S.headR * 0.42, S.headR * 0.7, 3), scarfMat, 0, -S.neckLen * 0.2, S.headR * 0.46, Math.PI, 0, 0));
+    flap.scale.set(1, 1, 0.35);
+  }
+  // THE HEAD UNDER THE LID. Built whenever the face shows (open helmet or
+  // none): skull, jaw, ears, nose, eyes and brows as chunky low-poly masses in
+  // the STYLE-LOCK manner -- readable at race distance, not a portrait.
+  // THE BARE HEAD matches the body's heroic scale (the torso and shoulders are
+  // exaggerated per STYLE-LOCK; a true-to-life head on them read as a pinhead),
+  // times the player's HEAD SIZE slider.
+  const hR = S.headR * 0.98 * L.headSize, hy = S.headH * 0.30 * L.headSize;
+  if (faceShown) {
+    const skull = add(head, mk(new THREE.SphereGeometry(hR, 14, 10), skin, 0, hy, 0));
+    skull.scale.set(0.9, 1.08, 1.0);
+    const jawR = hR * 0.72, jawY = hy - hR * 0.45, jawZ = hR * 0.26;
+    const jaw = add(head, mk(new THREE.SphereGeometry(jawR, 12, 8), skin, 0, jawY, jawZ));
+    jaw.scale.set(0.95, 0.82, 0.95);
+    const faceZ = (y, x = 0) => {   // skull surface depth at (x, y) relative to its centre
+      const nx = x / (hR * 0.9), ny = y / (hR * 1.08);
+      return hR * Math.sqrt(Math.max(0.05, 1 - nx * nx - ny * ny));
+    };
+    add(head, mk(cbox(hR * 0.22, hR * 0.36, hR * 0.3, 0.01), skin, 0, hy - hR * 0.14, faceZ(-hR * 0.14) + hR * 0.02, -0.12));
+    for (const s of [-1, 1]) {
+      const ex = s * hR * 0.33, ey = hy + hR * 0.1;
+      add(head, mk(new THREE.SphereGeometry(hR * 0.13, 8, 6), white, ex, ey, faceZ(hR * 0.1, ex) - hR * 0.06));
+      add(head, mk(new THREE.SphereGeometry(hR * 0.075, 6, 4), dark, ex, ey, faceZ(hR * 0.1, ex) + hR * 0.03));
+      add(head, mk(cbox(hR * 0.34, hR * 0.08, hR * 0.1, 0.01), hairMat, ex, ey + hR * 0.2, faceZ(hR * 0.3, ex) + hR * 0.01, 0.1, 0, s * 0.12));
+      const ear = add(head, mk(new THREE.SphereGeometry(hR * 0.24, 8, 6), skin, s * hR * 0.88, hy - hR * 0.02, -hR * 0.05));
+      ear.scale.set(0.42, 1, 0.7);
+      if (L.earring) add(head, mk(new THREE.TorusGeometry(hR * 0.07, hR * 0.02, 4, 10), gold, s * hR * 0.93, hy - hR * 0.26, -hR * 0.02, 0, Math.PI / 2, 0));
+    }
+    const mouthZ = jawZ + jawR * 0.95 * 0.96;
+    add(head, mk(cbox(hR * 0.38, hR * 0.06, hR * 0.06, 0.01), lip, 0, jawY + hR * 0.02, mouthZ));
+    // ---- facial hair ----
+    const beardMat = L.beard === 'stubble' ? stubbleMat : hairMat;
+    if (L.beard === 'full' || L.beard === 'stubble') {
+      const k = L.beard === 'full' ? 1.1 : 1.02;
+      const b = add(head, mk(new THREE.SphereGeometry(jawR * k, 12, 8, 0, Math.PI, Math.PI * 0.3, Math.PI * 0.7), beardMat, 0, jawY - (k - 1) * jawR * 0.6, jawZ));
+      b.scale.set(0.95, 0.82, 0.95);
+      b.material = beardMat.clone(); b.material.side = THREE.DoubleSide;
+    }
+    if (L.beard === 'goatee') add(head, mk(cbox(hR * 0.26, hR * 0.3, hR * 0.14, 0.02), hairMat, 0, jawY - hR * 0.3, mouthZ - hR * 0.12, 0.3));
+    if (L.beard === 'goatee' || L.beard === 'moustache' || L.beard === 'full') {
+      add(head, mk(cbox(hR * 0.5, hR * 0.1, hR * 0.12, 0.02), hairMat, 0, jawY + hR * 0.12, mouthZ + hR * 0.01));
+    }
+    // ---- eyewear ----
+    const ey = hy + hR * 0.1, ez = faceZ(hR * 0.1, hR * 0.33) + hR * 0.12;
+    if (L.glasses === 'shades' || L.glasses === 'aviator') {
+      const lens = L.glasses === 'shades' ? dark : P(0x6a4a22, 0.08, 0.9, 1.0, 0.02);
+      for (const s of [-1, 1]) {
+        if (L.glasses === 'shades') add(head, mk(cbox(hR * 0.4, hR * 0.24, hR * 0.05, 0.012), lens, s * hR * 0.33, ey, ez));
+        else { const l = add(head, mk(new THREE.SphereGeometry(hR * 0.2, 10, 6), lens, s * hR * 0.33, ey - hR * 0.02, ez)); l.scale.set(1.05, 0.88, 0.25); }
+        add(head, mk(cbox(0.006, 0.008, hR * 0.95, 0.002), L.glasses === 'aviator' ? gold : dark, s * hR * 0.56, ey + hR * 0.05, ez - hR * 0.46));
+      }
+      add(head, mk(cbox(hR * 0.24, 0.008, 0.008, 0.002), L.glasses === 'aviator' ? gold : dark, 0, ey + hR * 0.07, ez));
+    }
+    if (L.glasses === 'goggles' && L.helmet === 'none') {
+      const strap = add(head, mk(new THREE.TorusGeometry(hR * 0.98, hR * 0.07, 4, 18), dark, 0, ey, 0, Math.PI / 2));
+      strap.scale.set(0.95, 1.04, 1);
+      for (const s of [-1, 1]) add(head, mk(new THREE.CylinderGeometry(hR * 0.2, hR * 0.22, hR * 0.18, 10), lensMat, s * hR * 0.33, ey, ez, Math.PI / 2));
+    }
+  }
+  // ---- hair ----
+  // Bare head: the whole style. Under a lid: only what a lid cannot hold in (a
+  // ponytail, long hair, dreads) -- and a mohawk becomes a crest ON the lid,
+  // which is what riders actually do with one.
+  if (L.helmet === 'none') buildHair(true);
+  else buildHair(false);
+  function buildHair(full) {
+    const cap = (k, theta, tilt, mat) => {
+      const c = add(head, mk(new THREE.SphereGeometry(hR * k, 14, 8, 0, Math.PI * 2, 0, theta), mat, 0, hy, 0, tilt));
+      c.scale.set(0.9, 1.08, 1.0);
+      c.material = mat.clone(); c.material.side = THREE.DoubleSide;
+      return c;
+    };
+    const H = L.hair;
+    if (full) {
+      if (H === 'short' || H === 'long' || H === 'ponytail' || H === 'bun' || H === 'dreads') cap(1.07, 1.6, -0.42, hairMat);
+      if (H === 'buzz') cap(1.02, 1.62, -0.42, stubbleMat);
+      if (H === 'mohawk' || H === 'spikes') cap(1.015, 1.62, -0.42, stubbleMat);
+      if (H === 'slick') { cap(1.06, 1.5, -0.5, hairMat); add(head, mk(new THREE.SphereGeometry(hR * 0.36, 8, 6), hairMat, 0, hy + hR * 0.86, hR * 0.46)).scale.set(1.6, 0.7, 1); }
+      if (H === 'afro') {
+        const a = cap(1.68, 2.0, -0.8, hairMat);
+        a.position.set(0, hy + hR * 0.3, -hR * 0.1);
+      }
+      if (H === 'bun') add(head, mk(new THREE.SphereGeometry(hR * 0.38, 10, 8), hairMat, 0, hy + hR * 0.86, -hR * 0.62));
+      if (H === 'spikes') {
+        for (let i = 0; i < 16; i++) {
+          const a = i * 2.39996, pol = 0.15 + 1.05 * Math.sqrt((i + 0.5) / 16);
+          const dir = new THREE.Vector3(Math.sin(pol) * Math.cos(a), Math.cos(pol), Math.sin(pol) * Math.sin(a));
+          if (dir.z > 0.55 && dir.y < 0.75) continue;     // keep the forehead clear
+          const sp = add(head, mk(new THREE.ConeGeometry(hR * 0.14, hR * 0.55, 5), hairMat, dir.x * hR * 1.0, hy + dir.y * hR * 1.08, dir.z * hR));
+          sp.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+        }
+      }
+    }
+    if (H === 'mohawk') {
+      // the crest: fins stood radially along the midline, tallest mid-scalp
+      const onLid = !full, R = onLid ? S.headR * 1.1 * L.helmetSize * L.headSize : hR * 1.02, cy = onLid ? HC.y * L.headSize : hy;
+      const N = 9;
+      for (let i = 0; i < N; i++) {
+        const phi = 0.55 - (i / (N - 1)) * 2.35;          // front -> nape
+        const h = (onLid ? 0.26 : 0.4) * hR * (0.7 + 0.6 * Math.sin(Math.PI * (i + 0.5) / N));
+        const r = R + h * 0.5;
+        const fin = add(head, mk(cbox(hR * (onLid ? 0.1 : 0.16), h, hR * 0.36, 0.01), hairMat,
+          0, cy + Math.cos(phi) * r * (onLid ? 1.08 : 1.08), Math.sin(phi) * r * (onLid ? 1.12 : 1), phi));
+        if (onLid) lid.push(fin);
+      }
+    }
+    // what hangs below a lid as well as below a bare head
+    if (H === 'long') {
+      const cur = add(head, mk(new THREE.CylinderGeometry(hR * 1.0, hR * 1.2, hR * 1.7, 12, 1, true, Math.PI * 0.42, Math.PI * 1.16), hairMat, 0, hy - hR * 0.72, -hR * 0.06));
+      cur.scale.set(0.95, 1, 0.95);
+      cur.material = hairMat.clone(); cur.material.side = THREE.DoubleSide;
+    }
+    if (H === 'ponytail') {
+      const tail = add(head, mk(seg(hR * 1.5, [[0, hR * 0.2], [0.3, hR * 0.24], [0.8, hR * 0.14], [1, hR * 0.04]], 6), hairMat, 0, hy - hR * 0.1, -hR * 0.98, 0.5));
+      add(head, mk(new THREE.TorusGeometry(hR * 0.19, hR * 0.05, 4, 8), accent, 0, hy - hR * 0.18, -hR * 1.02, 0.5 + Math.PI / 2));
+      void tail;
+    }
+    if (H === 'dreads') {
+      for (let i = 0; i < 13; i++) {
+        const a = Math.PI * (0.3 + 1.4 * i / 12);         // round the back
+        const x = Math.cos(a) * hR * 0.92, z = -Math.abs(Math.sin(a)) * hR * 0.92 + (Math.sin(a) > 0 ? 0 : 0);
+        const len = hR * (1.5 + 0.45 * ((i * 7) % 5) / 4);
+        const out = full ? 1 : 1.3;                        // under a lid they fall from its rim
+        add(head, mk(seg(len, [[0, hR * 0.1], [1, hR * 0.07]], 5), hairMat, x * out, hy + hR * (full ? 0.05 : -0.2), z * out, -0.14, 0, -x / hR * 0.2));
+      }
+    }
+  }
   // ---- arms: shoulder -> upper -> elbow -> forearm -> glove ----
   // EVERY length here is the spec's, and the joint positions are derived from
   // the segment lengths, so changing the spec cannot leave a limb floating.
@@ -253,18 +554,42 @@ export default function (THREE) {
     const shoulder = new THREE.Group();
     shoulder.position.set(s * S.shoulderW * 0.76, T * 0.97, TD * 0.04);
     torso.add(shoulder);
-    shoulder.add(mk(new THREE.SphereGeometry(R0 * 1.29, 8, 6), leather, 0, 0, 0));
+    // WHAT COVERS THE ARM: leathers all the way down; a hoodie's cotton; a
+    // tee's short sleeve over bare (maybe inked) skin; a tank or vest, bare.
+    const sleeveMat = leatherTop ? leather : TOP === 'hoodie' ? cotton : ink;
+    // (a bare or cotton shoulder is the arm's own size -- the leathers' 1.29 is
+    // the armour under the hide, and on skin it read as a ball joint)
+    shoulder.add(mk(new THREE.SphereGeometry(R0 * (leatherTop ? 1.29 : bareArms ? 1.0 : 1.12), 8, 6), bareArms ? ink : leatherTop ? leather : cotton, 0, 0, 0));
     // shoulder armour: a dome over the ball, tipped outward -- a cap that
     // follows the shoulder rather than a box standing on it
-    const cap = mk(new THREE.SphereGeometry(R0 * 1.42, 8, 3, 0, Math.PI * 2, 0, Math.PI * 0.5), padIn, s * R0 * 0.06, R0 * 0.02, 0, 0, 0, -s * 0.22);
-    shoulder.add(cap);
+    if (leatherTop) {
+      const cap = mk(new THREE.SphereGeometry(R0 * 1.42, 8, 3, 0, Math.PI * 2, 0, Math.PI * 0.5), padIn, s * R0 * 0.06, R0 * 0.02, 0, 0, 0, -s * 0.22);
+      shoulder.add(cap);
+    }
+    if (L.spikes) {
+      // studded pauldron: a steel dome and three spikes fanned outward
+      const dome = add(shoulder, mk(new THREE.SphereGeometry(R0 * 1.5, 8, 3, 0, Math.PI * 2, 0, Math.PI * 0.5), steel, s * R0 * 0.1, R0 * 0.1, 0, 0, 0, -s * 0.3));
+      void dome;
+      for (let k = 0; k < 3; k++) {
+        const sp = add(shoulder, mk(new THREE.ConeGeometry(R0 * 0.26, R0 * 1.1, 6), steel,
+          s * R0 * (0.35 + 0.1 * k), R0 * 1.55, (k - 1) * R0 * 0.62, (k - 1) * 0.35, 0, -s * (0.45 + 0.1 * k)));
+        void sp;
+      }
+    }
 
     const upper = new THREE.Group();          // pivots AT the shoulder
     shoulder.add(upper);
     // deltoid -> bicep -> narrowing to the elbow
-    upper.add(mk(seg(S.upperArm, [[0.0, R0 * 1.05], [0.22, R0 * 1.10], [0.5, R0 * 1.0], [0.85, R0 * 0.84], [1.0, R0 * 0.80]]), leather, 0, 0, 0));
+    // (a bare arm is a touch slimmer than a sleeved one)
+    const bk = leatherTop || TOP === 'hoodie' ? 1 : 0.9;
+    upper.add(mk(seg(S.upperArm, [[0.0, R0 * 1.05 * bk], [0.22, R0 * 1.10 * bk], [0.5, R0 * 1.0 * bk], [0.85, R0 * 0.84 * bk], [1.0, R0 * 0.80 * bk]]), sleeveMat, 0, 0, 0));
     // sleeve seam, and an accent piping down the outside of the sleeve
-    upper.add(mk(cbox(0.01, S.upperArm * 0.8, 0.012, 0.003), accent, s * R0 * 1.0, -S.upperArm * 0.48, 0));
+    if (leatherTop) upper.add(mk(cbox(0.01, S.upperArm * 0.8, 0.012, 0.003), accent, s * R0 * 1.0, -S.upperArm * 0.48, 0));
+    if (TOP === 'tee') {
+      // the short sleeve, open at the hem
+      add(upper, mk(seg(S.upperArm * 0.46, [[0.0, R0 * 1.2], [0.5, R0 * 1.16], [1.0, R0 * 1.12]]), cotton, 0, R0 * 0.1, 0));
+      add(upper, mk(new THREE.CylinderGeometry(R0 * 1.14, R0 * 1.14, S.upperArm * 0.05, 8), cottonDk, 0, -S.upperArm * 0.43, 0));
+    }
     // REST POSE, from the ride table. The race re-asserts it every frame, but a
     // rig correct in its rest pose already reads as a rider in the showroom.
     upper.rotation.x = R.upperArm ?? -1.04;
@@ -273,29 +598,37 @@ export default function (THREE) {
     const elbow = new THREE.Group();
     elbow.position.set(0, -S.upperArm, 0);
     upper.add(elbow);
-    elbow.add(mk(new THREE.SphereGeometry(R0 * 0.88, 8, 6), leather, 0, 0, 0));
+    const foreMat = leatherTop ? leather : TOP === 'hoodie' ? cotton : ink;
+    elbow.add(mk(new THREE.SphereGeometry(R0 * 0.88 * bk, 8, 6), foreMat, 0, 0, 0));
     // ELBOW PAD on the point of the elbow. The arm flexes toward local +Z, so
     // the point is on -Z; the pad rides on the elbow joint, halfway between
     // the upper arm and the forearm, as a hard cap does.
-    elbow.add(mk(cbox(R0 * 1.45, R0 * 1.55, R0 * 0.55, 0.012), pad, 0, -R0 * 0.25, -R0 * 0.78));
+    if (leatherTop) elbow.add(mk(cbox(R0 * 1.45, R0 * 1.55, R0 * 0.55, 0.012), pad, 0, -R0 * 0.25, -R0 * 0.78));
     elbow.rotation.x = R.elbow ?? -0.32;
 
     const fore = new THREE.Group();           // pivots AT the elbow
     elbow.add(fore);
-    fore.add(mk(seg(S.forearm * 0.86, [[0.0, R0 * 0.86], [0.28, R0 * 0.92], [0.75, R0 * 0.74], [1.0, R0 * 0.68]]), leather, 0, 0, 0));
-    // GAUNTLET: the glove's flared cuff over the sleeve
-    fore.add(mk(new THREE.CylinderGeometry(R0 * 0.98, R0 * 0.80, S.forearm * 0.26, 8), glove, 0, -S.forearm * 0.86, 0));
-    fore.add(mk(cbox(R0 * 0.5, 0.012, R0 * 0.3, 0.003), steel, s * R0 * 0.72, -S.forearm * 0.80, 0, 0, 0, Math.PI / 2));  // cuff strap
+    fore.add(mk(seg(S.forearm * 0.86, [[0.0, R0 * 0.86 * bk], [0.28, R0 * 0.92 * bk], [0.75, R0 * 0.74 * bk], [1.0, R0 * 0.68 * bk]]), foreMat, 0, 0, 0));
+    if (TOP === 'hoodie') add(fore, mk(new THREE.CylinderGeometry(R0 * 0.8, R0 * 0.8, S.forearm * 0.1, 8), cottonDk, 0, -S.forearm * 0.8, 0));
+    // GAUNTLET: the glove's flared cuff over the sleeve (a race glove only)
+    if (L.gloves === 'full') {
+      fore.add(mk(new THREE.CylinderGeometry(R0 * 0.98, R0 * 0.80, S.forearm * 0.26, 8), glove, 0, -S.forearm * 0.86, 0));
+      fore.add(mk(cbox(R0 * 0.5, 0.012, R0 * 0.3, 0.003), steel, s * R0 * 0.72, -S.forearm * 0.80, 0, 0, 0, Math.PI / 2));  // cuff strap
+    } else {
+      // a bare wrist down to the hand
+      add(fore, mk(new THREE.CylinderGeometry(R0 * 0.62, R0 * 0.6, S.forearm * 0.2, 8), skin, 0, -S.forearm * 0.9, 0));
+    }
     // THE GLOVED FIST, gripping. Centred where the IK puts the grip
     // (0, -forearm - hand/2, 0.01): palm block, a curled finger block wrapped
     // FORWARD round the bar, knuckle ridge on top, thumb on the INSIDE (toward
     // the tank) closing the ring. Four masses; at race distance it reads as a
     // hand holding something, where the old single box read as a brick.
     const hy = -S.forearm - S.hand * 0.5, hz = 0.01;
-    fore.add(mk(cbox(R0 * 1.40, S.hand * 0.62, R0 * 1.10, 0.012), glove, 0, hy + S.hand * 0.16, hz - R0 * 0.12));
-    fore.add(mk(cbox(R0 * 1.34, S.hand * 0.40, R0 * 0.80, 0.014), glove, 0, hy - S.hand * 0.24, hz + R0 * 0.30, -0.45, 0, 0));
-    fore.add(mk(cbox(R0 * 1.30, S.hand * 0.16, R0 * 0.50, 0.008), pad, 0, hy + S.hand * 0.02, hz - R0 * 0.62));      // knuckle guard
-    fore.add(mk(cbox(R0 * 0.44, S.hand * 0.42, R0 * 0.48, 0.010), glove, -s * R0 * 0.74, hy - S.hand * 0.02, hz + R0 * 0.30, 0.35, 0, s * 0.30));
+    const palm = L.gloves === 'none' ? skin : glove, fingers = L.gloves === 'full' ? glove : skin;
+    fore.add(mk(cbox(R0 * 1.40, S.hand * 0.62, R0 * 1.10, 0.012), palm, 0, hy + S.hand * 0.16, hz - R0 * 0.12));
+    fore.add(mk(cbox(R0 * 1.34, S.hand * 0.40, R0 * 0.80, 0.014), fingers, 0, hy - S.hand * 0.24, hz + R0 * 0.30, -0.45, 0, 0));
+    if (L.gloves === 'full') fore.add(mk(cbox(R0 * 1.30, S.hand * 0.16, R0 * 0.50, 0.008), pad, 0, hy + S.hand * 0.02, hz - R0 * 0.62));      // knuckle guard
+    fore.add(mk(cbox(R0 * 0.44, S.hand * 0.42, R0 * 0.48, 0.010), fingers, -s * R0 * 0.74, hy - S.hand * 0.02, hz + R0 * 0.30, 0.35, 0, s * 0.30));
 
     arms[side] = { shoulder, upper, elbow, fore };
   }
@@ -421,7 +754,7 @@ export default function (THREE) {
   g.updateMatrixWorld(true);
   g.traverse((n) => {
     const p = n.isMesh && n.geometry && n.geometry.attributes && n.geometry.attributes.position;
-    if (!p) return;
+    if (!p || n.userData.noMeasure) return;
     if (n.isInstancedMesh) {
       for (let c = 0; c < n.count; c++) {
         n.getMatrixAt(c, im);

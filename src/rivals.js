@@ -134,7 +134,7 @@ export class Rival {
     // hero bike and the base rider recoloured, and the pack read as six copies.
     this.kit = packKit(index);
     const bikeSrc = bikeSource(assets, this.kit.bike);
-    const riderSrc = assets.rider;
+    const riderSrc = assets.npcRider || assets.rider;
     this.group = new THREE.Group();
 
     // cloneWithJoints, not a bare .clone() -- see the long note in player.js.

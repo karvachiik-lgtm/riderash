@@ -11,6 +11,7 @@ import { buildFinish, placeFinish } from './finishline.js';
 import { TrackDress } from './trackdress.js';
 import { setLanePlan } from './lanes.js';
 import { CrossTraffic } from './crosstraffic.js';
+import { placeHazards, HazardView } from './hazards.js';
 import { Flagger } from './flagger.js';
 import { trafficContact, applyTrafficHit } from './traffic.js';
 import { buildLighting, followSun } from './lighting.js';
@@ -165,6 +166,7 @@ let finishGantry = null;   // the FINISH banner, moved to each race's line in __
 let trackDress = null;     // chevrons, rails, warnings, countdown boards, start line (per course)
 let flagger = null;        // the starter in the road with the chequered flag
 let crossTraffic = null;   // cars coming across at the crossroads
+let hazardView = null;     // oil slicks and gravel on the deck
 let roadGroup = null, roadsideGroup = null;   // rebuilt when a course's lane layout differs (lanes.js)
 let raceCounter = 0;       // races started this session, so a replayed event gets a new outfit
 
@@ -471,6 +473,7 @@ async function init() {
   scene.add(finishGantry);
   trackDress = new TrackDress(scene);
   try { flagger = new Flagger(scene); } catch (e) { console.warn('[riderash] flagger:', e); flagger = null; }
+  try { hazardView = new HazardView(scene); } catch (e) { console.warn('[riderash] hazards:', e); }
   try { crossTraffic = new CrossTraffic(scene); window.__CROSS__ = crossTraffic; } catch (e) { console.warn('[riderash] cross traffic:', e); crossTraffic = null; }
   world.traffic = traffic;
 
@@ -1656,6 +1659,16 @@ function stepGame(dt) {
     }
   }
 
+  // OIL / GRAVEL: tell the player the moment the tyres go light
+  {
+    const hz = player.phys.onHazard;
+    if (hz && hz !== state.lastHazard) {
+      state.warn = hz === 'oil' ? 'OIL!' : 'GRAVEL';
+      if (hz === 'gravel') audio.oneShot('scrape', 0.5, 0.8);
+    }
+    state.lastHazard = hz;
+  }
+
   // CROSS TRAFFIC at the crossroads: T-bones are wipeouts above a walking pace
   if (crossTraffic && !window.__TRAFFIC_OFF__) {
     crossTraffic.update(dt, world.parts.filter((r) => r.phys).map((r) => r.phys.s));
@@ -1870,6 +1883,7 @@ window.__START__ = () => {
   try { if (trackDress) window.__TRACKDRESS__ = trackDress.build(state.finishS); } catch (e) { console.warn('[riderash] trackdress:', e); }
   // a different starter outfit every race (window.__FLAGGER_OUTFIT__ pins one)
   if (crossTraffic) crossTraffic.reset();
+  try { window.__HAZARDS__ = placeHazards(spine, state.finishS); if (hazardView) hazardView.build(); } catch (e) { console.warn('[riderash] hazards:', e); }
   if (flagger) {
     flagger.reset(window.__FLAGGER_OUTFIT__ != null ? window.__FLAGGER_OUTFIT__ : (career.state.race || 0) + (career.state.wins || 0) * 3 + raceCounter++);
   }

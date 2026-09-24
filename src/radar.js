@@ -166,7 +166,7 @@ export class Radar {
       if (roadPx > 7) {
         const L = [], Rr = [], divs = [];
         for (let s = Math.max(0, s0); s <= s1; s += STEP_M) {
-          const c = centreAt(-s), t = centreTangent(-s), nx = -t.z, nz = t.x;
+          const c = centreAt(-s), t = centreTangent(-s), nx = t.z, nz = -t.x;
           const eR = edgeAt(s, 1), eL = edgeAt(s, -1);
           this._project(c.x + nx * eR, c.z + nz * eR, px, pz, fwdX, fwdZ, pt); Rr.push(pt[0], pt[1]);
           this._project(c.x - nx * eL, c.z - nz * eL, px, pz, fwdX, fwdZ, pt); L.push(pt[0], pt[1]);
@@ -191,7 +191,7 @@ export class Radar {
         }
         for (const cs of crossings()) {
           if (cs < s0 || cs > s1) continue;
-          const c = centreAt(-cs), t = centreTangent(-cs), nx = -t.z, nz = t.x;
+          const c = centreAt(-cs), t = centreTangent(-cs), nx = t.z, nz = -t.x;
           g.beginPath();
           this._project(c.x - nx * 60, c.z - nz * 60, px, pz, fwdX, fwdZ, pt); g.moveTo(pt[0], pt[1]);
           this._project(c.x + nx * 60, c.z + nz * 60, px, pz, fwdX, fwdZ, pt); g.lineTo(pt[0], pt[1]);

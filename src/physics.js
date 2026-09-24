@@ -31,6 +31,7 @@ const CFG_ROAD_W_HALF = CFG.ROAD_W / 2;
 // THE EDGE MOVES (lanes.js): the tarmac edge on the side a body is on, at its
 // distance. Open at a crossroads, where the cross road's deck is tarmac too.
 import { edgeAt, crossingNear, medianAt, MEDIAN_HALF } from './lanes.js';
+import { hazardAt, HAZ } from './hazards.js';
 function edgeFor(s, lateral) {
   const e = edgeAt(Math.max(0, s || 0), lateral >= 0 ? 1 : -1);
   // a little extra room at a crossroads (no kerb or rail there), not so much
@@ -1554,6 +1555,20 @@ export class BikePhys {
     this.slipRear += (targetR - this.slipRear) * relax;
 
     this.grip = (this.onRoad ? PHYS.ONROAD_GRIP : PHYS.OFROAD_GRIP) * this.machine.grip;
+    // OIL AND GRAVEL (hazards.js): the tyres lose most of their grip on an oil
+    // slick, some of it on gravel, which also drags. A slick also twitches the
+    // rear: the bike steps out a little as it crosses.
+    const hz = this.onRoad && !this.airborne ? hazardAt(this.s, this.lateral) : null;
+    this.onHazard = hz ? hz.kind : null;
+    if (hz) {
+      if (hz.kind === 'oil') {
+        this.grip *= HAZ.OIL_GRIP;
+        this.yawRate += (Math.sin(this.s * 1.7) * 0.6 + (this.lean || 0) * 0.8) * h * Math.min(1, this.speed / 25);
+      } else {
+        this.grip *= HAZ.GRAVEL_GRIP;
+        this.speed = Math.max(0, this.speed - HAZ.GRAVEL_DRAG * h);
+      }
+    }
     // THE FRICTION CIRCLE, NOW APPLIED THE WAY THE REFERENCE DEFINES IT.
     //
     // A tyre has ONE grip budget and it is shared between cornering and braking.

@@ -453,7 +453,8 @@ export class Scenery {
     // trees standing in its outer lanes.
     const widen = (s, lat) => {
       const side = lat >= 0 ? 1 : -1;
-      return lat + side * (edgeAt(Math.max(0, s), side) - CFG.ROAD_W / 2);
+      // (this frame's normal is the rider's LEFT: see traffic.js on the sign)
+      return lat + side * (edgeAt(Math.max(0, s), -side) - CFG.ROAD_W / 2);
     };
     const put = (key, s, lat, o = {}) => {
       if (!this.kit.has(key)) return;

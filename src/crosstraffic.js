@@ -86,7 +86,7 @@ export class CrossTraffic {
       // drive on the right of the cross road: +dir traffic on one side of its centre line
       u.sOff = -u.dir * CROSS.LANE;
       centreAt(-(u.cs + u.sOff), c); centreTangent(-(u.cs + u.sOff), tg);
-      const nx = -tg.z, nz = tg.x;
+      const nx = tg.z, nz = -tg.x;         // + lateral = the rider's right (traffic.js)
       car.position.set(c.x + nx * u.x, c.y, c.z + nz * u.x);
       // facing along the cross road, the way it is going
       // (vehicle models face their local -Z: see traffic.js, where an oncoming

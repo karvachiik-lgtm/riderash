@@ -250,7 +250,11 @@ export function buildRoad() {
   // THE ROAD'S EDGES MOVE (lanes.js): every strip is built between two lateral
   // offsets that are functions of distance. `build(width, offset)` is the old
   // fixed-width call, kept as a wrapper.
-  const E = (s, side) => edgeAt(Math.max(0, s), side);
+  // THE SIDE SIGN. Every strip below is offset along (-t.z, t.x) of
+  // centreTangent, which points BACK along the road: that normal is the
+  // rider's LEFT. lanes.js speaks in the rider's frame (+1 = right), so the
+  // level's +side is lanes' -side.
+  const E = (s, side) => edgeAt(Math.max(0, s), -side);
   const buildF = (fA, fB, material, yOff, uvScale) => {
     const pos = [], uv = [], idx = [];
     for (let i = -ROAD_BEHIND_SEGS; i <= N; i++) {
@@ -374,7 +378,7 @@ export function buildRoad() {
     lanesAt(Math.max(0, -z), LL);
     const c = centreAt(z), t = centreTangent(z);
     const nx = -t.z, nz = t.x, yaw = Math.atan2(t.x, t.z);
-    for (const [side, n] of [[1, LL.r], [-1, LL.l]]) {
+    for (const [side, n] of [[-1, LL.r], [1, LL.l]]) {         // (level frame: -1 is the rider's right)
       if (n < 1.5) continue;
       const off = side * LANE;
       dp.set(c.x + nx * off, c.y + 0.017, c.z + nz * off);
@@ -441,6 +445,8 @@ export function buildRoad() {
     const z = -cs, c = centreAt(z), t = centreTangent(z);
     const yaw = Math.atan2(t.x, t.z);
     const cross = new THREE.Mesh(new THREE.PlaneGeometry(CROSS_HALF * 2, 420), asphalt);
+    // (the holder's local +x is the rider's RIGHT -- yaw from centreTangent
+    // maps x to (t.z, -t.x) -- so lanes.js edges are used directly here)
     const holder = new THREE.Group();
     holder.position.set(c.x, c.y - 0.004, c.z);
     holder.rotation.y = yaw;
@@ -449,18 +455,18 @@ export function buildRoad() {
     holder.add(cross);
     for (const d of [-1, 1]) {
       // stop lines across our carriageway, and the cross road's own centre line
-      const stop = new THREE.Mesh(new THREE.BoxGeometry(E(cs, 1) + E(cs, -1), 0.012, 0.4), line);
-      stop.position.set((E(cs, 1) - E(cs, -1)) / 2, 0.02, d * (CROSS_HALF + 1.2));
+      const stop = new THREE.Mesh(new THREE.BoxGeometry(edgeAt(cs, 1) + edgeAt(cs, -1), 0.012, 0.4), line);
+      stop.position.set((edgeAt(cs, 1) - edgeAt(cs, -1)) / 2, 0.02, d * (CROSS_HALF + 1.2));
       holder.add(stop);
       for (let k = 0; k < 6; k++) {
         const zeb = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.012, 2.6), line);
-        zeb.position.set(-E(cs, -1) + 1 + k * ((E(cs, 1) + E(cs, -1) - 2) / 5), 0.019, d * (CROSS_HALF + 3.2));
+        zeb.position.set(-edgeAt(cs, -1) + 1 + k * ((edgeAt(cs, 1) + edgeAt(cs, -1) - 2) / 5), 0.019, d * (CROSS_HALF + 3.2));
         holder.add(zeb);
       }
     }
     // the cross road's centre line, stopping at our kerbs
     for (const d of [-1, 1]) {
-      const from = d > 0 ? E(cs, 1) + 1 : E(cs, -1) + 1;
+      const from = d > 0 ? edgeAt(cs, 1) + 1 : edgeAt(cs, -1) + 1;
       const cl = new THREE.Mesh(new THREE.BoxGeometry(205 - from, 0.012, 0.12), line);
       cl.position.set(d * (from + (205 - from) / 2), 0.02, 0);
       holder.add(cl);
@@ -652,7 +658,7 @@ export function buildRoadside(seed = 7) {
     const c = centreAt(z), t = centreTangent(z);
     const nx = -t.z, nz = t.x;
     if (crossings().some((cs) => Math.abs(-z - cs) < CROSS_HALF + 3)) continue;   // open at a crossroads
-    const off = s * (edgeAt(Math.max(0, -z), s) + CFG.KERB_W + 0.55);
+    const off = s * (edgeAt(Math.max(0, -z), -s) + CFG.KERB_W + 0.55);
     p.set(c.x + nx * off, c.y + 0.37, c.z + nz * off);
     q.setFromEuler(new THREE.Euler(0, Math.atan2(t.x, t.z), 0));
     m.compose(p, q, sc);
@@ -717,7 +723,7 @@ export function buildRoadside(seed = 7) {
       const s = r() > 0.5 ? -1 : 1;
       const c = centreAt(z), t = centreTangent(z);
       const nx = -t.z, nz = t.x;
-      const off = s * (edgeAt(Math.max(0, -z), s) + CFG.KERB_W + 2.3);
+      const off = s * (edgeAt(Math.max(0, -z), -s) + CFG.KERB_W + 2.3);
       sites.push({
         x: c.x + nx * off, y: c.y, z: c.z + nz * off,
         ry: Math.atan2(t.x, t.z) + Math.PI / 2 * s,
@@ -761,7 +767,7 @@ export function buildRoadside(seed = 7) {
       if (r() > 0.62) continue;
       const c = centreAt(z), t = centreTangent(z);
       const nx = -t.z, nz = t.x;
-      const off = s * (edgeAt(Math.max(0, -z), s) + CFG.KERB_W + 1.8 + r() * 14);
+      const off = s * (edgeAt(Math.max(0, -z), -s) + CFG.KERB_W + 1.8 + r() * 14);
       const y = c.y - 0.1;
       p.set(c.x + nx * off, y + 0.5, c.z + nz * off);
       q.setFromEuler(new THREE.Euler(0, r() * 6.28, 0));
@@ -790,7 +796,7 @@ export function buildRoadside(seed = 7) {
     const s = -1;
     const c = centreAt(z), t = centreTangent(z);
     const nx = -t.z, nz = t.x;
-    const off = s * (edgeAt(Math.max(0, -z), s) + CFG.KERB_W + 5.5);
+    const off = s * (edgeAt(Math.max(0, -z), -s) + CFG.KERB_W + 5.5);
     p.set(c.x + nx * off, c.y + 3.7, c.z + nz * off);
     q.setFromEuler(new THREE.Euler(0, 0, 0));
     sc.set(1, 1, 1);

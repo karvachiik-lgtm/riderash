@@ -72,7 +72,8 @@ const CHOICE_LABELS = {
   bandana: 'Bandana', fingerless: 'Fingerless',
   crop: 'Crop top', dress: 'Dress', jeans: 'Jeans', shorts: 'Shorts', skirt: 'Skirt',
   plain: 'Plain', floral: 'Floral', dots: 'Polka', stripes: 'Stripes', m: 'Masculine', f: 'Feminine',
-  sunhat: 'Sun hat', cap: 'Cap', boots: 'Boots', low: 'Low shoes', sneakers: 'Sneakers',
+  sunhat: 'Sun hat', cap: 'Cap', cowboy: 'Cowboy', flannel: 'Flannel', denimjacket: 'Denim jacket',
+  bikini: 'Bikini', onepiece: 'Swimsuit', plaid: 'Plaid', stars: 'Stars', boots: 'Boots', low: 'Low shoes', sneakers: 'Sneakers',
 };
 const KEY_LABELS = {
   helmet: { none: 'No lid' }, beard: { full: 'Full beard', none: 'Clean' },
@@ -442,7 +443,7 @@ export class Showroom {
       swatches(g, 'colors', 'jacket', PALETTE.jacket);
       sub(g, 'Print (cloth tops and dresses)'); chips(g, 'pattern');
       g = grp(O, 'Bottoms'); chips(g, 'bottom'); swatches(g, 'colors', 'pants', PALETTE.pants);
-      sub(g, 'A dress brings its own skirt');
+      sub(g, 'A dress or swimwear brings its own bottom');
       g = grp(O, 'Accent'); swatches(g, 'colors', 'accent', PALETTE.accent);
       g = grp(O, 'Tattoos');
       chips(g, 'tattoo');

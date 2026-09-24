@@ -63,8 +63,30 @@ export const FLAG_OUTFITS = {
     colors: { jacket: 0xf0efe8, pants: 0xf0efe8, accent: 0xc4b03a },
     look: { top: 'dress', pattern: 'stripes', hat: 'sunhat', hair: 'afro', hairColor: 0x1a1512, glasses: 'aviator',
             chain: 'gold', earring: true, shoes: 'low', bootColor: 0xc4b03a } },
+  'Stars & Stripes': { height: 1.72, skin: 0xe0ac87,
+    colors: { jacket: 0x1f3a7a, pants: 0x1f3a7a, accent: 0xd8262e },
+    look: { top: 'bikini', pattern: 'stars', hair: 'long', hairColor: 0xe0cc8a, glasses: 'aviator', earring: true,
+            shoes: 'low', bootColor: 0xf0efe8, hat: 'cowboy' } },
+  'Beach Day': { height: 1.7, skin: 0xc68e64,
+    colors: { jacket: 0xd8262e, pants: 0xd8262e, accent: 0xf0efe8 },
+    look: { top: 'onepiece', hair: 'long', hairColor: 0x3b2616, hat: 'sunhat', glasses: 'shades', earring: true,
+            shoes: 'low', bootColor: 0xf0efe8 } },
+  Tropical: { height: 1.68, skin: 0x7a5236,
+    colors: { jacket: 0x1f8a8a, pants: 0x1f8a8a, accent: 0xf2c94c },
+    look: { top: 'bikini', pattern: 'floral', hair: 'bun', hairColor: 0x1a1512, earring: true, chain: 'gold',
+            shoes: 'low', bootColor: 0xf2c94c } },
+  Cowgirl: { height: 1.72, skin: 0xf1c9a5,
+    colors: { jacket: 0xb3261e, pants: 0x5a7ab0, accent: 0xf0efe8 },
+    look: { top: 'flannel', pattern: 'plaid', bottom: 'shorts', hat: 'cowboy', hair: 'long', hairColor: 0x8a3a1a,
+            shoes: 'boots', bootColor: 0x6b4a2a, earring: true } },
+  'Denim Days': { height: 1.7, skin: 0x9c7358,
+    colors: { jacket: 0x4a6a9a, pants: 0xf0efe8, accent: 0xd46a9a },
+    look: { top: 'denimjacket', bottom: 'skirt', hair: 'ponytail', hairColor: 0x1a1512, glasses: 'shades', chain: 'gold',
+            shoes: 'sneakers', bootColor: 0xf0efe8, earring: true } },
 };
-export const FLAG_OUTFIT_ORDER = Object.keys(FLAG_OUTFITS);
+// Race to race, alternate the looks so two races in a row never feel alike.
+export const FLAG_OUTFIT_ORDER = ['Sundress', 'Stars & Stripes', 'Grid Queen', 'Cowgirl', 'Summer Denim', 'Beach Day',
+  'Polka Dot', 'Tropical', 'Rock Chick', 'Denim Days', 'Riviera'];
 
 /** A full spec input for an outfit (the showroom uses this too). */
 export function flagOutfitSpec(name) {

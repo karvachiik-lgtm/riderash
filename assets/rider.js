@@ -45,13 +45,18 @@ export default function (THREE) {
   }, S.look || {});
   const TOP = L.top;
   const leatherTop = TOP === 'leather';
-  const bareArms = TOP === 'tank' || TOP === 'vest' || TOP === 'dress';
+  // a denim jacket is cut like the leathers (zip, collar, full sleeves) in cloth
+  const jacketLike = leatherTop || TOP === 'denimjacket';
+  const longCloth = TOP === 'hoodie' || TOP === 'flannel';
+  const swim = TOP === 'bikini' || TOP === 'onepiece';
+  const strapped = TOP === 'dress' || swim;
+  const bareArms = TOP === 'tank' || TOP === 'vest' || strapped;
   // FIGURE: 'f' re-cuts the same rig -- waist in, hips out, a bust line, a
   // narrower yoke, slimmer limbs. Lengths and joints are the spec's either way.
   const FEM = L.figure === 'f';
   // what is below the waist: a dress brings its own skirt
-  const BOTTOM = TOP === 'dress' ? 'dress' : L.bottom;
-  const bareLegs = BOTTOM === 'skirt' || BOTTOM === 'dress';
+  const BOTTOM = TOP === 'dress' ? 'dress' : swim ? 'swim' : L.bottom;
+  const bareLegs = BOTTOM === 'skirt' || BOTTOM === 'dress' || BOTTOM === 'swim';
   const shortsOn = BOTTOM === 'shorts';
   const faceShown = L.helmet !== 'full';
 
@@ -70,7 +75,7 @@ export default function (THREE) {
   const shade = (hex, k) => {               // darker / lighter variant of a spec colour
     const col = new THREE.Color(hex); col.multiplyScalar(k); return col;
   };
-  const leather = P(C.jacket, 0.46, 0.08, 0.55, 0.28, true); leather.name = 'fabric';
+  const leather = TOP === 'denimjacket' ? M(C.jacket, 0.9, 0.0, true) : P(C.jacket, 0.46, 0.08, 0.55, 0.28, true); leather.name = 'fabric';
   const seam    = P(shade(C.jacket, 0.55), 0.6, 0.05, 0.2, 0.5, true); seam.name = 'fabric';
   const pad     = P(shade(C.jacket, 0.75), 0.38, 0.10, 0.7, 0.2, true); pad.name = 'fabric';   // armour panels: harder hide
   const padIn   = pad.clone(); padIn.side = THREE.DoubleSide;   // open domes show their inside
@@ -87,7 +92,8 @@ export default function (THREE) {
   // Cloth tops (tee, tank, hoodie) are matte cotton in the jacket colour.
   const cotton  = M(C.jacket, 0.92, 0.0, true); cotton.name = 'fabric';
   if (L.pattern !== 'plain') { cotton.map = patternTex(L.pattern, C.jacket); cotton.color.setHex(0xffffff); }
-  const skirtMat = BOTTOM === 'dress' ? cotton : M(C.pants, 0.85, 0.0, true); skirtMat.name = 'fabric';
+  if (swim) { cotton.roughness = 0.45; }                // swimwear: a lycra sheen
+  const skirtMat = BOTTOM === 'dress' || BOTTOM === 'swim' ? cotton : M(C.pants, 0.85, 0.0, true); skirtMat.name = 'fabric';
   const cottonDk = M(shade(C.jacket, 0.72), 0.94, 0.0, true); cottonDk.name = 'fabric';
   const hairMat = M(L.hairColor, L.hair === 'slick' ? 0.32 : 0.86, 0.0, true); hairMat.name = 'fabric';
   const stubbleMat = M(mix(C.skin, L.hairColor, 0.55), 0.95, 0.0); stubbleMat.name = 'fabric';
@@ -156,6 +162,18 @@ export default function (THREE) {
         if (dx * dx + dy * dy < 12) c = white;
       } else if (kind === 'stripes') {
         if ((y % 8) < 3) c = white;
+      } else if (kind === 'plaid') {
+        // tartan: dark bands both ways, a fine light overcheck
+        const bx = (x % 16) < 5, by = (y % 16) < 5;
+        if (bx && by) c = c.map((v) => v * 0.35);
+        else if (bx || by) c = c.map((v) => v * 0.62);
+        if ((x % 16) === 10 || (y % 16) === 10) c = [214, 206, 190];
+      } else if (kind === 'stars') {
+        // white five-point stars on the colour, staggered rows
+        const cx = (y >> 4) % 2 ? 8 : 0;
+        const dx = ((x + cx) % 16) - 8, dy = (y % 16) - 8, r = Math.hypot(dx, dy), a = Math.atan2(dy, dx) + Math.PI / 2;
+        const star = 2.2 + 2.3 * Math.pow(Math.max(0, Math.cos((a * 5) / 2)), 3);
+        if (r < star) c = white;
       } else if (kind === 'floral') {
         // two flowers per tile, five petals round a gold centre, a leaf
         for (const [fx, fy, pc] of [[8, 9, white], [24, 25, pink]]) {
@@ -232,15 +250,21 @@ export default function (THREE) {
   const pelvis = new THREE.Group();
   pelvis.position.set(0, S.hipY, 0);
   g.add(pelvis);
-  const seatBlock = pelvis.add(mk(cbox(S.pelvisW, S.pelvisH, S.pelvisD, 0.03), bareLegs ? skirtMat : denim, 0, 0, 0));
-  void seatBlock;
+  if (!FEM) pelvis.add(mk(cbox(S.pelvisW, S.pelvisH, S.pelvisD, 0.03), bareLegs ? skirtMat : denim, 0, 0, 0));
+  else {
+    // a rounded hip instead of the square seat block: an ellipsoid the size
+    // of the block, which is what gives the waist-to-hip curve
+    const sw = BOTTOM === 'swim';
+    pelvis.add(mk(new THREE.SphereGeometry(S.pelvisW * (sw ? 0.5 : 0.54), 14, 10), bareLegs ? skirtMat : denim, 0, -S.pelvisH * (sw ? 0.1 : 0.05), 0));
+    pelvis.children[pelvis.children.length - 1].scale.set(1, (S.pelvisH / S.pelvisW) * (sw ? 0.95 : 1.15), (S.pelvisD / S.pelvisW) * 1.02);
+  }
   if (!bareLegs) {
     // belt, and a steel buckle at the front
     pelvis.add(mk(cbox(S.pelvisW * 1.03, S.pelvisH * 0.2, S.pelvisD * 1.03, 0.012), seam, 0, S.pelvisH * 0.42, 0));
     pelvis.add(mk(cbox(0.06, S.pelvisH * 0.2, 0.014, 0.004), steel, 0, S.pelvisH * 0.42, S.pelvisD * 0.52));
     // back pockets, as raised panels
     for (const s of [-1, 1]) pelvis.add(mk(cbox(S.pelvisW * 0.3, S.pelvisH * 0.42, 0.012, 0.004), denim, s * S.pelvisW * 0.22, -S.pelvisH * 0.04, -S.pelvisD * 0.51));
-  } else {
+  } else if (BOTTOM !== 'swim') {
     // THE SKIRT: an open flared cone off the hips, to above the knee (a
     // dress) or mid-thigh (a skirt); a sash where a belt would be
     const len = S.thigh * (BOTTOM === 'dress' ? 0.82 : 0.66), top = S.pelvisW * (FEM ? 0.6 : 0.56);
@@ -252,6 +276,16 @@ export default function (THREE) {
     hem.scale.set(1, (S.pelvisD / S.pelvisW) * 1.15, 1);
     const sash = add(pelvis, mk(new THREE.CylinderGeometry(top * 1.02, top * 1.02, S.pelvisH * 0.16, 16), accent, 0, S.pelvisH * 0.42, 0));
     sash.scale.set(1, 1, (S.pelvisD / S.pelvisW) * 1.15);
+  }
+
+  if (FEM) {
+    // hips and seat: two rounded masses on the back of the pelvis block, in
+    // whatever covers it, and a little more width over the hip joints
+    const gm = bareLegs ? skirtMat : denim, gr = S.pelvisW * 0.25;
+    for (const s of [-1, 1]) {
+      const gl = add(pelvis, mk(new THREE.SphereGeometry(gr, 12, 8), gm, s * S.pelvisW * 0.2, -S.pelvisH * 0.12, -S.pelvisD * 0.24));
+      gl.scale.set(0.95, 1.0, 0.8);
+    }
   }
 
   // ---- torso, pitched forward into a racing tuck ----
@@ -288,7 +322,7 @@ export default function (THREE) {
   const TRUNK_LEN = T * 0.90;
   const trunkGeo = seg(TRUNK_LEN, TRUNK_PROF);
   trunkGeo.rotateX(Math.PI);                  // grow UP from the lumbar joint
-  const torsoMat = (leatherTop || TOP === 'vest') ? leather : TOP === 'crop' ? skin : cotton;
+  const torsoMat = (jacketLike || TOP === 'vest') ? leather : TOP === 'crop' || TOP === 'bikini' ? skin : cotton;
   const trunk = mk(trunkGeo, torsoMat, 0, 0.0, 0);
   trunk.scale.set(TW * 0.5, 1, TD * 0.5);
   // the jacket's surface half-depth at height y: details are placed ON it, not
@@ -313,6 +347,26 @@ export default function (THREE) {
     const band = add(torso, mk(seg(TRUNK_LEN * (1 - from), prof), cotton, 0, TRUNK_LEN, 0));
     band.scale.set(TW * 0.5, 1, TD * 0.5);
   }
+  if (FEM) {
+    // THE BUST: two soft masses on the chest, in whatever covers it (a
+    // bikini's cups are the cloth; everything else wears them in the top)
+    const by = T * 0.7, br = TW * 0.155;
+    const bustMat = TOP === 'bikini' || TOP === 'crop' ? cotton : torsoMat === skin ? cotton : torsoMat;
+    for (const s of [-1, 1]) {
+      // set into the chest and flattened, so it reads as a shaped torso
+      const b = add(torso, mk(new THREE.SphereGeometry(br * 1.1, 12, 8), bustMat, s * TW * 0.14, by, surf(by) - br * 0.42));
+      b.scale.set(1.0, 0.85, 0.62);
+      b.rotation.set(-0.15, s * 0.18, 0);
+    }
+    if (TOP === 'bikini') {
+      // the underband, and a tie at the back
+      const ry = T * 0.62, rr = TW * 0.5 * 0.9;
+      const ub = add(torso, mk(new THREE.CylinderGeometry(rr, rr * 1.01, T * 0.035, 14, 1, true), cotton, 0, ry, 0));
+      ub.scale.set(1, 1, TD / TW);
+      ub.material = cotton.clone(); ub.material.side = THREE.DoubleSide;
+      add(torso, mk(cbox(0.05, 0.03, 0.02, 0.005), cotton, 0, ry, -(surf(ry) + 0.01), 0, 0, Math.PI / 4));
+    }
+  }
   // THE SHOULDER LINE: one rounded mass from deltoid to deltoid, a lathe laid
   // along X -- full round over the trapezius, tapering into each shoulder
   // ball. This replaced a flat chamfered slab 1.4 shoulder-widths wide, which
@@ -324,18 +378,20 @@ export default function (THREE) {
     const geo = new THREE.LatheGeometry(pts, 8);
     geo.rotateZ(Math.PI / 2);
     // a dress is cut on straps: the shoulders are bare skin, the straps cross them
-    const yoke = mk(geo, TOP === 'crop' ? cotton : TOP === 'dress' ? skin : torsoMat, 0, T * 0.94, TD * 0.03);
+    const yoke = mk(geo, TOP === 'crop' ? cotton : strapped ? skin : torsoMat, 0, T * 0.94, TD * 0.03);
     yoke.scale.set(1, T * (FEM ? 0.11 : 0.15), TD * (FEM ? 0.4 : 0.46));
     torso.add(yoke);
-    if (TOP === 'dress') {
+    if (strapped) {
       for (const s of [-1, 1]) {
         // a flat band over the top of the shoulder, front to back, lying on it
         const strap = add(torso, mk(new THREE.TorusGeometry(TD * 0.36, 0.008, 4, 12, Math.PI), cotton, s * S.shoulderW * 0.34, T * 0.9, TD * 0.03, 0, Math.PI / 2, 0));
         strap.scale.set(1, (T * 0.085) / (TD * 0.36), 1);
       }
       // the neckline: the bodice stops at the bust, skin above it
+      if (TOP !== 'bikini') {
       const top = add(torso, mk(new THREE.CylinderGeometry(TW * 0.5 * 0.86, TW * 0.5 * 0.99, T * 0.18, 12, 1, true), skin, 0, T * 0.92, 0));
       top.scale.set(1, 1, TD / TW);
+      }
     }
   }
   // yoke seam (front and back) and the side panel seams: raised dark welts
@@ -343,7 +399,7 @@ export default function (THREE) {
   // each a short run laid on the jacket surface at its own height
   // (the flat front face is 0.38 of the local radius each side of centre, so
   // every detail stays within |x| < 0.3 r and sits on it)
-  const zipped = leatherTop || TOP === 'vest';
+  const zipped = jacketLike || TOP === 'vest';
   if (zipped) for (const z of [1, -1]) torso.add(mk(cbox(TW * 0.36, 0.012, 0.012, 0.003), seam, 0, T * 0.78, z * (surf(T * 0.78) + 0.004)));
   for (let k = 0; zipped && k < 4; k++) {
     const y = T * (0.18 + k * 0.15);
@@ -354,7 +410,7 @@ export default function (THREE) {
   }
   if (zipped) torso.add(mk(cbox(0.02, 0.034, 0.014, 0.004), steel, TW * 0.03, T * 0.70, surf(T * 0.70) + 0.01));   // the pull
   // waistband: the hem of the jacket, a slightly proud ring over the belt
-  const hem = mk(new THREE.CylinderGeometry(1, 1, T * 0.08, 8), zipped ? pad : cottonDk, 0, T * 0.03, 0);
+  const hem = mk(new THREE.CylinderGeometry(1, 1, T * 0.08, 8), zipped ? pad : TOP === 'bikini' || TOP === 'crop' ? skin : cottonDk, 0, T * 0.03, 0);
   hem.scale.set(TW * 0.47, 1, TD * 0.47);
   torso.add(hem);
   // jacket collar: a short open cone, stood up and open at the front
@@ -367,6 +423,11 @@ export default function (THREE) {
     // a crew neck: a ribbed band where the cloth meets the neck
     const crew = add(torso, mk(new THREE.TorusGeometry(S.headR * 0.62, S.headR * 0.09, 5, 12), cottonDk, 0, T * 1.10, TD * 0.03, Math.PI / 2 - 0.2));
     crew.scale.set(1, 1.15, 1);
+  }
+  if (TOP === 'flannel') {
+    // a shirt: a button placket down the front, a pocket on each breast
+    add(torso, mk(cbox(0.022, T * 0.7, 0.008, 0.003), cottonDk, 0, T * 0.5, surf(T * 0.5) + 0.004));
+    for (const s of [-1, 1]) add(torso, mk(cbox(TW * 0.16, T * 0.12, 0.01, 0.003), cottonDk, s * TW * 0.14, T * 0.74, surf(T * 0.74) + 0.004));
   }
   if (TOP === 'hoodie') {
     // the hood lies folded behind the neck, the pouch pocket on the belly,
@@ -571,6 +632,21 @@ export default function (THREE) {
     crown.scale.set(0.95, 0.9, 1.0);
     add(head, mk(new THREE.CylinderGeometry(hR * 1.04, hR * 1.06, hR * 0.2, 16, 1, true), accent, 0, hy2 + hR * 0.1, -hR * 0.05, -0.12));
   }
+  if (L.helmet === 'none' && L.hat === 'cowboy') {
+    const felt = M(0x8a5a32, 0.8, 0.0, true); felt.name = 'fabric';
+    const hy2 = hy + hR * 0.66;
+    // brim: a lathe that turns up at the rim; crown with a pinched top
+    const pts = [[0.0001, 0], [hR * 1.2, 0], [hR * 1.75, hR * 0.06], [hR * 2.05, hR * 0.32], [hR * 2.02, hR * 0.36]].map(([x, y]) => new THREE.Vector2(x, y));
+    const brim = new THREE.LatheGeometry(pts, 18);
+    const b = add(head, mk(brim, felt, 0, hy2, -hR * 0.05, -0.1));
+    b.scale.set(0.95, 1, 1.18);
+    b.material = felt.clone(); b.material.side = THREE.DoubleSide;
+    const crown = add(head, mk(new THREE.CylinderGeometry(hR * 0.78, hR * 1.0, hR * 0.95, 12), felt, 0, hy2 + hR * 0.47, -hR * 0.05, -0.1));
+    crown.scale.set(0.95, 1, 1.15);
+    const dent = add(head, mk(new THREE.SphereGeometry(hR * 0.8, 10, 4, 0, Math.PI * 2, 0, Math.PI * 0.4), felt, 0, hy2 + hR * 0.72, -hR * 0.05, -0.1));
+    dent.scale.set(0.9, 0.5, 1.1);
+    add(head, mk(new THREE.CylinderGeometry(hR * 1.0, hR * 1.02, hR * 0.14, 12, 1, true), accent, 0, hy2 + hR * 0.1, -hR * 0.05, -0.1)).scale.set(0.95, 1, 1.15);
+  }
   if (L.helmet === 'none' && L.hat === 'cap') {
     const cap = add(head, mk(new THREE.SphereGeometry(hR * 1.08, 14, 6, 0, Math.PI * 2, 0, Math.PI * 0.5), cottonDk, 0, hy + hR * 0.28, 0, -0.15));
     cap.scale.set(0.95, 0.85, 1.0);
@@ -657,10 +733,10 @@ export default function (THREE) {
     torso.add(shoulder);
     // WHAT COVERS THE ARM: leathers all the way down; a hoodie's cotton; a
     // tee's short sleeve over bare (maybe inked) skin; a tank or vest, bare.
-    const sleeveMat = leatherTop ? leather : TOP === 'hoodie' ? cotton : ink;
+    const sleeveMat = jacketLike ? leather : longCloth ? cotton : ink;
     // (a bare or cotton shoulder is the arm's own size -- the leathers' 1.29 is
     // the armour under the hide, and on skin it read as a ball joint)
-    shoulder.add(mk(new THREE.SphereGeometry(R0 * (leatherTop ? 1.29 : bareArms ? 1.0 : 1.12), 8, 6), bareArms ? ink : leatherTop ? leather : cotton, 0, 0, 0));
+    shoulder.add(mk(new THREE.SphereGeometry(R0 * (leatherTop ? 1.29 : bareArms ? 1.0 : 1.12), 8, 6), bareArms ? ink : jacketLike ? leather : cotton, 0, 0, 0));
     // shoulder armour: a dome over the ball, tipped outward -- a cap that
     // follows the shoulder rather than a box standing on it
     if (leatherTop) {
@@ -682,7 +758,7 @@ export default function (THREE) {
     shoulder.add(upper);
     // deltoid -> bicep -> narrowing to the elbow
     // (a bare arm is a touch slimmer than a sleeved one)
-    const bk = leatherTop || TOP === 'hoodie' ? 1 : 0.9;
+    const bk = jacketLike || longCloth ? 1 : 0.9;
     upper.add(mk(seg(S.upperArm, [[0.0, R0 * 1.05 * bk], [0.22, R0 * 1.10 * bk], [0.5, R0 * 1.0 * bk], [0.85, R0 * 0.84 * bk], [1.0, R0 * 0.80 * bk]]), sleeveMat, 0, 0, 0));
     // sleeve seam, and an accent piping down the outside of the sleeve
     if (leatherTop) upper.add(mk(cbox(0.01, S.upperArm * 0.8, 0.012, 0.003), accent, s * R0 * 1.0, -S.upperArm * 0.48, 0));
@@ -699,7 +775,7 @@ export default function (THREE) {
     const elbow = new THREE.Group();
     elbow.position.set(0, -S.upperArm, 0);
     upper.add(elbow);
-    const foreMat = leatherTop ? leather : TOP === 'hoodie' ? cotton : ink;
+    const foreMat = jacketLike ? leather : longCloth ? cotton : ink;
     elbow.add(mk(new THREE.SphereGeometry(R0 * 0.88 * bk, 8, 6), foreMat, 0, 0, 0));
     // ELBOW PAD on the point of the elbow. The arm flexes toward local +Z, so
     // the point is on -Z; the pad rides on the elbow joint, halfway between
@@ -710,7 +786,7 @@ export default function (THREE) {
     const fore = new THREE.Group();           // pivots AT the elbow
     elbow.add(fore);
     fore.add(mk(seg(S.forearm * 0.86, [[0.0, R0 * 0.86 * bk], [0.28, R0 * 0.92 * bk], [0.75, R0 * 0.74 * bk], [1.0, R0 * 0.68 * bk]]), foreMat, 0, 0, 0));
-    if (TOP === 'hoodie') add(fore, mk(new THREE.CylinderGeometry(R0 * 0.8, R0 * 0.8, S.forearm * 0.1, 8), cottonDk, 0, -S.forearm * 0.8, 0));
+    if (longCloth) add(fore, mk(new THREE.CylinderGeometry(R0 * 0.8, R0 * 0.8, S.forearm * 0.1, 8), cottonDk, 0, -S.forearm * 0.8, 0));
     // GAUNTLET: the glove's flared cuff over the sleeve (a race glove only)
     if (L.gloves === 'full') {
       fore.add(mk(new THREE.CylinderGeometry(R0 * 0.98, R0 * 0.80, S.forearm * 0.26, 8), glove, 0, -S.forearm * 0.86, 0));
@@ -742,7 +818,7 @@ export default function (THREE) {
     pelvis.add(hip);
     // BARE LEGS under a skirt or dress; SHORTS leave the thigh's top in denim
     const legMat = bareLegs || shortsOn ? skin : denim;
-    hip.add(mk(new THREE.SphereGeometry(R0 * 1.40, 8, 6), bareLegs ? skin : denim, 0, 0, 0));
+    hip.add(mk(new THREE.SphereGeometry(R0 * (bareLegs && FEM ? 1.22 : 1.40), 8, 6), bareLegs ? skin : denim, 0, 0, 0));
     // KNEES FORWARD. +x on this joint swings the thigh toward -Z, the TAIL (the
     // rider faces +Z), so the old +1.48 folded the thigh backwards and the rest
     // pose had the knee 0.33 m behind the hip -- the mirror-image leg. The race

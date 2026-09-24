@@ -259,7 +259,7 @@ export default function (THREE) {
     // widest (with the thigh tops), waist 1-1.5 heads, waist:hip near 0.7.
     // The ellipsoid is widened side to side only, to meet the thighs.
     pelvis.add(mk(new THREE.SphereGeometry(S.pelvisW * (sw ? 0.5 : 0.54), 14, 10), bareLegs ? skirtMat : denim, 0, -S.pelvisH * (sw ? 0.1 : 0.05), 0));
-    pelvis.children[pelvis.children.length - 1].scale.set(sw ? 1.42 : 1.36, (S.pelvisH / S.pelvisW) * (sw ? 0.95 : 1.15), (S.pelvisD / S.pelvisW) * 1.02);
+    pelvis.children[pelvis.children.length - 1].scale.set(sw ? 1.24 : 1.22, (S.pelvisH / S.pelvisW) * (sw ? 0.85 : 1.0), (S.pelvisD / S.pelvisW) * 0.95);
   }
   if (!bareLegs) {
     // belt, and a steel buckle at the front
@@ -285,9 +285,9 @@ export default function (THREE) {
   if (FEM) {
     // hips and seat: two rounded masses on the back of the pelvis block, in
     // whatever covers it, and a little more width over the hip joints
-    const gm = bareLegs ? skirtMat : denim, gr = S.pelvisW * 0.29;
+    const gm = bareLegs ? skirtMat : denim, gr = S.pelvisW * 0.22;
     for (const s of [-1, 1]) {
-      const gl = add(pelvis, mk(new THREE.SphereGeometry(gr, 12, 8), gm, s * S.pelvisW * 0.27, -S.pelvisH * 0.14, -S.pelvisD * 0.24));
+      const gl = add(pelvis, mk(new THREE.SphereGeometry(gr, 12, 8), gm, s * S.pelvisW * 0.24, -S.pelvisH * 0.12, -S.pelvisD * 0.2));
       gl.scale.set(0.95, 1.0, 0.8);
     }
   }
@@ -330,7 +330,7 @@ export default function (THREE) {
   const trunk = mk(trunkGeo, torsoMat, 0, 0.0, 0);
   // (the feminine torso is wider side to side at the same depth: the canon's
   // 1.3-head waist and 2-head hip on a trunk cut for a 0.9-head waist)
-  const TWx = FEM ? TW * 1.4 : TW;
+  const TWx = FEM ? TW * 1.28 : TW;
   trunk.scale.set(TWx * 0.5, 1, TD * 0.5);
   // the jacket's surface half-depth at height y: details are placed ON it, not
   // at a guessed constant (at a constant they float 3 cm off the waist)
@@ -360,7 +360,7 @@ export default function (THREE) {
     // Sized by the BUST slider; shaped as a TEARDROP -- fuller below the
     // centre, a gentle slope above -- set slightly apart and angled out, the
     // way a figure reads in profile, instead of a round ball.
-    const k = L.bust, br = TW * 0.19 * k, by = T * (0.69 - 0.02 * (k - 1));
+    const k = L.bust, br = TW * 0.145 * k, by = T * (0.69 - 0.02 * (k - 1));
     const bustMat = TOP === 'bikini' || TOP === 'crop' ? cotton : torsoMat === skin ? cotton : torsoMat;
     const geo = new THREE.SphereGeometry(br, 16, 12);
     {
@@ -375,8 +375,9 @@ export default function (THREE) {
       geo.computeVertexNormals();
     }
     for (const s of [-1, 1]) {
-      const b = add(torso, mk(geo, bustMat, s * TWx * 0.15 * (0.9 + 0.1 * k), by, surf(by) - br * 0.28));
-      b.scale.set(1.0, 0.95, 0.8);
+      // sunk well into the chest: only the front third stands proud
+      const b = add(torso, mk(geo, bustMat, s * TWx * 0.14, by, surf(by) - br * 0.5));
+      b.scale.set(1.0, 0.9, 0.7);
       b.rotation.set(0.12, s * 0.22, 0);
     }
     if (TOP === 'bikini') {

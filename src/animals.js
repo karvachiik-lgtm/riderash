@@ -400,6 +400,76 @@ export class Animals {
     return null;
   }
 
+  /**
+   * As road obstacles for the AI's look (traffic.setTrafficExtras). The animal
+   * stands side-on: its length runs ACROSS the road.
+   */
+  obstacles(s, back, fwd) {
+    const out = [];
+    for (const a of this.pool) {
+      const u = a.userData;
+      if (!u.active) continue;
+      const d = u.s - s;
+      if (d < -back || d > fwd) continue;
+      out.push({ s: u.s, at: u.lat, halfL: u.halfW, halfW: u.halfL, vs: 0 });
+    }
+    return out;
+  }
+
+  /**
+   * For the traffic's car-following: a stationary thing in the lane, which a
+   * driver stops for and then goes round (traffic.js treats a DOWN rider so).
+   */
+  asRiders() {
+    const out = [];
+    for (const a of this.pool) {
+      const u = a.userData;
+      if (!u.active) continue;
+      out.push({ phys: { s: u.s, lateral: u.lat, speed: 0 }, fighter: { down: true }, padW: u.halfL + 0.6 });
+    }
+    return out;
+  }
+
+  /**
+   * VEHICLES AGAINST ANIMALS. Traffic cars (road frame: long along s) and
+   * crossing cars (long across it) used to drive straight through a cow. A car
+   * that reaches one now hits it: the animal staggers and bolts, the car stands
+   * on its brakes (a moose stops it dead). Returns the hits, for sound.
+   */
+  vehicleContact(cars, crossCars) {
+    const hits = [];
+    for (const a of this.pool) {
+      const u = a.userData;
+      if (!u.active || u.hit) continue;
+      const strike = (lat, v) => {
+        u.hit = true;
+        u.speed = Math.max(u.speed, u.kind === 'cow' ? 2.2 : 8);
+        u.stopT = 0; u.stagger = 1;
+        u.dir = Math.sign(u.lat - lat) || u.dir;
+        hits.push({ animal: a, v });
+      };
+      for (const car of cars || []) {
+        const c = car.userData;
+        if (c.off || c.at === undefined) continue;
+        if (Math.abs(c.s - u.s) > c.halfL + u.halfW || Math.abs(c.at - u.lat) > c.halfW + u.halfL) continue;
+        strike(c.at, c.speed || 0); hits[hits.length - 1].car = car;
+        c.stun = Math.max(c.stun || 0, 1.2);
+        c.speed = (c.speed || 0) * (u.kind === 'moose' ? 0.15 : 0.6);
+        break;
+      }
+      if (u.hit) continue;
+      for (const car of crossCars || []) {
+        const c = car.userData;
+        if (!c.active) continue;
+        if (Math.abs(c.cs + (c.sOff || 0) - u.s) > c.halfW + u.halfW || Math.abs(c.x - u.lat) > c.halfL + u.halfL) continue;
+        strike(c.x, c.v || 0); hits[hits.length - 1].car = car; hits[hits.length - 1].cross = true;
+        c.v = (c.v || 0) * (u.kind === 'moose' ? 0.1 : 0.5);
+        break;
+      }
+    }
+    return hits;
+  }
+
   /** Near the rider's path ahead, for the HUD warning. */
   ahead(p, range = 120) {
     for (const a of this.pool) {

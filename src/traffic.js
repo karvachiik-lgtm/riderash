@@ -309,7 +309,7 @@ export function updateTraffic(traffic, playerS, dt, t = 0, riders = null) {
         // stop for a rider who is DOWN in front of them. A Road Rash car does not
         // dodge an upright bike coming at it -- that is the rider's problem.
         if (u.dir > 0 && !down) continue;
-        if (Math.abs(p.lateral - (u.at ?? u.lane)) > u.halfW + 0.9) continue;
+        if (Math.abs(p.lateral - (u.at ?? u.lane)) > u.halfW + (rd.padW ?? 0.9)) continue;
         const d = (p.s - u.s) * fwd;
         if (d <= 0 || d > 60) continue;
         const gap = d - u.halfL - 1.2;
@@ -327,12 +327,23 @@ export function updateTraffic(traffic, playerS, dt, t = 0, riders = null) {
     if (blockedBy) {
       u.blockedT = (u.blockedT || 0) + dt;
       if (u.blockedT > 1.6) {
-        u.passT = 4.0;
+        u.passT = 5.0;
         u.passDir = Math.sign((u.at ?? u.lane) - blockedBy.lateral) || -Math.sign(u.lane || 1);
         u.blockedT = 0;
       }
     } else u.blockedT = 0;
-    if (u.passT > 0) { u.passT -= dt; target = Math.max(target, Math.min(u.cruise, 9)); }
+    // ...but only as fast as it has actually pulled out: it used to set off at
+    // 9 m/s while the swerve was still easing in, and clipped the very thing it
+    // was going round (MEASURED: a car that had stopped for a cow then hit it).
+    if (u.passT > 0) {
+      u.passT -= dt;
+      // measured from where the car actually IS, not where its swerve is aiming
+      const moved = Math.min(Math.abs(u.swerve || 0), Math.abs((u.at ?? u.lane) - (u.lane ?? 0)));
+      const out = Math.min(1, moved / (u.halfW * 2 + 1.0));
+      // (the obstacle check is skipped while passing, so this is a CAP: creep
+      // until clear, then 9 m/s past it)
+      target = Math.min(target, Math.max(0.6, Math.min(u.cruise, 9) * out * out));
+    }
     if (u.stun > 0) { u.stun -= dt; target = 0; }   // just hit something: stand on the brakes
     // accelerate gently (2.2 m/s^2, a loaded vehicle), brake hard (7 m/s^2)
     u.speed += THREE.MathUtils.clamp(target - u.speed, -7 * dt, 2.2 * dt);
@@ -582,8 +593,17 @@ export function applyTrafficHit(p, hit, invuln = false) {
  * Plain-number view of the vehicles near `s`, for brains that must not hold
  * scene objects (npc.js) and for the cop. `vs` is velocity along +s.
  */
+// OTHER THINGS IN THE ROAD. The AI's traffic look (trafficNear -> trafficEscape,
+// the pack and the cop) used to see only the traffic: a rival rode straight
+// into a cow, a parked car or a car crossing at the crossroads it could not
+// "see". main.js registers them here as plain obstacle records.
+let _extras = null;
+/** fn(s, back, fwd) -> [{s, at, halfL, halfW, vs}]: extra obstacles for trafficNear. */
+export function setTrafficExtras(fn) { _extras = fn; }
+
 export function trafficNear(traffic, s, back = 10, fwd = 120) {
   const out = [];
+  if (_extras) { try { for (const o of _extras(s, back, fwd)) out.push(o); } catch (e) { /* never break the AI on a dressing object */ } }
   if (!traffic || !traffic.userData || !traffic.userData.cars) return out;
   for (const car of traffic.userData.cars) {
     const u = car.userData;

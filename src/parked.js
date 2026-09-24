@@ -75,6 +75,17 @@ export class Parked {
     return this.cars.length;
   }
 
+  /** As road obstacles for the AI's look (traffic.setTrafficExtras). */
+  obstacles(s, back, fwd) {
+    const out = [];
+    for (const k of this.cars) {
+      const d = k.s - s;
+      if (d < -back - k.halfL || d > fwd + k.halfL) continue;
+      out.push({ s: k.s, at: k.lat, halfL: k.halfL, halfW: k.halfW, vs: 0 });
+    }
+    return out;
+  }
+
   /**
    * Keep a rider (BikePhys) out of the parked cars: a solid box. Returns the
    * closing speed of a fresh hit (0 if none) so the caller can decide a wipeout.

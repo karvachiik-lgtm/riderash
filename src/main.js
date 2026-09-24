@@ -11,6 +11,7 @@ import { buildFinish, placeFinish } from './finishline.js';
 import { TrackDress } from './trackdress.js';
 import { setLanePlan } from './lanes.js';
 import { CrossTraffic } from './crosstraffic.js';
+import { setTrafficExtras } from './traffic.js';
 import { placeHazards, HazardView } from './hazards.js';
 import { Animals, ANIMALS } from './animals.js';
 import { Parked } from './parked.js';
@@ -485,6 +486,19 @@ async function init() {
   try { parked = new Parked(scene); window.__PARKED__ = parked; } catch (e) { console.warn('[riderash] parked:', e); }
   try { animals = new Animals(scene); window.__ANIMALS__ = animals; } catch (e) { console.warn('[riderash] animals:', e); }
   try { crossTraffic = new CrossTraffic(scene); window.__CROSS__ = crossTraffic; } catch (e) { console.warn('[riderash] cross traffic:', e); crossTraffic = null; }
+  // The AI's traffic look also sees the animals, the parked cars and the cars
+  // crossing at the crossroads (see traffic.setTrafficExtras).
+  setTrafficExtras((s0, back, fwd) => {
+    const out = [];
+    if (animals && !window.__TRAFFIC_OFF__) out.push(...animals.obstacles(s0, back, fwd));
+    if (parked) out.push(...parked.obstacles(s0, back, fwd));
+    if (crossTraffic && !window.__TRAFFIC_OFF__) for (const b of crossTraffic.blockers()) {
+      const d = b.s - s0;
+      if (d < -back || d > fwd) continue;
+      out.push({ s: b.s, at: (b.lat0 + b.lat1) / 2, halfL: 1.1, halfW: (b.lat1 - b.lat0) / 2, vs: 0 });
+    }
+    return out;
+  });
   world.traffic = traffic;
 
   // fills the MODULE-SCOPE `assets`, so the showroom can reach the rider later
@@ -1572,11 +1586,22 @@ function stepGame(dt) {
   // wanders 76 m sideways -- see updateTraffic in world.js.
   // The riders are passed so a car slows behind a bike in its lane and every
   // car stops short of a rider lying in the road (traffic.js updateTraffic).
+  // EVERYONE ON THE ROAD: the racers, and a chasing cop. The cop used to be
+  // left out of every contact below, so he rode through cars, parked cars,
+  // cows and the crossroads untouched.
+  const roadUsers = cop && cop.state === 'chase' ? [...world.parts, cop] : world.parts;
   if (window.__TRAFFIC_OFF__ && world.traffic) {
     // HARNESS: an empty road, to test the pack or the cop without the traffic.
     world.traffic.visible = false;
     for (const c of (world.traffic.userData.cars || [])) { const u = c.userData; u.s = u.prevS = -1e5; u.at = u.prevAt = 0; u.speed = 0; }
-  } else updateTraffic(world.traffic, player.phys.s, dt, state.time || 0, world.parts);
+  } else {
+    // Drivers also stop for what is standing in the road -- an animal, a car
+    // crossing at the crossroads -- and then go round it, as for a downed rider.
+    const inRoad = [...roadUsers];
+    if (animals) inRoad.push(...animals.asRiders());
+    if (crossTraffic) for (const b of crossTraffic.blockers()) inRoad.push({ phys: { s: b.s, lateral: (b.lat0 + b.lat1) / 2, speed: 0 }, fighter: { down: true }, padW: (b.lat1 - b.lat0) / 2 + 0.6 });
+    updateTraffic(world.traffic, player.phys.s, dt, state.time || 0, inRoad);
+  }
 
   // RIDING-VERB FEEDBACK. A verb the player cannot see or hear is a number in
   // a file: the landing needs a thump, the boost needs a note, and both need a
@@ -1668,7 +1693,7 @@ function stepGame(dt) {
   // A per-(vehicle, rider) cooldown of 0.6 s lives in traffic.js, so one car
   // cannot score a hit every frame it overlaps.
   if (CFG.TRAFFIC_COLLISION && tcars) {
-    for (const rd of world.parts) {
+    for (const rd of roadUsers) {
       const f = rd.fighter;
       if (!rd.phys || !f || f.down) continue;
       const hit = window.__TRAFFIC_OFF__ ? null : trafficContact(world.traffic, rd.phys);
@@ -1728,7 +1753,7 @@ function stepGame(dt) {
 
   // PARKED CARS: solid; a side scrape is a scrape, hitting the back of one
   // at speed is a wipeout
-  if (parked) for (const rd of world.parts) {
+  if (parked) for (const rd of roadUsers) {
     const f = rd.fighter;
     if (!rd.phys || !f || f.down) continue;
     const v = parked.collide(rd.phys);
@@ -1748,10 +1773,16 @@ function stepGame(dt) {
   // COWS AND DEER: in the road on the rural courses
   if (animals && !window.__TRAFFIC_OFF__) {
     animals.update(dt, spine, player.phys.s, state.finishS, state.countdown <= 0);
+    // cars hit animals too: the animal staggers and bolts, the car brakes
+    for (const h of animals.vehicleContact(world.traffic && world.traffic.userData ? world.traffic.userData.cars : null, crossTraffic ? crossTraffic.cars : null)) {
+      const u = h.animal.userData, d = Math.abs(u.s - player.phys.s);
+      if (d < 140) audio.oneShot('impact', Math.max(0.05, 1 - d / 140) * 0.8, 0.7);
+      if (d < 120) state.warn = u.kind === 'moose' ? 'CAR HIT A MOOSE' : 'CAR HIT A ' + u.kind.toUpperCase();
+    }
     const k = animals.ahead(player.phys);
     if (k && k !== state.lastAnimal) state.warn = k === 'cow' ? 'COW!' : k === 'moose' ? 'MOOSE!!' : 'DEER!';
     state.lastAnimal = k;
-    for (const rd of world.parts) {
+    for (const rd of roadUsers) {
       const f = rd.fighter;
       if (!rd.phys || !f || f.down || f.invuln > 0) continue;
       const hit = animals.contact(rd.phys);
@@ -1774,8 +1805,8 @@ function stepGame(dt) {
 
   // CROSS TRAFFIC at the crossroads: T-bones are wipeouts above a walking pace
   if (crossTraffic && !window.__TRAFFIC_OFF__) {
-    crossTraffic.update(dt, world.parts.filter((r) => r.phys).map((r) => r.phys.s));
-    for (const rd of world.parts) {
+    crossTraffic.update(dt, roadUsers.filter((r) => r.phys).map((r) => r.phys.s));
+    for (const rd of roadUsers) {
       const f = rd.fighter;
       if (!rd.phys || !f || f.down || f.invuln > 0) continue;
       const hit = crossTraffic.contact(rd.phys);
@@ -1890,7 +1921,14 @@ function bustRace() {
   audio.idle();
   audio.playMusic('menu');
   refreshTitle();
+  // SAY WHAT THE BUTTON DOES. It always started career.event, which after an
+  // advance is the NEXT race -- labelled "RIDE AGAIN", so a winner had no idea
+  // the career moved on (and no way to the garage to spend the prize).
+  const ag = document.getElementById('again');
+  if (ag && !res.over) ag.textContent = res.complete ? 'NEW CAREER' : res.advanced ? `NEXT RACE: ${career.event.name}` : 'RIDE AGAIN';
+  lastResult = res;
 }
+let lastResult = null;
 
 function endRace(pos) {
   audio.siren(0);
@@ -1952,6 +1990,9 @@ function endRace(pos) {
   audio.idle();
   audio.playMusic('menu');
   refreshTitle();
+  const ag = document.getElementById('again');
+  if (ag && !res.over) ag.textContent = res.complete ? 'NEW CAREER' : res.advanced ? `NEXT RACE: ${career.event.name}` : 'RIDE AGAIN';
+  lastResult = res;
 }
 
 // ---------- harness contract ----------
@@ -2486,7 +2527,19 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Equal' || e.code === 'NumpadAdd') radar.zoom(-1);
   else if (e.code === 'Minus' || e.code === 'NumpadSubtract') radar.zoom(+1);
 });
-document.getElementById('again').addEventListener('click', () => window.__START__());
+document.getElementById('again').addEventListener('click', () => {
+  // a finished series starts over, as a dead career does
+  if (lastResult && lastResult.complete) { career.reset(); refreshTitle(); }
+  lastResult = null;
+  window.__START__();
+});
+// Back to the title: the garage, the rider designer, the settings -- where the
+// prize money is actually spent.
+document.getElementById('tomenu').addEventListener('click', () => {
+  lastResult = null;
+  document.getElementById('over').classList.remove('on');
+  quitToTitle();
+});
 // KEYBOARD START, GUARDED. Any of Enter / Space / W starts a race from the
 // title or results screen, but only when that screen is actually the one on
 // top, only on a fresh press (not auto-repeat), and never within a second of

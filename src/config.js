@@ -29,7 +29,11 @@ export const CFG = {
   // past the finish line and drawn every frame the player looked down the road.
   // Sized to the longest map (CANYON, 5300 m) plus a margin for the camera's
   // look-ahead, which is where the draw budget was going.
-  ROAD_SEGS: 700,         // SEG * ROAD_SEGS = 5600 m of physical road
+  // A FLOOR, NOT THE LENGTH: main.js raises this at load to the longest race in
+  // the career schedule (SERIES x lenMul) + ROAD_PAST_FINISH. The maps outgrew a
+  // hand-set 5600 m and the road ended before most finish lines.
+  ROAD_SEGS: 700,
+  ROAD_PAST_FINISH: 500,  // m of road beyond the longest finish, for the look-ahead
 
   // --- bike physics ---
   // TOP SPEED IS THE MEASURED TERMINAL SPEED, not a wish.
@@ -152,6 +156,7 @@ export const CFG = {
   // same tarmac at the start line.
   TRAFFIC_GAP_MIN: 380,
   TRAFFIC_GAP_SPAN: 620,
+  TRAFFIC_FLEET_LEN: 5600, // m of road the fleet is laid over (see buildTraffic)
 
   // --- bike-to-bike contact -------------------------------------------------
   // Contact is scored in the road frame as a CLOSING SPEED along the contact

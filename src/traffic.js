@@ -187,7 +187,13 @@ export function buildTraffic(seed = 73) {
   g.name = 'traffic';
   const cars = [];
   let n = 0;
-  for (let z = -120; z > -CFG.ROAD_SEGS * CFG.SEG; z -= CFG.TRAFFIC_GAP_MIN + r() * CFG.TRAFFIC_GAP_SPAN) {
+  // THE FLEET IS SIZED TO A FIXED LENGTH, NOT TO THE ROAD. Cars recycle to
+  // within ~1 km of the player (see updateTraffic), so the number of cars -- not
+  // the road length -- is the traffic density you meet. The road now grows to
+  // the longest race (up to ~21 km); laying cars along all of it would have
+  // quadrupled the fleet, the draw calls and the density.
+  const fleetLen = Math.min(CFG.ROAD_SEGS * CFG.SEG, CFG.TRAFFIC_FLEET_LEN);
+  for (let z = -120; z > -fleetLen; z -= CFG.TRAFFIC_GAP_MIN + r() * CFG.TRAFFIC_GAP_SPAN) {
     // Guarantee at least one of each big type early in the fleet so a race
     // always meets a bus and a lorry; after that the weighted draw decides.
     const forced = ['bus', 'semi', 'boxTruck', 'van', 'pickup'][n];

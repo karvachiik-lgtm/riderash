@@ -386,7 +386,11 @@ export class Scenery {
   // ------------------------------------------------------------------------
   _build(spine) {
     const rnd = prng(hashStr(spine.mapId) ^ 0x9e3779b9);
-    const roadEnd = CFG.ROAD_SEGS * CFG.SEG;              // 5600 m of physical road
+    // Dress THIS course to its finish (plus the look-ahead), not the whole
+    // physical road: the road is sized to the longest race in the career, and
+    // dressing 20 km for the 4.8 km opener would be four times the props.
+    const roadEnd = Math.min(CFG.ROAD_SEGS * CFG.SEG,
+      (spine.totalLength || CFG.ROAD_SEGS * CFG.SEG) + (CFG.ROAD_PAST_FINISH || 500));
     const sEnd = roadEnd + 60;
     const nChunks = Math.ceil((sEnd + PRE) / CHUNK);
     const buckets = [];                                    // per chunk: Map key -> {m:[], c:[]}

@@ -7,6 +7,7 @@ import { Showroom } from './showroom.js';
 import { PLAYER_CHAIN, chainState } from './chainweapon.js';   // [chain agent]
 import { buildRoad, buildRoadside, buildBackdrop, centreAt, centreTangent, headAt } from './level.js';
 import { buildTraffic, updateTraffic, trafficHit, resetTraffic } from './world.js';
+import { buildFinish, placeFinish } from './finishline.js';
 import { trafficContact, applyTrafficHit } from './traffic.js';
 import { buildLighting, followSun } from './lighting.js';
 import { Player } from './player.js';
@@ -156,6 +157,7 @@ let playerSpec = makeSpec({ height: 1.75, build: 'normal', colors: { ...(CFG.PLA
 // showroom needs the rider prototype to show the player's real body, and it is
 // constructed after the loader has run. `loadAssets` fills it in.
 const assets = { bike: null, rider: null };
+let finishGantry = null;   // the FINISH banner, moved to each race's line in __START__
 
 // The character designer. Constructed lazily the first time it is opened, so a
 // player who never opens it never pays for its scene.
@@ -409,6 +411,26 @@ async function init() {
   lights = buildLighting(scene, renderer, camera, sky);
 
   progress(0.14, 'building road');
+  // THE ROAD IS AS LONG AS THE LONGEST RACE, DERIVED, NOT HAND-SET.
+  //
+  // `ROAD_SEGS` was sized once to the longest map of the day (5300 m) and the
+  // maps were lengthened afterwards -- coastal 6400 m, desert 10000 m, and then
+  // stretched again by each level's `lenMul` (up to 2.05x, a 20.5 km desert).
+  // The tarmac, kerbs and rail simply STOPPED at 5600 m, short of every finish
+  // line but the Sierra opener's. The schedule is the source of truth for how
+  // far anyone can ride, so the road is sized from it, plus the camera's
+  // look-ahead past the line.
+  {
+    let longest = 0;
+    for (const ev of SERIES) {
+      const m = MAPS[ev.map];
+      if (!m) continue;
+      const len = m.sectors.reduce((a, [, l]) => a + l, 0) * (ev.lenMul || 1);
+      if (len > longest) longest = len;
+    }
+    const need = Math.ceil((longest + CFG.ROAD_PAST_FINISH) / CFG.SEG);
+    if (need > CFG.ROAD_SEGS) CFG.ROAD_SEGS = need;
+  }
   const road = buildRoad();
   const side = buildRoadside();
   const back = buildBackdrop();
@@ -427,6 +449,8 @@ async function init() {
   } catch (e) { console.warn('[riderash] scenery:', e); }
   const traffic = buildTraffic();
   scene.add(road, side, back, traffic);
+  finishGantry = buildFinish();
+  scene.add(finishGantry);
   world.traffic = traffic;
 
   // fills the MODULE-SCOPE `assets`, so the showroom can reach the rider later
@@ -918,6 +942,8 @@ function frame(now) {
   requestAnimationFrame(frame);
   const rawDt = (now - last) / 1000;
   last = now;
+  // HARNESS: `__HOLD__` hands the clock to __SIM__ entirely.
+  if (window.__HOLD__) return;
   pollPad();
 
   // THE DESIGNER TAKES THE WHOLE FRAME. Checked here, at the top, so none of the
@@ -1062,9 +1088,31 @@ function frameBody(dt) {
     rain.update(dt, camera, state.running && spine ? spine.weather : 0, vel);
   }
 
+  // HARNESS: `__NORENDER__` skips the present so a software-GL harness can step
+  // the real game loop quickly (see __SIM__); `__RENDER__` presents on demand.
+  if (window.__NORENDER__) return;
   if (postfx) postfx.render(dt, speedFrac);
   else renderer.render(scene, camera);
 }
+
+// HARNESS: advance the real game loop by `sec` of simulated time at a fixed
+// 60 Hz without presenting, then (optionally) render one frame. Under a software
+// GL the game manages ~1.5 fps and a 3 s countdown costs 40 s of wall clock; this
+// runs the same frameBody the browser does, just without waiting on the GPU.
+window.__STATE__ = state;
+window.__SIM__ = (sec, renderAfter = false) => {
+  const prev = window.__NORENDER__;
+  window.__NORENDER__ = true;
+  const n = Math.max(1, Math.round(sec * 60));
+  try { for (let i = 0; i < n; i++) { frameBody(1 / 60); input.endFrame(); } }
+  finally { window.__NORENDER__ = prev; }
+  if (renderAfter) window.__RENDER__();
+  return n;
+};
+window.__RENDER__ = () => {
+  const speedFrac = state.running && player ? player.phys.speed / CFG.MAX_SPEED : 0;
+  if (postfx) postfx.render(1 / 60, speedFrac); else renderer.render(scene, camera);
+};
 
 // WEATHER DRIVES THE LIGHT. The sky, fog and road all followed the weather front
 // while the sun stayed at full strength, so a storm rendered as a black sky over
@@ -1629,6 +1677,7 @@ window.__START__ = () => {
   // Re-dress the roadside for this course (no-op when it is already dressed).
   try { if (scenery) scenery.setCourse(spine); } catch (e) { console.warn('[riderash] scenery:', e); }
   state.finishS = spine.totalLength;
+  placeFinish(finishGantry, state.finishS);
   world.raceLen = spine.totalLength;
   resetRace();
   state.running = true;

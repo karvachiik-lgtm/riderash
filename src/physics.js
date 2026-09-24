@@ -760,7 +760,16 @@ export class BikePhys {
     this.pos.x += nx * this.lateral;
     this.pos.z += nz * this.lateral;
     this.roadYaw = Math.atan2(this.tangent.x, this.tangent.z);
-    this.yaw = this.roadYaw + this.yawOffset;
+    // THE HEADING TURNS THE SAME WAY THE BIKE MOVES. `yawOffset` is positive
+    // toward +lateral: the slip model below settles `lateralV` at
+    // `v * tan(yawOffset)`, and +lateral is the road normal (-t.z, 0, t.x). A
+    // world yaw `y` points the model's nose at (sin y, 0, cos y), so pointing it
+    // toward +lateral needs `roadYaw - yawOffset`. It was `+`, which MIRRORED the
+    // heading against the motion: press right, the bike moved right while its
+    // nose swung LEFT -- the rear wheel appeared to step out into the turn ahead
+    // of the front. MEASURED on a fresh BikePhys at 25 m/s, full right: lateral
+    // +0.97 m after 1 s while forward.x went -0.10 -> -0.30 (nose to the left).
+    this.yaw = this.roadYaw - this.yawOffset;
     this.forward.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
 
     // ---- ROAD PITCH: the two-point sample -------------------------------
@@ -820,6 +829,36 @@ export class BikePhys {
     // The airborne test can use this instead of a one-point frame derivative.
     this.axleGrade = (yR - yF) / PHYS.WHEELBASE;
     return this;
+  }
+
+  /**
+   * WHERE THE BIKE PIVOTS WHEN IT TURNS: THE REAR CONTACT, NOT THE MIDDLE.
+   *
+   * The kinematic bicycle model (the one every vehicle-dynamics text starts
+   * from) says the rear tyre rolls WITHOUT sliding sideways: its velocity lies
+   * along the bike's heading, and the machine rotates about a point on the line
+   * through the rear axle. So when the bars turn in, the FRONT swings into the
+   * corner and the rear follows its own track.
+   *
+   * This integrator tracks the MIDDLE of the wheelbase and moves it along the
+   * path angle, with the heading leading it by `headingSlip`. Drawn about the
+   * middle, the rear therefore kicks OUT by (L/2)·sin(slip) on every turn-in --
+   * a small but visible "the back wheel moves first". Translating the drawn
+   * bike by that amount along the road normal puts the rear contact back on the
+   * path and lets the front lead, which is what the eye expects.
+   *
+   * Render-only: the physics state is untouched. Faded out at a crawl, and
+   * during a real slide (large slip), where the rear SHOULD step out.
+   */
+  rearPivotShift(out) {
+    out.set(0, 0, 0);
+    const slip = this.headingSlip || 0;
+    if (!Number.isFinite(slip) || this.speed < 2) return out;
+    const fade = Math.min(1, (this.speed - 2) / 6) * Math.max(0, 1 - Math.abs(slip) / 0.35);
+    const d = THREE.MathUtils.clamp(PHYS.WHEELBASE * 0.5 * Math.sin(slip), -0.3, 0.3) * fade;
+    // +lateral is the road normal (-t.z, 0, t.x); see sync().
+    out.set(-this.tangent.z * d, 0, this.tangent.x * d);
+    return out;
   }
 
   // ---------------------------------------------------------------------
@@ -1428,6 +1467,8 @@ export class BikePhys {
     const fwdV = Math.max(1, this.speed * Math.cos(this.yawOffset));
     const pathAngle = Math.atan2(this.lateralV, fwdV);
     const slip = this.yawOffset - pathAngle;
+    // Published for the renderer's rear-contact pivot (see rearPivotShift).
+    this.headingSlip = slip;
     // The load on each tyre is NOT the static split any more: it is whatever the
     // weight transfer above left there. A tyre carrying its load makes more
     // force, so braking into a corner genuinely tightens the front and loosens

@@ -22,8 +22,9 @@
 //  2. THE RIDER IS THE PHYSICS SUBJECT WHILE ON FOOT. `player.phys` is driven at
 //     walking speed by this module instead of by `BikePhys.step`, so the existing
 //     chase camera keeps looking at the person the player is controlling, with no
-//     camera change. The BIKE becomes the free body, drawn as a child of the
-//     group at its own offset (see Dismount.render).
+//     camera change. Both BODIES become children of the scene while on foot (see
+//     Dismount._detach): the thrown rider is a ragdoll (ragdoll.js), and the
+//     bike slides, stops and STAYS where it stopped until he walks to it.
 //
 //  3. REST POSE BEFORE DELTAS. riderpose.clearAxes first, every frame, then the
 //     walk's own rest, then the sine gait. Skipping the clear is the measured
@@ -39,6 +40,7 @@ import { clearAxes } from './riderpose.js';
 import { GAIT } from './motions.js';
 import { RIDING } from './reach.js';
 import { CFG } from './config.js';
+import { Ragdoll, restoreRest, captureLocal, blendFrom } from './ragdoll.js';
 
 // ---------------------------------------------------------------------------
 // States. Strings rather than an enum so a log line reads as the state's name.
@@ -70,8 +72,8 @@ export const DIS = {
   DOWN_TIME: 0.80,        // s lying still, reading the situation
   STAND_TIME: 0.95,       // s rising to the feet
   MOUNT_TIME: 0.90,       // s swinging a leg back over
-  WALK_SPEED: 3.20,       // m/s under the player's own control
-  WALK_AUTO_SPEED: 2.60,  // m/s the homing assist walks at
+  WALK_SPEED: 4.00,       // m/s under the player's own control: a jog back
+  WALK_AUTO_SPEED: 3.40,  // m/s the homing assist walks at
   WALK_ACCEL: 9.0,        // m/s^2 toward the target walking speed
   WALK_TURN: 4.2,         // rad/s the walker faces its direction of travel
 
@@ -112,8 +114,18 @@ export const DIS = {
   BIKE_SPIN_DAMP: 2.6,
   BIKE_STOP: 0.45,        // m/s under which the bike is at rest
 
-  MOUNT_RANGE: 1.70,      // m from the bike at which remount is offered
-  AUTO_HOME_AFTER: 3.5,   // s of no meaningful approach before the assist walks
+  // THE THROWN BODY is now a ragdoll (ragdoll.js), so FALL_TIME is only the
+  // fallback for a rig without joints. The fall ends when the body is at rest,
+  // or at FALL_CAP whatever it is doing -- past ~3 s a wreck is an interruption.
+  FALL_CAP: 3.0,
+  GETUP_BLEND: 0.45,      // s to blend out of the ragdoll's last pose on the rise
+  BIKE_KEEP: 0.72,        // fraction of crash speed the bike keeps (rider keeps ~0.95)
+  BIKE_GRAVITY: 14.0,
+
+  MOUNT_RANGE: 1.45,      // m from the bike at which remount begins
+  AUTO_HOME_AFTER: 1.2,   // s of no meaningful approach before the assist walks.
+                          // Was 3.5: a player who has just been thrown does not
+                          // know he can walk, and 3.5 s standing still reads as stuck.
   HARD_FOOT_CAP: 26.0,    // s on foot before a forced remount. The bound.
 
   STAND_Y: 0.0,           // the rider's origin IS his feet, so he stands at 0
@@ -130,6 +142,25 @@ export const DIS = {
 const _c = new THREE.Vector3();
 const _t = new THREE.Vector3();
 const _p = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+const _wc = new THREE.Vector3(), _wt = new THREE.Vector3();
+
+const wrapPi = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+
+// The inverse of roadToWorld: a world point to (s, lateral), returned as
+// out.x = s, out.z = lateral. The road is a function of z, so two fixed-point
+// passes are exact to well under a millimetre.
+function worldToRoad(pos, out) {
+  let s = -pos.z, lateral = 0;
+  for (let i = 0; i < 3; i++) {
+    centreAt(-s, _wc);
+    headAt(-s, _wt);
+    const dx = pos.x - _wc.x, dz = pos.z - _wc.z;
+    lateral = dx * -_wt.z + dz * _wt.x;
+    s += dx * _wt.x + dz * _wt.z;
+  }
+  return out.set(s, 0, lateral);
+}
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const easeInOut = (t) => { const u = clamp(t, 0, 1); return u * u * (3 - 2 * u); };
@@ -148,120 +179,148 @@ function roadToWorld(s, lateral, out) {
 }
 
 export class Dismount {
-  constructor(player) {
-    // scratch, allocated ONCE: measuring the body every prone frame must not
-    // allocate a Box3 at 60 Hz
+  /**
+   * `owner` is anything with the rider rig shape: { phys, rider, bike, group,
+   * socket, fighter }. The player and every rival have it.
+   *
+   * `opts.auto`: an AI walker. It gets up and walks straight back to its bike
+   * with no homing delay (the assist delay exists for a human who may not know
+   * they can walk).
+   */
+  constructor(owner, opts = {}) {
     this._proneBox = new THREE.Box3();
     this._bikeBox = new THREE.Box3();
-    this.player = player;
+    this.player = owner;
+    this.auto = !!opts.auto;
     this.state = ST.RIDING;
     this.t = 0;               // seconds in the current state
     this.total = 0;           // seconds since the fall started
+    this.rag = null;          // the thrown body (ragdoll.js) while FALLING / DOWN
+    this.getUp = null;        // captured ragdoll pose, blended out on the rise
     this.walk = this._freshWalk();
   }
 
-  // A whole new on-foot record. reset() replaces this object rather than picking
-  // fields off it — §5.16 is the record of what a chosen subset costs.
   _freshWalk() {
     return {
-      // rider body, in the road frame
+      // rider body, in the road frame (derived from the ragdoll while it flies)
       s: 0, lateral: 0, speed: 0, lateralV: 0,
       yawOffset: 0, yawRate: 0,
-      airY: 0, airVY: 0, // vertical hop during the tumble
-      roll: 0, rollV: 0, // tumble about the travel axis
-      pitch: 0,          // face-down / face-up lean of the body
-      // bike body, in the road frame
+      airY: 0, airVY: 0,
+      roll: 0, rollV: 0,
+      pitch: 0,
+      // bike body, in the road frame, plus its own hop and roll
       bikeS: 0, bikeLateral: 0, bikeSpeed: 0, bikeLateralV: 0,
       bikeYawOffset: 0, bikeYawRate: 0, bikeStopped: false,
+      bikeY: 0, bikeVY: 0, bikeRoll: 0, bikeRollV: 0, bikeRollTarget: 1.35,
       // walking bookkeeping
-      facing: 0,          // world yaw the walker faces
-      gaitPhase: 0,       // the sine gait's clock, advanced by ground speed
-      rise: 0,            // 0 = prone, 1 = on the feet; latches during the rise
-      homeTimer: 0,       // s spent not approaching the bike
+      facing: 0,
+      gaitPhase: 0,
+      rise: 0,
+      homeTimer: 0,
+      assist: false,      // the homing assist, latched until the player acts
       lastDist: Infinity,
+      // harness: the two numbers that say whether a crash reads as a crash
+      peakSep: 0,         // m, largest rider-bike separation during the fall
+      restAt: -1,         // s from impact to the body coming to rest
     };
   }
 
   /** Put the whole state machine back to a known state for a new race. */
   reset() {
+    this._reattach();
     this.state = ST.RIDING;
     this.t = 0;
     this.total = 0;
+    this.rag = null;
+    this.getUp = null;
     this.walk = this._freshWalk();
     const p = this.player && this.player.phys;
     if (p) { p.airY = 0; p.airVY = 0; }
     return this;
   }
 
-  get onFoot() {
-    return this.state !== ST.RIDING;
-  }
-
-  /** True while the module is posing the rider and the bike itself. */
+  get onFoot() { return this.state !== ST.RIDING; }
   get ownsPose() { return this.onFoot; }
+  get focus() { return this.player.phys.pos; }
 
-  // The world position the camera should be watching. While riding that is the
-  // bike (the group); while on foot it is the person, who is the subject.
-  get focus() {
-    return this.player.phys.pos;
-  }
+  /** Harness: rider-bike separation right now, metres. */
+  get separation() { return this._distToBike(); }
 
   /**
-   * Start a fall. Called by Player the frame `fighter.down` goes true.
+   * Start a fall. Called the frame `fighter.down` goes true.
    *
-   * `source` is free-form: { side, speed } if a caller knows more, ignored
-   * otherwise. Everything needed is already on `phys` — knockDown applied the
-   * speed loss and the lateral/yaw kick, and this reads that state rather than
-   * inventing a second version of it.
+   * `source.side` is the side the blow came from if known; `source.kind` may be
+   * 'head' (hit something ahead), 'side' (a swipe) or 'rear' -- the crash type
+   * picks the launch, so a head-on and a swipe do not look the same.
    */
   beginFall(source = {}) {
-    const p = this.player.phys;
+    const player = this.player;
+    const p = player.phys;
     const w = this.walk = this._freshWalk();
     this.state = ST.FALLING;
     this.t = 0;
     this.total = 0;
+    this.getUp = null;
 
-    // --- rider: inherits the bike's velocity at the moment of the fall ---
     w.s = Number.isFinite(p.s) ? p.s : 0;
     w.lateral = Number.isFinite(p.lateral) ? p.lateral : 0;
     w.speed = Math.max(0, Number.isFinite(p.speed) ? p.speed : 0);
     w.lateralV = Number.isFinite(p.lateralV) ? p.lateralV : 0;
-    // thrown off to one side; `source.side` when a caller knows which side the
-    // blow came from, otherwise whichever way the bike was already sliding.
-    const side = source.side || (Math.sign(w.lateralV) || (Math.random() < 0.5 ? -1 : 1));
-    w.lateralV += side * 1.2;
     w.yawOffset = Number.isFinite(p.yawOffset) ? p.yawOffset : 0;
-    w.yawRate = Number.isFinite(p.yawRate) ? p.yawRate : 0;
-    w.airY = DIS.RIDER_AIR_START;         // knocked clear of the machine
-    // THE LAUNCH SCALES WITH CRASH SPEED. At a 43 m/s wreck this is ~5.5 m/s up
-    // (a ~1 m apogee, ~0.73 s of airtime); at a walking-pace bump it is 1.6 m/s
-    // (a ~9 cm stumble). Without the scaling every crash looked identical, which
-    // is its own tell that nothing physical is happening.
-    const speedFrac = clamp(w.speed / DIS.RIDER_HOP_REF, 0, 1);
-    w.airVY = DIS.RIDER_HOP_MIN + (DIS.RIDER_HOP_MAX - DIS.RIDER_HOP_MIN) * speedFrac;
-    w.roll = 0;
-    // The tumble also scales: a body thrown harder turns over more.
-    w.rollV = side * DIS.RIDER_SPIN * (0.5 + 0.5 * speedFrac);
-    w.pitch = 0;
     w.facing = p.yaw || 0;
+    const side = source.side || (Math.sign(w.lateralV) || (Math.random() < 0.5 ? -1 : 1));
+    const kind = source.kind || (Math.abs(w.lateralV) > 3 ? 'side' : 'head');
+    const speedFrac = clamp(w.speed / DIS.RIDER_HOP_REF, 0, 1);
 
-    // --- bike: keeps sliding, decoupled from here on ---
+    // ---- world-frame directions at the crash ----
+    headAt(-w.s, _t);                                  // travel direction
+    const tangent = new THREE.Vector3(_t.x, 0, _t.z).normalize();
+    const normal = new THREE.Vector3(-tangent.z, 0, tangent.x);   // +lateral
+    const heading = new THREE.Vector3(Math.sin(w.facing), 0, Math.cos(w.facing));
+    const vel = tangent.clone().multiplyScalar(w.speed * Math.cos(w.yawOffset))
+      .addScaledVector(normal, w.lateralV);
+
+    // ---- CUT THE STRINGS: both bodies become children of the scene ----
+    this._detach();
+
+    // ---- THE LAUNCH: rider and bike DIVERGE from the first frame ----------
+    // Rider keeps most of the forward momentum, gains lift and a sideways kick;
+    // the bike loses more speed, stays low and spins. The separation in the
+    // first 300 ms is what the eye reads as the impact.
+    const L = kind === 'head' ? { keep: 0.95, lift: 1.0, kick: 0.6, pitch: 1.0 }
+            : kind === 'rear' ? { keep: 0.80, lift: 0.45, kick: 0.5, pitch: 0.5 }
+            :                   { keep: 0.90, lift: 0.55, kick: 1.4, pitch: 0.45 };
+    const lift = (DIS.RIDER_HOP_MIN + (DIS.RIDER_HOP_MAX - DIS.RIDER_HOP_MIN) * speedFrac) * L.lift;
+    const kick = (1.2 + 2.6 * speedFrac) * L.kick;
+    const rVel = vel.clone().multiplyScalar(L.keep)
+      .add(new THREE.Vector3(0, lift, 0))
+      .addScaledVector(normal, side * kick);
+    // Over the bars: rotation about the axis (up x heading) pitches the head
+    // forward and down; a roll about the heading tumbles him onto a shoulder.
+    const up = new THREE.Vector3(0, 1, 0);
+    const spin = new THREE.Vector3().crossVectors(up, heading)
+      .multiplyScalar((2.0 + 5.0 * speedFrac) * L.pitch)
+      .addScaledVector(heading, side * (1.0 + 2.5 * speedFrac) * (kind === 'side' ? 1.4 : 0.6))
+      .addScaledVector(up, (Math.random() - 0.5) * 2.0);
+    this.rag = player.rider ? new Ragdoll(player.rider) : null;
+    if (this.rag && this.rag.ok) this.rag.launch(rVel, spin);
+    else this.rag = null;
+
+    // ---- the bike: keeps sliding low, decoupled from here on ----
     w.bikeS = w.s;
     w.bikeLateral = w.lateral;
-    w.bikeSpeed = w.speed;
-    w.bikeLateralV = w.lateralV * 0.35;   // only some of the sideways throw
+    w.bikeSpeed = w.speed * DIS.BIKE_KEEP;
+    w.bikeLateralV = w.lateralV * 0.5 - side * 0.8;     // it goes the other way
     w.bikeYawOffset = w.yawOffset;
-    w.bikeYawRate = w.yawRate;
+    w.bikeYawRate = (Math.random() < 0.5 ? -1 : 1) * (1.5 + 3.5 * speedFrac);
     w.bikeStopped = false;
+    w.bikeY = 0;
+    w.bikeVY = 0.6 + 2.2 * speedFrac;
+    w.bikeRoll = player.bikeLean || p.lean || 0;
+    w.bikeRollTarget = (Math.sign(w.bikeRoll) || -side) * 1.35;
+    w.bikeRollV = w.bikeRollTarget * 3.0;
   }
 
-  // -------------------------------------------------------------------------
-  // Per frame. Returns the current state string.
-  //
-  // `input` is the game's own input object (throttle/brake/steer). Walking uses
-  // the SAME keys as riding, deliberately: W walks forward, A/D steer the walk,
-  // and there is no new control to learn for a mechanic the player meets once.
-  // -------------------------------------------------------------------------
   update(dt, input) {
     const d = Math.min(0.05, Math.max(0, dt));
     this.t += d;
@@ -277,67 +336,78 @@ export class Dismount {
     return this.state;
   }
 
+  // Project the ragdoll's pelvis into the road frame, so the camera, the HUD,
+  // the standings and the harness keep reading one (s, lateral).
+  _followBody() {
+    const w = this.walk;
+    if (!this.rag) return;
+    worldToRoad(this.rag.pelvis, _p);
+    w.s = _p.x; w.lateral = _p.z;
+    const sep = this._distToBike();
+    if (sep > w.peakSep) w.peakSep = sep;
+  }
+
   // ---- FALLING: both bodies are moving, neither is controlled ---------------
   _stepFalling(d) {
     const w = this.walk;
     this._stepBike(d);
-    // rider: forward slide scrubbed, sideways scrubbed, a ballistic hop, and a
-    // tumble that damps out. All of it clamps, because a non-finite value here
-    // reaches phys and then the renderer (§5.6).
-    w.speed -= Math.sign(w.speed) * Math.min(Math.abs(w.speed), DIS.RIDER_FRICTION * d);
-    w.lateralV -= Math.sign(w.lateralV) * Math.min(Math.abs(w.lateralV), DIS.RIDER_SIDE_FRICTION * d);
-    w.airVY -= DIS.RIDER_GRAVITY * d;
-    w.airY += w.airVY * d;
-    if (w.airY <= 0) {
-      w.airY = 0;
-      if (Math.abs(w.airVY) > 0.8) w.airVY = -w.airVY * 0.18;   // a small bounce
-      else w.airVY = 0;
-    }
-    w.rollV *= (1 - d * 2.4);
-    w.roll += w.rollV * d;
-    w.yawRate *= (1 - d * 2.0);
-    w.yawOffset += w.yawRate * d;
-    w.s += w.speed * d;
-    w.lateral += w.lateralV * d;
-    this._clampToWorld(w);
-
-    // The body has stopped moving. Down it is.
-    const moving = w.speed > 0.9 || Math.abs(w.lateralV) > 0.9 || w.airY > 0.01;
-    if ((this.t >= DIS.FALL_TIME && !moving) || this.t >= DIS.FALL_TIME + 1.4) {
+    if (this.rag) {
+      this.rag.step(d);
+      this._followBody();
+      if (this.rag.atRest || this.t > DIS.FALL_CAP) {
+        if (w.restAt < 0) w.restAt = this.total;
+        this._enter(ST.DOWN);
+      }
+    } else if (this.t >= DIS.FALL_TIME) {
       this._enter(ST.DOWN);
-      w.pitch = DIS.DOWN_ROLL;             // face-down on the tarmac
-      w.airY = 0;
     }
   }
 
-  // ---- DOWN: lying still; the player can see where the bike ended up --------
+  // ---- DOWN: lying still, limp; the player can see where the bike ended up --
   _stepDown(d) {
     this._stepBike(d);
-    const w = this.walk;
-    w.rollV *= (1 - d * 3.0);
-    w.roll += w.rollV * d;
-    if (this.t >= DIS.DOWN_TIME) {
-      this._enter(ST.STANDING);
-    }
+    if (this.rag) { this.rag.step(d); this._followBody(); }
+    if (this.t >= DIS.DOWN_TIME) this._beginGetUp();
   }
 
-  // ---- STANDING: a short scripted rise to the feet -------------------------
+  // Hand the body from the ragdoll to the procedural rise. The walker starts
+  // where the pelvis lies, facing so the procedural prone pose puts the head
+  // where the ragdoll's head is, and the ragdoll's joint pose is captured so the
+  // rise can blend OUT of it instead of popping.
+  _beginGetUp() {
+    const w = this.walk;
+    const rider = this.player.rider;
+    if (this.rag && rider) {
+      this._followBody();
+      _c.subVectors(this.rag.head, this.rag.pelvis); _c.y = 0;
+      // the prone pose lies head toward the walker's -forward (bodyX < 0)
+      if (_c.lengthSq() > 1e-4) w.facing = Math.atan2(-_c.x, -_c.z);
+      const j = rider.userData.joints;
+      rider.updateMatrixWorld(true);
+      const pw = new THREE.Vector3(), pq = new THREE.Quaternion();
+      j.pelvis.matrixWorld.decompose(pw, pq, _c);
+      this.getUp = { pose: captureLocal(rider), pelvisPos: pw, pelvisQ: pq };
+    }
+    this.rag = null;
+    w.rise = 0;
+    // HE STANDS UP STILL. `speed` still held the crash speed the fall began
+    // with, so the first walking frame set off at 30 m/s -- MEASURED in the crash
+    // lab, the walker shot 50 m back up the road in a second and a half.
+    w.speed = 0; w.lateralV = 0; w.yawRate = 0;
+    w.lastDist = this._distToBike(); w.homeTimer = 0;
+    this._enter(ST.STANDING);
+  }
+
+  // ---- STANDING: the rise, blended out of the ragdoll's final pose --------
   _stepStanding(d) {
     this._stepBike(d);
-    // ROLL BACK TO ZERO. The tumble leaves the body rolled onto its side
-    // (measured: 0.99 rad, 57 degrees, still there when the stand began), and a
-    // standing figure leaning permanently at 57 degrees is the same class of
-    // "it renders and is wrong" that this module exists to avoid. It unwinds
-    // with the rise rather than snapping.
     const w = this.walk;
     w.roll *= (1 - Math.min(1, d * 6.0));
-    if (Math.abs(w.roll) < 0.01) w.roll = 0;
     if (this.t >= DIS.STAND_TIME) {
       w.roll = 0;
+      w.rise = 1;
+      this.getUp = null;
       this._enter(ST.WALKING);
-      // face the bike to start with, which is also the direction the player
-      // almost always wants to go.
-      w.facing = this._bearingToBike();
     }
   }
 
@@ -347,62 +417,113 @@ export class Dismount {
     this._stepBike(d);
 
     const dist = this._distToBike();
-    // steer: A/D are a turn rate, W/S are forward/back. Same keys as the bike.
     const steer = input && Number.isFinite(input.steer) ? clamp(input.steer, -1, 1) : 0;
     const thr = input ? (input.throttle ? 1 : 0) : 0;
     const brake = input ? (input.brake ? 1 : 0) : 0;
 
-    // THE HOMING ASSIST, and why it is not optional. A player can be knocked
-    // down at 30 m/s and the bike can slide 40 m; with no input that is half a
-    // minute of walking, and a player who does not realise they can walk reads
-    // the game as broken and stuck. After AUTO_HOME_AFTER seconds of not
-    // approaching, the walker turns itself toward the bike and walks. It yields
-    // the moment the player steers, so it is a floor, not a cutscene.
-    if (dist < w.lastDist - 0.05) { w.homeTimer = 0; }
+    // "Approaching" is a RATE, not a per-frame step: 0.05 m a frame is 3 m/s,
+    // faster than the auto-walk itself, so the old test never saw the assist
+    // making progress and it switched itself off and on -- MEASURED in the
+    // crash lab as a walker crawling at ~0.7 m/s into the 26 s force-mount.
+    const closing = (w.lastDist - dist) / Math.max(1e-3, d);
+    if (closing > 0.8) { w.homeTimer = 0; }
     else { w.homeTimer += d; }
     w.lastDist = dist;
-    const assisting = w.homeTimer > DIS.AUTO_HOME_AFTER;
+    // The assist LATCHES once it engages and lets go only when the player
+    // touches a key. An AI walker is always assisted. The first moments after
+    // standing are an assisted turn toward the bike: he gets up and LOOKS for it.
+    const playerInput = Math.abs(steer) > 0.1 || thr || brake;
+    if (playerInput) w.assist = false;
+    else if (w.homeTimer > DIS.AUTO_HOME_AFTER) w.assist = true;
+    const assisting = this.auto || w.assist || (this.t < 0.8 && !playerInput);
 
-    if (assisting) w.facing = this._bearingToBike();
-
-    // turning
+    // TURN, never snap. The walker rotates toward the bike at a body's turning
+    // rate; the old code set `facing` to the bearing outright, so the figure
+    // spun on the spot in one frame.
+    if (assisting) {
+      const err = wrapPi(this._bearingToBike() - w.facing);
+      w.facing += clamp(err, -DIS.WALK_TURN * 1.4 * d, DIS.WALK_TURN * 1.4 * d);
+    }
     w.facing -= steer * DIS.WALK_TURN * d * (assisting ? 0.25 : 1);
-    if (Number.isFinite(w.facing)) w.yawOffset = 0; // world yaw derived below
 
-    // speed
     let target = 0;
-    if (assisting) target = DIS.WALK_AUTO_SPEED;
+    const facingErr = Math.abs(wrapPi(this._bearingToBike() - w.facing));
+    if (assisting && this.t > 0.25) target = DIS.WALK_AUTO_SPEED * (this.auto ? 1.35 : 1) * (facingErr < 1.2 ? 1 : 0.3);
     else if (thr && !brake) target = DIS.WALK_SPEED;
     else if (brake) target = -DIS.WALK_SPEED * 0.45;
+    // slow down to step up to the machine rather than walking into it
+    if (assisting) target = Math.min(target, 0.6 + dist * 1.2);
     w.speed += clamp(target - w.speed, -DIS.WALK_ACCEL * d, DIS.WALK_ACCEL * d);
     if (Math.abs(w.speed) < 0.02) w.speed = 0;
 
-    // Move along the world facing, then project back into the road frame. This
-    // is what keeps the walker on the road's own elevation: (s, lateral) is the
-    // frame the road is defined in.
-    const fwdS = -Math.cos(w.facing);
-    const fwdL = Math.sin(w.facing);
-    w.s += w.speed * fwdS * d;
-    w.lateral += w.speed * fwdL * d;
+    // Move along the world facing, then project back into the road frame.
+    // facing is a WORLD yaw; forward is (sin f, 0, cos f).
+    roadToWorld(w.s, w.lateral, _p);
+    _p.x += Math.sin(w.facing) * w.speed * d;
+    _p.z += Math.cos(w.facing) * w.speed * d;
+    worldToRoad(_p, _c);
+    w.s = _c.x; w.lateral = _c.z;
     this._clampToWorld(w);
 
     if (dist <= DIS.MOUNT_RANGE || this.total >= DIS.HARD_FOOT_CAP) {
-      this._enter(ST.MOUNTING);
+      this._beginMount();
     }
   }
 
-  // ---- MOUNTING: a short leg-over, then riding ---------------------------------
+  // ---- MOUNTING: the machine comes up, the rider swings a leg over ----------
+  //
+  // THE BIKE DOES NOT MOVE TO THE MAN. The phys body is put at the BIKE (where
+  // it lies), the group goes with it, and the bike is handed back to the group
+  // exactly where it is; only its roll comes out as he heaves it upright. The
+  // rider goes to the group at his current world transform and is carried from
+  // there to the saddle.
+  _beginMount() {
+    const player = this.player, p = player.phys, w = this.walk;
+    p.s = w.bikeS;
+    p.lateral = w.bikeLateral;
+    p.yawOffset = this._wrap(w.bikeYawOffset);
+    w.bikeYawOffset = p.yawOffset;
+    p.speed = 0; p.lateralV = 0; p.lean = 0; p.airY = 0;
+    p.sync();
+    player.group.position.copy(p.pos);
+    player.group.rotation.set(p.roadPitch || 0, p.yaw, 0, 'YXZ');
+    player.group.updateMatrixWorld(true);
+    const bike = player.bike, rider = player.rider;
+    if (bike) {
+      this._placeBike();
+      player.group.attach(bike);
+      this._mBikeP = bike.position.clone();
+      this._mBikeQ = bike.quaternion.clone();
+    }
+    if (rider) {
+      player.group.attach(rider);
+      this._mRiderP = rider.position.clone();
+      this._mRiderQ = rider.quaternion.clone();
+      this._mRiderS = rider.scale.x;
+    }
+    this._enter(ST.MOUNTING);
+  }
+
   _stepMounting(d) {
-    this._stepBike(d);
     if (this.t >= DIS.MOUNT_TIME) this._finishMount();
   }
 
   // -------------------------------------------------------------------------
-  // The bike's own slide, in the road frame. It is the whole reason the bike and
-  // the rider can separate: this runs whether or not the rider is even upright.
+  // The bike's own slide, in the road frame, plus its hop and its fall onto its
+  // side. Runs whether or not the rider is even upright -- the whole reason the
+  // two can separate. Once it stops it STAYS where it stopped.
   // -------------------------------------------------------------------------
   _stepBike(d) {
     const w = this.walk;
+    // hop and roll settle even after the slide has stopped
+    w.bikeVY -= DIS.BIKE_GRAVITY * d;
+    w.bikeY += w.bikeVY * d;
+    if (w.bikeY <= 0) { w.bikeY = 0; w.bikeVY = w.bikeVY < -1.2 ? -w.bikeVY * 0.25 : 0; }
+    // roll: a damped spring onto its side, with a bounce as the bar end hits
+    const ra = (w.bikeRollTarget - w.bikeRoll) * 60 - w.bikeRollV * 7;
+    w.bikeRollV += ra * d;
+    w.bikeRoll += w.bikeRollV * d;
+    if (Math.abs(w.bikeRoll) > 1.45) { w.bikeRoll = Math.sign(w.bikeRoll) * 1.45; w.bikeRollV *= -0.3; }
     if (w.bikeStopped) return;
     w.bikeSpeed -= Math.sign(w.bikeSpeed) * Math.min(Math.abs(w.bikeSpeed), DIS.BIKE_FRICTION * d);
     w.bikeLateralV -= Math.sign(w.bikeLateralV) * Math.min(Math.abs(w.bikeLateralV), DIS.BIKE_SIDE_FRICTION * d);
@@ -412,25 +533,18 @@ export class Dismount {
     w.bikeLateral += w.bikeLateralV * d;
     this._clampToWorld(w);
     if (Math.abs(w.bikeSpeed) < DIS.BIKE_STOP && Math.abs(w.bikeLateralV) < DIS.BIKE_STOP) {
-      w.bikeSpeed = 0; w.bikeLateralV = 0; w.bikeStopped = true;
+      w.bikeSpeed = 0; w.bikeLateralV = 0; w.bikeYawRate = 0; w.bikeStopped = true;
     }
   }
 
-  // Keep both road-frame bodies on the tarmac and inside the rail. The rider can
-  // be flung into the verge but is walked back toward the road, because a walker
-  // 30 m out in the scrub can never reach the bike and the whole mechanic dies.
   _clampToWorld(w) {
     const half = CFG.ROAD_W / 2;
     const rail = half + CFG.KERB_W + 0.9;
-    if (Math.abs(w.lateral) > rail) { w.lateral = Math.sign(w.lateral) * rail; w.lateralV = 0; }
+    if (Math.abs(w.lateral) > rail) { w.lateral = Math.sign(w.lateral) * rail; }
     if (Math.abs(w.bikeLateral) > rail) { w.bikeLateral = Math.sign(w.bikeLateral) * rail; w.bikeLateralV = 0; }
-    // A gentle pull from the verge back toward the tarmac. Weak deliberately: it
-    // must not fight the player's own steering, only prevent a stranded walk.
-    if (Math.abs(w.lateral) > half) w.lateralV -= Math.sign(w.lateral) * 3.2 * 0.016;
-    // Nothing may leave here non-finite. §5.6: a NaN in a physics value reaches
-    // the audio graph and the renderer and takes the frame down.
     for (const k of ['s', 'lateral', 'speed', 'lateralV', 'bikeS', 'bikeLateral',
-                     'bikeSpeed', 'bikeLateralV', 'yawOffset', 'yawRate', 'facing']) {
+                     'bikeSpeed', 'bikeLateralV', 'yawOffset', 'yawRate', 'facing',
+                     'bikeYawOffset', 'bikeYawRate', 'bikeY', 'bikeVY', 'bikeRoll', 'bikeRollV']) {
       const v = w[k];
       if (typeof v === 'number' && !Number.isFinite(v)) w[k] = 0;
     }
@@ -438,17 +552,15 @@ export class Dismount {
 
   _distToBike() {
     const w = this.walk;
-    const ds = w.s - w.bikeS;
-    const dl = w.lateral - w.bikeLateral;
-    return Math.hypot(ds, dl);
+    return Math.hypot(w.s - w.bikeS, w.lateral - w.bikeLateral);
   }
 
+  // WORLD yaw from the walker to the bike, in the (sin f, 0, cos f) convention.
   _bearingToBike() {
     const w = this.walk;
-    const ds = w.bikeS - w.s;                 // + = bike is further up the road
-    const dl = w.bikeLateral - w.lateral;
-    // world direction: forward is -z as s rises, right is +lateral
-    return Math.atan2(dl, -ds);
+    roadToWorld(w.s, w.lateral, _p);
+    roadToWorld(w.bikeS, w.bikeLateral, _c);
+    return Math.atan2(_c.x - _p.x, _c.z - _p.z);
   }
 
   _enter(state) {
@@ -456,16 +568,15 @@ export class Dismount {
     this.t = 0;
   }
 
-  // Hand control back to the bike. The rider is standing at the machine, so the
-  // machine's own rest position becomes the new riding position — which is why
-  // walking somewhere and remounting actually moves the race along.
+  // Hand control back to the bike, which is where it lay -- walking to it and
+  // remounting is what moves the race along.
   _finishMount() {
     const p = this.player.phys;
     const w = this.walk;
     p.s = w.bikeS;
     p.lateral = w.bikeLateral;
     p.yawOffset = w.bikeYawOffset;
-    p.speed = Math.max(2.5, Math.abs(w.bikeSpeed));   // the push-start handles the rest
+    p.speed = 2.5;                  // the push-start handles the rest
     p.lateralV = 0;
     p.yawRate = 0;
     p.lean = 0;
@@ -476,256 +587,206 @@ export class Dismount {
     const f = this.player.fighter;
     if (f) { f.down = false; f.downTimer = 0; f.invuln = CFG.INVULN_AFTER; }
 
-    // Back on the machine: hand the rider back to the saddle socket FIRST, so the
-    // very frame control returns, the rider is a child of the bike again and
-    // Player.applyVisual's riding pose has the chain it expects.
-    this._setRidingRig(true);
-
-    // ...the module relinquishes the pose so Player's own riding pose drives
-    // again from this frame.
+    this._reattach();
+    if (this.player.bikeLean !== undefined) this.player.bikeLean = 0;
     this.state = ST.RIDING;
     this.t = 0;
     this.total = 0;
   }
 
   // -------------------------------------------------------------------------
-  // RENDERING. Player.applyVisual calls this while onFoot.
+  // PARENTING.
   //
-  // The group is anchored to the RIDER (player.phys is the walker), so the
-  // rider is at the group origin and the BIKE is the child at an offset. The
-  // offset is the inverse of the group's own yaw-only transform.
-  /**
-   * Re-parent the rider between the two rigs it lives in.
-   *
-   * RIDING:  group -> bike -> socket -> rider   (the saddle is the parent)
-   * ON FOOT: group -> rider                     (the rider IS the body)
-   *
-   * This is the connection fix. The rider used to stay parented to the movable
-   * bike group for the whole on-foot sequence, so every write this module makes
-   * to `rider.position` -- which it intends as ROAD space, because the walker is
-   * the subject -- was actually applied in the BIKE's frame. The bike slides and
-   * spins while the player walks, so the walker was carried along by a machine he
-   * is supposed to have left behind: that is the "why is the bike moving when he
-   * is walking" defect, and it is a parenting bug, not a numbers bug.
-   *
-   * `attach`-style: the rider's world transform is preserved across the change,
-   * so there is no pop at the instant of the swap. three.js expresses this as
-   * `Object3D.attach` (re-parent while keeping world transform); the mount
-   * direction is a plain `add` because the socket's local seat offset is exactly
-   * where the pelvis should be, which is the whole point of having a socket.
-   */
-  _setRidingRig(riding) {
+  // RIDING:  group -> bike -> socket -> rider
+  // ON FOOT: scene -> bike,  scene -> rider   (two free bodies)
+  //
+  // Detaching uses `Object3D.attach`, which re-parents while preserving the
+  // world transform, so there is no pop. The old on-foot rig kept the BIKE as a
+  // child of the group and anchored the group to the WALKER, computing the
+  // bike's offset with the walker's current yaw while the group kept its last
+  // riding yaw -- so every step the walker turned, the parked bike swung around
+  // him. That is "the bike moves toward me while I walk", and it is gone by
+  // construction: nothing about the bike is expressed relative to the man.
+  // -------------------------------------------------------------------------
+  _scene() {
+    let n = this.player.group;
+    return (n && n.parent) || null;
+  }
+
+  _detach() {
+    const scene = this._scene();
+    const { bike, rider } = this.player;
+    if (!scene) return;
+    this.player.group.updateMatrixWorld(true);
+    // Remember the RIDING local scales before attach() folds the parents' scale
+    // into them; _reattach puts exactly these back.
+    if (bike && bike.parent === this.player.group) this._bikeLocalScale = bike.scale.x;
+    if (rider && rider.parent === this.player.socket) this._riderLocalScale = rider.scale.x;
+    if (bike && bike.parent !== scene) scene.attach(bike);
+    if (rider && rider.parent !== scene) scene.attach(rider);
+    if (bike) bike.rotation.reorder('YXZ');
+    if (rider) rider.rotation.reorder('YXZ');
+  }
+
+  // Back on the machine. Every local transform the riding code assumes is put
+  // back explicitly -- including SCALE. `attach` preserves WORLD scale, and the
+  // rider sits under a bike scaled ~0.9, so a detached rider carries 0.9 as its
+  // own local scale; re-parenting under the socket without resetting it made the
+  // rider ~10% smaller after EVERY crash (0.9, 0.81, 0.73...) and sunk into the
+  // saddle, with hands short of the bars. That is the "sits sunken after the
+  // walk" bug. The joint rest pose is restored the same way (ragdoll.js).
+  _reattach() {
     const player = this.player;
-    const rider = player.rider;
-    if (!rider) return;
-    const socket = player.socket;
-    if (riding) {
-      if (socket) {
-        socket.add(rider);              // child of the saddle
-        rider.position.set(0, 0, 0);
-        rider.rotation.set(0, 0, 0);
-      }
-    } else if (rider.parent !== player.group) {
-      // Preserve the world transform on the jump so the first on-foot frame is
-      // continuous with the last riding frame.
-      player.group.attach(rider);
+    if (!player) return;
+    const { bike, rider, socket, group } = player;
+    if (bike && group && bike.parent !== group) group.add(bike);
+    if (bike) {
+      bike.position.set(0, 0, 0);
+      bike.rotation.set(0, 0, 0, 'YXZ');
+      if (this._bikeLocalScale) bike.scale.setScalar(this._bikeLocalScale);
+    }
+    if (rider) {
+      if (socket && rider.parent !== socket) socket.add(rider);
+      rider.position.set(0, 0, 0);
+      rider.rotation.set(0, 0, 0);
+      if (this._riderLocalScale) rider.scale.setScalar(this._riderLocalScale);
+      restoreRest(rider);
+      rider.visible = true;
+    }
+    if (bike) bike.visible = true;
+  }
+
+  // Place the free bike in WORLD space from its road-frame state.
+  _placeBike() {
+    const bike = this.player.bike;
+    const w = this.walk;
+    if (!bike) return;
+    roadToWorld(w.bikeS, w.bikeLateral, _p);
+    const yaw = roadYawAt(w.bikeS) - w.bikeYawOffset;
+    bike.position.set(_p.x, _p.y + w.bikeY, _p.z);
+    bike.rotation.set(0, yaw, w.bikeRoll, 'YXZ');
+    // Its origin is at wheel-contact height, so rolling it swings the low side
+    // under the road: measure the real box and lift by the gap.
+    bike.updateMatrixWorld(true);
+    this._bikeBox.setFromObject(bike);
+    const gap = this._bikeBox.min.y - _p.y;
+    if (Number.isFinite(gap) && gap < 0) bike.position.y -= gap;
+    const j = bike.userData && bike.userData.joints;
+    if (j) {
+      if (j.frontSteer && j.frontSteer.rotation) j.frontSteer.rotation.y = 0.35 * Math.sign(w.bikeRoll || 1);
     }
   }
 
   // -------------------------------------------------------------------------
+  // RENDERING. Called every frame while on foot.
+  // -------------------------------------------------------------------------
   render(dt) {
-    if (!this.onFoot) return;   // _finishMount may have run earlier this frame
+    if (!this.onFoot) return;
     const player = this.player;
     const p = player.phys;
     const w = this.walk;
-    const bike = player.bike;
     const rider = player.rider;
 
-    // THE RIDER MUST BE ON THE GROUP WHILE ON FOOT, not on the bike's socket.
-    // See _setRidingRig: parenting the walker to the bike is why the bike
-    // appeared to move him while he walked. Idempotent, so calling it every frame
-    // is safe and a missed transition cannot leave the wrong parent.
-    this._setRidingRig(false);
+    if (this.state !== ST.MOUNTING) this._detach();
 
-    // The group carries the rider. Write the rider body back into phys so the
-    // camera, the HUD and the harness all continue to read one source of truth.
+    // phys follows the PERSON, so the camera and HUD keep one source of truth
     p.s = w.s;
     p.lateral = w.lateral;
-    p.yawOffset = (this.state === ST.WALKING)
-      ? this._wrap(w.facing - roadYawAt(w.s))
-      : (this.state === ST.MOUNTING ? w.bikeYawOffset : w.yawOffset);
-    p.speed = this.state === ST.WALKING ? w.speed : 0;
+    p.yawOffset = (this.state === ST.WALKING || this.state === ST.STANDING)
+      ? this._wrap(roadYawAt(w.s) - w.facing)
+      : (this.state === ST.MOUNTING ? w.bikeYawOffset : this._wrap(w.yawOffset));
+    p.speed = this.state === ST.WALKING ? Math.abs(w.speed) : 0;
     p.lateralV = 0;
     p.lean = 0;
-    p.airY = w.airY;
+    p.airY = 0;
     p.wheelSpin = 0;
+    if (this.state === ST.MOUNTING) { p.s = w.bikeS; p.lateral = w.bikeLateral; }
     p.sync();
-
-    // group at the rider. `airY` lifts the whole person during the tumble — the
-    // same channel the bike uses for a jump, so it is already understood by
-    // everything downstream.
     player.group.position.copy(p.pos);
-    player.group.position.y += w.airY;
 
-    if (bike) {
-      // --- the bike body, placed in world then expressed in the group's frame ---
-      roadToWorld(w.bikeS, w.bikeLateral, _p);
-      const yaw = roadYawAt(w.bikeS) + w.bikeYawOffset;
-      _c.copy(_p).sub(player.group.position);
-      const gy = p.yaw;
-      bike.position.set(
-        Math.cos(gy) * _c.x - Math.sin(gy) * _c.z,
-        _c.y,
-        Math.sin(gy) * _c.x + Math.cos(gy) * _c.z);
-      // 'YXZ' MANDATORY. A bare rotation.set(0, y, 0) resets the Euler ORDER to
-      // the default XYZ, silently undoing the order player.js establishes for the
-      // bike. It runs on every remount, so it wiped the fix within seconds of a
-      // crash -- the bike would pitch correctly until you fell off, then never
-      // again. Always pass the order explicitly when you touch this node.
-      bike.rotation.set(0, yaw - gy, 0, 'YXZ');
-      // A CRASHED BIKE LIES OVER. The line below used to set `rotation.z = 0`
-      // whenever the bike was crashed -- the exact opposite of its own comment --
-      // so a fallen machine stood bolt upright on the road and read as riding
-      // away from the rider it had just thrown. Measured in the wreck capture:
-      // bike upright, rider prone beside it.
-      //
-      // While it is down it is on its side; once the player is back on his feet
-      // and walking to it, it is still down but righting; and only on the mount
-      // does it come upright.
-      const crashed = this.state === ST.FALLING || this.state === ST.DOWN;
-      const walking  = this.state === ST.WALKING || this.state === ST.STANDING;
-      const lean = walking ? 1.15 : 1.35;
-      if (this.state === ST.MOUNTING) {
-        // heaving it upright as he climbs on: the lean goes out as the mount
-        // progresses, so the machine meets him already on its wheels
-        const k = easeInOut(this.t / DIS.MOUNT_TIME);
-        bike.rotation.z = lean * (1 - k);
-      } else {
-        // FALLING / DOWN / STANDING / WALKING: it is over, and it stays over
-        // until he picks it up.
-        bike.rotation.z = lean;
-      }
+    if (this.state === ST.MOUNTING) { this._renderMounting(); return; }
 
-      // ---- THE MACHINE MUST NOT SINK INTO THE ROAD -------------------------
-      // Its origin is at WHEEL-CONTACT height, so rolling it about that origin
-      // swings the low-side wheel BELOW the surface. MEASURED pinned in the DOWN
-      // state: the bike's box floor read -0.231 m against the road, i.e. the
-      // whole near side was 23 cm under the tarmac.
-      //
-      // Same treatment as the rider above, for the same reason: measure the real
-      // world box and lift by the gap. Only while it is actually over -- upright
-      // it sits correctly on its contact plane and measuring would fight the
-      // riding pose.
-      if (bike.rotation.z > 0.01) {
-        player.group.updateMatrixWorld(true);
-        this._bikeBox.setFromObject(bike);
-        const gap = this._bikeBox.min.y - player.group.position.y;
-        if (Number.isFinite(gap) && gap < 0) bike.position.y -= gap;
-      }
-      const j = bike.userData && bike.userData.joints;
-      if (j) {
-        if (j.frontSteer) j.frontSteer.rotation.y = 0;
-        if (j.frontWheel) j.frontWheel.rotation.x = 0;
-        if (j.rearWheel) j.rearWheel.rotation.x = 0;
-      }
+    this._placeBike();
+    if (!rider) return;
+    rider.visible = true;
+    const j = rider.userData && rider.userData.joints;
+
+    if (this.rag) {                    // FALLING / DOWN: the ragdoll IS the pose
+      if (j && j.chain) j.chain.visible = false;
+      this.rag.apply();
+      return;
     }
 
-    if (rider) {
-      const j = rider.userData && rider.userData.joints;
-      if (this.state === ST.MOUNTING) {
-        this._renderMounting(rider, j);
-      } else {
-        // PRONE PLACEMENT -- MEASURED, NOT PREDICTED.
-        //
-        // The rider's origin is his FEET, so rotating the body about its feet by
-        // a prone angle stands it on its face instead of laying it down. The body
-        // has to rotate about a point near its centre and then be lowered until
-        // it rests on the road.
-        //
-        // Computing that in closed form from the spine was tried and is WRONG:
-        // it ignores the body's width and depth (a prone 1.75 m figure is ~1.28 m
-        // tall, not the 0.12 m a landmarks-only model predicts), and three.js
-        // measured that version at -0.202 .. 1.073 -- a fifth of a metre sunk
-        // through the tarmac with the rest standing a metre up.
-        //
-        // So the drop is MEASURED, below, from the body's real world bounding box.
-        // Exact for any figure, pose or future limb change, because it reads the
-        // geometry rather than predicting it.
-        const spec = player.rider && player.rider.userData && player.rider.userData.spec;
-        const proneness = this.state === ST.FALLING
-          ? easeInOut(this.t / Math.max(0.01, DIS.FALL_TIME))
-          : (this.state === ST.DOWN ? 1 : 0);
-        const pivotY = spec ? spec.pronePivotY : CFG.SEAT_Y;
-        // raise the body so its rotation centre (mid-torso) is at the origin;
-        // `_proneFix` below then measures and lowers it onto the road
-        rider.position.set(0, pivotY * proneness, 0);
-        // Practice the body's pitch through the sequence: upright -> tumbling
-        // forward onto the face -> held prone -> rising back to vertical. One
-        // value, read by one rotation, so there is no state where two of them
-        // disagree about how far over the body is.
-        let bodyX;
-        if (this.state === ST.FALLING) {
-          bodyX = easeInOut(this.t / Math.max(0.01, DIS.FALL_TIME)) * DIS.DOWN_ROLL;
-        } else if (this.state === ST.DOWN) {
-          bodyX = DIS.DOWN_ROLL;
-        } else {
-          bodyX = 0;   // STANDING / WALKING: upright
-        }
-        // EULER ORDER MATTERS, and this is the third place in this project it
-        // has bitten. The default is XYZ, which composes R = Rx * Ry * Rz, so
-        // the ROLL is applied FIRST in the body's own frame and the PITCH is
-        // applied after. The result of stacking a 51-degree tumble roll onto an
-        // 86-degree prone pitch that way is a body lying on its BACK with its
-        // legs in the air -- which is exactly what the wreck looked like, and it
-        // is not a pose any fall produces.
-        //
-        // YXZ is what a falling body needs: yaw to face the direction of travel,
-        // then pitch to go prone, then roll about the now-horizontal axis to
-        // tumble onto a shoulder. Verified against the world matrix, not by eye.
-        rider.rotation.set(bodyX, w.facing - p.yaw, w.roll, 'YXZ');
+    // STANDING / WALKING: procedural, in WORLD space at the walker.
+    restoreRest(rider);
+    const rise = this.state === ST.STANDING ? easeInOut(this.walk.rise) : 1;
+    const proneness = 1 - rise;
+    const spec = rider.userData && rider.userData.spec;
+    const sc = rider.scale.y;
+    const pivotY = (spec ? spec.pronePivotY : CFG.SEAT_Y) * sc;
+    roadToWorld(w.s, w.lateral, _p);
+    rider.position.set(_p.x, _p.y + pivotY * proneness, _p.z);
+    rider.rotation.set(DIS.DOWN_ROLL * proneness, w.facing, w.roll * proneness, 'YXZ');
+    if (j) this.poseOnFoot(j, dt);
+    if (proneness > 0) {
+      rider.updateMatrixWorld(true);
+      this._proneBox.setFromObject(rider);
+      const gap = this._proneBox.min.y - _p.y;
+      if (Number.isFinite(gap)) rider.position.y -= gap * proneness;
+    }
 
-        // ---- MEASURE, THEN PLACE ------------------------------------------
-        // The pose is now final for this frame, so the body's world bounding box
-        // is meaningful. Lower it so its lowest point sits ON the road. This is
-        // the step that makes the wreck lie flat instead of hovering or sinking,
-        // and it holds for any figure because it reads the geometry.
-        //
-        // Only while he is actually going over. Standing and walking he is on his
-        // feet at the group origin, and measuring there would fight the walk.
-        if (proneness > 0) {
-          player.group.updateMatrixWorld(true);
-          this._proneBox.setFromObject(rider);
-          // world Y of the group is the road; the rider's box is in world space,
-          // so the correction is the gap between the box floor and the group
-          const gap = this._proneBox.min.y - player.group.position.y;
-          if (Number.isFinite(gap)) {
-            // ease the correction in with `proneness` so the fall does not snap
-            rider.position.y -= gap * proneness;
-          }
-        }
-
-        if (j) this.poseOnFoot(j, dt);
+    // THE GET-UP BLEND. Engines never cut from a ragdoll to an animation: they
+    // capture the ragdoll's last pose and blend out of it. Joints blend in their
+    // local frames; the pelvis, whose parent frame just moved from the crash
+    // spot to the walker, blends in WORLD space.
+    if (this.getUp && j) {
+      const k = easeInOut(this.t / DIS.GETUP_BLEND);
+      if (k < 1) {
+        rider.updateMatrixWorld(true);
+        const pw = new THREE.Vector3(), pq = new THREE.Quaternion();
+        j.pelvis.matrixWorld.decompose(pw, pq, _c);
+        blendFrom(this.getUp.pose, k);
+        pw.lerpVectors(this.getUp.pelvisPos, pw, k);
+        pq.slerpQuaternions(this.getUp.pelvisQ, pq, k);
+        const par = j.pelvis.parent;
+        par.updateWorldMatrix(true, false);
+        const parQ = new THREE.Quaternion();
+        par.matrixWorld.decompose(_c, parQ, _t);
+        j.pelvis.quaternion.copy(parQ.invert().multiply(pq));
+        j.pelvis.position.copy(par.worldToLocal(pw));
       }
     }
   }
 
-  _renderMounting(rider, j) {
-    const w = this.walk;
+  _renderMounting() {
+    const player = this.player;
     const k = easeInOut(this.t / DIS.MOUNT_TIME);
-    // Standing beside the machine, rising onto it. The rider's local y goes from
-    // the standing offset (its own feet) up to the SOCKET's height, so the rise
-    // lands the body's SEAT CONTACT on the saddle the riding rig expects -- the
-    // old hard-coded 0.62 was a second, independent seat height that happened to
-    // be near SEAT_Y and would silently disagree with it if either changed.
-    //
-    // The target is the socket's height, NOT SEAT_Y: the rider's origin is its
-    // FEET, and the socket carries it `seatContactY` below the saddle so the
-    // pelvis underside meets the seat. Ending the rise at SEAT_Y would leave the
-    // body standing on the saddle for the last frame before the hand-off.
-    const seatY = CFG.SEAT_Y - (this.player._seatContactY || 0);
-    rider.position.set(0, DIS.STAND_Y * (1 - k) + seatY * k, 0);
-    rider.rotation.set(0, w.bikeYawOffset - this.player.phys.yaw, 0);
-    if (j) this.poseMount(j, k);
+    const bike = player.bike, rider = player.rider;
+    if (bike && this._mBikeQ) {
+      // heaved upright as he climbs on
+      bike.position.lerpVectors(this._mBikeP, _c.set(0, 0, 0), k);
+      bike.quaternion.slerpQuaternions(this._mBikeQ, _q.identity(), k);
+      if (k < 1) {
+        bike.updateMatrixWorld(true);
+        this._bikeBox.setFromObject(bike);
+        const gap = this._bikeBox.min.y - player.group.position.y;
+        if (Number.isFinite(gap) && gap < 0) bike.position.y -= gap;
+      }
+    }
+    if (rider && this._mRiderQ) {
+      // The saddle in the GROUP's frame: the socket's local offset carried
+      // through the (upright, unscaled-position) bike. The rider's world scale
+      // is the bike's, which is what attach() gave it, so it is left alone.
+      const seat = _p.copy(player.socket ? player.socket.position : _c.set(0, CFG.SEAT_Y, 0))
+        .multiplyScalar(bike ? bike.scale.x : 1);
+      // a leg-over arc: up, across, down
+      rider.position.lerpVectors(this._mRiderP, seat, k);
+      rider.position.y += Math.sin(k * Math.PI) * 0.25;
+      rider.quaternion.slerpQuaternions(this._mRiderQ, _q.identity(), k);
+      restoreRest(rider);
+      const j = rider.userData && rider.userData.joints;
+      if (j) this.poseMount(j, k);
+    }
   }
 
   // -------------------------------------------------------------------------

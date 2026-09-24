@@ -24,6 +24,9 @@ import { mergeJoints } from '../assetlib.js';
 const MERGE_OPTS = { vertexColors: true, allNodes: true, keepColour: (h) => h === 0x1b1b1e };
 import { clearAxes, poseSeated, poseCombat, solveSeat } from './riderpose.js';
 import { NpcBrain } from './npc.js';
+import { Dismount } from './dismount.js';
+
+const _rivShift = new THREE.Vector3();
 import { packKit, bikeSource, paintBike, dressRider } from './kit.js';
 import { centreAt, headAt } from './level.js';
 import { gridFor, ROSTER_SIZE } from './roster.js';
@@ -253,6 +256,12 @@ export class Rival {
     this.group.userData.gearIds = (this.rider && this.rider.userData.gearIds) || [];
     scene.add(this.group);
     this.scene = scene;
+    // THE SAME CRASH AS THE PLAYER. A rival used to "go down" by slumping in the
+    // saddle of a bike that kept rolling, then popping upright at WRECK_TIME. Now
+    // the body is thrown (ragdoll), lies there, gets up and walks back to its own
+    // machine, which stays where it stopped -- the Road Rash beat, for everyone.
+    this.dismount = new Dismount(this, { auto: true });
+    this._wasDown = false;
   }
 
   /**
@@ -333,6 +342,9 @@ export class Rival {
   }
 
   reset(opts = {}) {
+    // Back on the bike before anything else reads the rig.
+    if (this.dismount) this.dismount.reset();
+    this._wasDown = false;
     // Re-apply the roster entry for THIS race first, so the per-race skill and
     // aggression scaling is in place before the brain is reset. `opts.entry` is
     // supplied by resetRace for the current career event.
@@ -485,6 +497,23 @@ export class Rival {
     } else {
       this._cullDist = 0;
     }
+    // ---- THE CRASH: thrown, down, up, walk back, remount ------------------
+    // Runs for near and far riders alike, so the standings see the same walk.
+    if (f.down && !this._wasDown && this.rider && this.socket) {
+      this.dismount.beginFall({ side: Math.sign(p.lateralV || 0) || 0 });
+    }
+    this._wasDown = f.down;
+    if (this.dismount.onFoot && !f.down) this.dismount.reset();
+    if (this.dismount.onFoot) {
+      // The dismount ends the crash (it clears `f.down` on the remount), so the
+      // fighter's WRECK_TIME must not pop the rider back onto a distant bike.
+      if (f.down) f.downTimer = Math.max(f.downTimer, 0.5);
+      f.update(dt, world.fightersExcept(this), this._charHooks(hooks, world));
+      this.dismount.update(dt, null);
+      this.dismount.render(dt);
+      return;
+    }
+
     if (this._lodFar === undefined) this._lodFar = false;
     if (this._lodFar) { if (this._cullDist < CFG.RIVAL_LOD_NEAR) this._lodFar = false; }
     else if (this._cullDist > CFG.RIVAL_LOD_FAR) this._lodFar = true;
@@ -664,6 +693,7 @@ export class Rival {
     if (!this.group.visible) return;   // nothing to transform
 
     this.group.position.copy(p.pos);
+    this.group.position.add(p.rearPivotShift(_rivShift));
     // the bike leans with the steer, and pitches slightly under power
     this.group.rotation.set(p.roadPitch || 0, p.yaw, 0, 'YXZ');
     if (this.bike) {
@@ -698,9 +728,9 @@ export class Rival {
         // crash pose: rider goes down with the bike, expressed in the socket's
         // frame (a drop and a slide back relative to the machine, not the road)
         if (f.down) {
-          const t = 1 - Math.max(0, f.downTimer) / CFG.WRECK_TIME;
-          this.rider.rotation.x = -1.35 * Math.min(1, t * 2.2);
-          this.rider.position.set(0, -0.35 * Math.min(1, t * 2.2), -0.5 * Math.min(1, t * 2.2));
+          // the frame before the dismount takes over: hold the riding pose,
+          // the ragdoll is measured off it (see player.js)
+          this.rider.position.set(0, 0, 0);
         } else {
           // The extra body lean ON TOP of the bike's roll (which this rider
         // inherits through the socket). Same sign as the bike's for the same

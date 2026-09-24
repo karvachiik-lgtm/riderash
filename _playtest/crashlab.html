@@ -1,0 +1,203 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Crash Lab</title>
+<!--
+  CRASH LAB -- a harness page, not part of the game.
+
+  Loads the REAL bike and rider assets and the REAL Player / BikePhys / Dismount /
+  Ragdoll on a strip of the real road, with none of the rest of the game (no
+  scenery, traffic, pack, post-processing). The sim is stepped at a fixed 60 Hz
+  by the harness and only rendered when asked, so it runs identically under a
+  software GL where the full game manages ~1 fps.
+
+  window.LAB = { step(sec, input), crash(), shot(view), state() }
+-->
+<style>html,body{margin:0;background:#9fb3c8;overflow:hidden}canvas{display:block}</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { ASSET } from '../assetlib.js';
+import { makeSpec } from '../src/bodyspec.js';
+import { RIDING } from '../src/reach.js';
+import { CFG } from '../src/config.js';
+import { centreAt, headAt } from '../src/level.js';
+import { Player } from '../src/player.js';
+
+const W = innerWidth, H = innerHeight;
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setSize(W, H);
+renderer.setPixelRatio(1);
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x9fb3c8);
+scene.fog = new THREE.Fog(0x9fb3c8, 60, 220);
+const camera = new THREE.PerspectiveCamera(55, W / H, 0.1, 500);
+scene.add(new THREE.HemisphereLight(0xdfe9ff, 0x5b4a36, 1.4));
+const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+sun.position.set(30, 60, 20);
+scene.add(sun);
+
+// ---- the road: the real centre line, flat cross-section, lane dashes --------
+function roadStrip(s0, s1, halfW, color, yOff = 0) {
+  const pos = [], idx = [];
+  const c = new THREE.Vector3(), t = new THREE.Vector3();
+  let n = 0;
+  for (let s = s0; s <= s1; s += 1) {
+    centreAt(-s, c); headAt(-s, t);
+    const nx = -t.z, nz = t.x;
+    pos.push(c.x - nx * halfW, c.y + yOff, c.z - nz * halfW, c.x + nx * halfW, c.y + yOff, c.z + nz * halfW);
+    if (n > 0) { const a = (n - 1) * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+    n++;
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx); g.computeVertexNormals();
+  return new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color, roughness: 0.95, side: THREE.DoubleSide }));
+}
+scene.add(roadStrip(-20, 900, 40, 0x7d8a58, -0.03));          // verge
+scene.add(roadStrip(-20, 900, CFG.ROAD_W / 2, 0x3b3d42));      // tarmac
+{
+  // dashes every 6 m so motion reads in a still
+  const c = new THREE.Vector3(), t = new THREE.Vector3();
+  const mat = new THREE.MeshBasicMaterial({ color: 0xeeeeee });
+  for (let s = 0; s < 900; s += 6) {
+    for (const lat of [-CFG.ROAD_W / 6, CFG.ROAD_W / 6]) {
+      centreAt(-s, c); headAt(-s, t);
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(0.15, 2.4), mat);
+      m.rotation.x = -Math.PI / 2;
+      m.rotation.z = -Math.atan2(t.x, t.z);
+      m.position.set(c.x - t.z * lat, c.y + 0.01, c.z + t.x * lat);
+      scene.add(m);
+    }
+  }
+  // metre grid ticks on the kerb line, for reading distances
+  for (let s = 0; s < 900; s += 1) {
+    centreAt(-s, c); headAt(-s, t);
+    const lat = CFG.ROAD_W / 2 - 0.1;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(0.25, s % 10 === 0 ? 0.6 : 0.15), s % 10 === 0 ? new THREE.MeshBasicMaterial({ color: 0xffcc33 }) : mat);
+    m.rotation.x = -Math.PI / 2; m.rotation.z = -Math.atan2(t.x, t.z);
+    for (const sg of [-1, 1]) { const mm = m.clone(); mm.position.set(c.x - t.z * lat * sg, c.y + 0.012, c.z + t.x * lat * sg); scene.add(mm); }
+  }
+}
+
+// ---- the real player -------------------------------------------------------
+const spec = makeSpec({ height: 1.75, build: 'normal', colors: { ...(CFG.PLAYER_COLORS || {}) } });
+const assets = {
+  bike: await ASSET('../assets/bike.js', { height: 1.25, keepHierarchy: true }),
+  rider: await ASSET('../assets/rider.js', { spec, ride: RIDING, keepHierarchy: true }),
+};
+const player = new Player(scene, assets);
+const world = { fightersExcept: () => [], player };
+player.phys.reset({ s: 20, lateral: 0, yawOffset: 0, speed: 8 });
+player.phys.sync();
+
+const input = { throttle: false, brake: false, steer: 0, tuck: false, attackPressed: () => false, pressed: {} };
+const hooks = { onRemount() {}, onKnockDown() {}, onImpact() {} };
+let simT = 0;
+// Direction arrows: GREEN = where the bike's nose points, YELLOW = where it is
+// actually travelling. On a real bike the two agree (the front leads, the rear
+// follows); when they disagree in sign, the heading is mirrored.
+const noseArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1), new THREE.Vector3(), 3.2, 0x33ff66, 0.6, 0.35);
+const travelArrow = new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1), new THREE.Vector3(), 3.2, 0xffcc00, 0.6, 0.35);
+noseArrow.visible = travelArrow.visible = false;
+scene.add(noseArrow, travelArrow);
+const lastPos = new THREE.Vector3(), vel = new THREE.Vector3();
+
+function step(sec, inp = {}) {
+  Object.assign(input, { throttle: false, brake: false, steer: 0 }, inp);
+  const n = Math.max(1, Math.round(sec * 60));
+  for (let i = 0; i < n; i++) {
+    lastPos.copy(player.phys.pos);
+    player.update(1 / 60, input, world, hooks);
+    vel.copy(player.phys.pos).sub(lastPos).multiplyScalar(60);
+    simT += 1 / 60;
+  }
+  return state();
+}
+function arrows(on) {
+  noseArrow.visible = travelArrow.visible = !!on;
+  if (!on) return;
+  const p = player.phys;
+  const o = new THREE.Vector3().copy(p.pos); o.y += 1.6;
+  noseArrow.position.copy(o); travelArrow.position.copy(o).add(new THREE.Vector3(0, 0.05, 0));
+  noseArrow.setDirection(new THREE.Vector3(Math.sin(p.yaw), 0, Math.cos(p.yaw)));
+  const v = vel.clone(); v.y = 0;
+  if (v.lengthSq() > 1e-6) travelArrow.setDirection(v.normalize());
+}
+
+const _v = new THREE.Vector3();
+const wp = (o) => { o.getWorldPosition(_v); return [+_v.x.toFixed(2), +_v.y.toFixed(2), +_v.z.toFixed(2)]; };
+function state() {
+  const p = player.phys, d = player.dismount, rd = player.rider, bk = player.bike;
+  const pel = new THREE.Vector3(); rd.userData.joints.pelvis.getWorldPosition(pel);
+  const sc = new THREE.Vector3(); rd.getWorldScale(sc);
+  const hd = new THREE.Vector3(); rd.userData.joints.head.getWorldPosition(hd);
+  return {
+    t: +simT.toFixed(2), st: d.state, speed: +p.speed.toFixed(2), s: +p.s.toFixed(2), lat: +p.lateral.toFixed(3),
+    latV: +p.lateralV.toFixed(2), yawOff: +p.yawOffset.toFixed(3), yaw: +p.yaw.toFixed(3),
+    roadYaw: +p.roadYaw.toFixed(3), steerAngle: +(p.steerAngle || 0).toFixed(3), lean: +p.lean.toFixed(3),
+    bike: wp(bk), bikeParent: bk.parent && (bk.parent.type || bk.parent.name),
+    pelvis: [+pel.x.toFixed(2), +pel.y.toFixed(2), +pel.z.toFixed(2)],
+    pelvisAboveRoad: +(pel.y - centreAt(pel.z).y).toFixed(2), headAboveRoad: +(hd.y - centreAt(hd.z).y).toFixed(2),
+    riderScale: +sc.x.toFixed(3), riderParent: rd.parent && (rd.parent.name || rd.parent.type),
+    sep: +(d.separation ?? Math.hypot(d.walk.s - d.walk.bikeS, d.walk.lateral - d.walk.bikeLateral)).toFixed(2),
+    peakSep: +(d.walk.peakSep || 0).toFixed(2),
+    restAt: +(d.walk.restAt ?? -1).toFixed(2), onFootT: +d.total.toFixed(2),
+  };
+}
+
+function crash() {
+  const f = player.fighter;
+  f.invuln = 0;
+  f.down = true; f.downTimer = CFG.WRECK_TIME; f.active = null;
+  player.phys.speed *= CFG.CRASH_SPEED_LOSS;
+  return state();
+}
+
+// Views: 'chase' (the game's framing, roughly), 'side' (fixed in world at the
+// crash point, looking across the road), 'top' (overhead, fixed), 'follow-top'.
+let anchor = null;
+function shot(view = 'chase', opts = {}) {
+  const p = player.phys;
+  const f = player.focus || p.pos;
+  const fwd = new THREE.Vector3(Math.sin(p.yaw), 0, Math.cos(p.yaw));
+  if (view === 'chase') {
+    camera.fov = 55;
+    camera.position.copy(f).addScaledVector(fwd, -(opts.back ?? 5.5)).add(new THREE.Vector3(0, opts.up ?? 2.2, 0));
+    camera.lookAt(f.x + fwd.x * 6, f.y + 1.0, f.z + fwd.z * 6);
+  } else if (view === 'top') {
+    const a = opts.follow ? f : (opts.at || anchor || f);
+    camera.fov = 50;
+    camera.position.set(a.x + 0.01, a.y + (opts.h ?? 16), a.z);
+    camera.up.set(opts.upX ?? 0, 0, opts.upZ ?? -1);
+    camera.lookAt(a.x, a.y, a.z);
+    camera.up.set(0, 1, 0);
+  } else if (view === 'side') {
+    const a = opts.follow ? f : (opts.at || anchor || f);
+    const t = new THREE.Vector3(); headAt(a.z, t);
+    const n = new THREE.Vector3(-t.z, 0, t.x);
+    camera.fov = opts.fov ?? 50;
+    const dist = opts.dist ?? 16;
+    camera.position.set(a.x + n.x * dist + t.x * (opts.ahead ?? 0), a.y + (opts.h ?? 2.5), a.z + n.z * dist + t.z * (opts.ahead ?? 0));
+    camera.lookAt(a.x + t.x * (opts.ahead ?? 0), a.y + 0.8, a.z + t.z * (opts.ahead ?? 0));
+  }
+  camera.updateProjectionMatrix();
+  arrows(opts.arrows);
+  renderer.render(scene, camera);
+  return true;
+}
+function setAnchor(ahead = 0) {
+  const p = player.phys;
+  const c = new THREE.Vector3(); centreAt(-(p.s + ahead), c);
+  anchor = c;
+  return [c.x, c.y, c.z];
+}
+
+window.LAB = { step, crash, shot, state, setAnchor, player, THREE };
+window.LAB_READY = true;
+</script>

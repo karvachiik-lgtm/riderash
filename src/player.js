@@ -18,6 +18,7 @@ const _pivotP = new THREE.Vector3();
 const _pivotR = new THREE.Vector3();
 const _pivotE = new THREE.Euler();
 const _pivotM = new THREE.Matrix4();
+const _pivotShift = new THREE.Vector3();
 
 export class Player {
   constructor(scene, assets) {
@@ -246,6 +247,7 @@ export class Player {
    */
   setRider(src) {
     if (!src || !this.socket) return;
+    this.dismount.reset();          // put the old rider back on the saddle first
     const old = this.rider;
     if (old) {
       old.removeFromParent();
@@ -280,6 +282,7 @@ export class Player {
     if (!src || !this.bike) return;
     const key = `${src.uuid}:${body}:${accent}`;
     if (this._bikeKey === key) return;
+    this.dismount.reset();          // the old bike must be back under the group
     const old = this.bike;
     const bike = cloneWithJoints(src);
     if (body != null) paintBike(bike, body, accent ?? 0xd8d2c4);
@@ -374,9 +377,7 @@ export class Player {
     // call being wired, notice that the fighter is no longer down and stand the
     // machine down. Correct either way, and it costs one comparison.
     if (this.dismount.onFoot && !f.down) {
-      this.dismount.reset();
-      this.rider && this.rider.position.set(0, 0, 0);
-      this.rider && this.rider.rotation.set(0, 0, 0);
+      this.dismount.reset();        // re-parents, rescales and re-poses the rig
     }
 
     // WHILE ON FOOT THE MACHINE DRIVES, not the bike integrator.
@@ -435,6 +436,8 @@ export class Player {
   applyVisual(dt) {
     const p = this.phys, f = this.fighter;
     this.group.position.copy(p.pos);
+    // Turn about the REAR contact, not the middle: see BikePhys.rearPivotShift.
+    this.group.position.add(p.rearPivotShift(_pivotShift));
     // YXZ: yaw first, then pitch about the already-yawed axis, then roll. The
     // default XYZ order would apply the road pitch in world X, so on any road
     // that is not pointing down Z the bike would tip sideways instead of
@@ -562,15 +565,11 @@ export class Player {
       const j = this.rider.userData.joints;
       if (j) {
         if (f.down) {
-          const t = 1 - Math.max(0, f.downTimer) / CFG.WRECK_TIME;
-          const k = Math.min(1, t * 2.4);
-          // A wreck slumps the rider off the saddle. Expressed in the SOCKET's
-          // counter-scaled frame, so the drop and back-set are multiplied by the
-          // same inverse the socket carries -- otherwise the slump would be 12%
-          // larger than authored on every bike whose scale is not exactly 1.
-          const k2 = 1 / (this._bikeScale || 1);
-          this.rider.rotation.x = -1.45 * k;
-          this.rider.position.set(0, -CFG.SEAT_BRAKE_DROP * k * k2, -CFG.SEAT_BRAKE_BACK * k * k2);
+          // The one frame between the knockdown and the dismount taking over.
+          // Hold the riding pose: the ragdoll is measured off this rig next
+          // frame, and a scripted slump here (it was a -1.45 rad pitch in the
+          // socket) would launch a body already folded backwards.
+          this.rider.position.set(0, 0, 0);
         } else {
           // THE RIDER LEANS WITH THE BIKE, BY CONSTRUCTION.
           //

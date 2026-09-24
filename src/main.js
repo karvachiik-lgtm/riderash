@@ -593,6 +593,8 @@ let camRoll = 0, camYaw = 0, camInitialised = false;
 // Smoothed 0..1 "the wreck is in the air" factor for the crash camera. Module
 // scope so it survives between frames and can be reset with the rest.
 let crashHold = 0;
+let slideDustT = 0;
+const _slideV = new THREE.Vector3();
 
 
 function updateCamera(dt, g) {
@@ -1199,6 +1201,19 @@ function stepGame(dt) {
         attackPressed: () => false, pressed: {} }
     : input;
   player.update(dt, gridInput, world, hooks);
+  // SLIDE DUST. A thrown body scrubbing along the tarmac kicks up grit, and the
+  // trail dying away with its speed is half of what reads as "he slid".
+  {
+    const rag = player.dismount && player.dismount.rag;
+    if (rag && rag.contact > 0.15) {
+      const v = rag.velocity(_slideV).length();
+      slideDustT -= dt;
+      if (v > 3 && slideDustT <= 0) {
+        slideDustT = 0.05;
+        fx.dust(rag.pelvis, v > 12 ? 3 : 1, 0x8a8070);
+      }
+    }
+  }
   if (touchpad) touchpad.sync(player.fighter);
 
   // rivals

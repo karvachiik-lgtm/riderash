@@ -162,6 +162,9 @@
      Pin the row to the viewport and let the panel scroll inside it. */
   #showroom.on { grid-template-rows:minmax(0, 1fr); height:100vh; height:100dvh; overflow:hidden; }
   #panel { min-height:0; }
+  /* the panel is a flex column: when a tab is taller than the panel, flex
+     SHRINKS its children -- the tab bar was squashed to 11 px and vanished */
+  #panel > * { flex-shrink:0; }
   .stabs { display:flex; gap:0; position:sticky; top:-22px; z-index:3; margin:-22px -18px 0; padding:10px 8px 0;
            background:rgba(12,13,15,.97); border-bottom:1px solid #2a2e33; overflow-x:auto; scrollbar-width:none; }
   .stabs::-webkit-scrollbar { display:none; }
@@ -472,10 +475,12 @@
     /* Character designer: the stage gets most of the height and its bands
        slim down -- showroom.js frames the figure in the space BETWEEN the pose
        bar and the stats, so every row the bar wraps onto shrank the rider. */
-    body #showroom.on { grid-template-columns:1fr; grid-template-rows:56vh auto; overflow-y:auto; }
-    /* the stage stays put while the panel scrolls up under it */
-    body #showroom.on #showstage { position:sticky; top:0; z-index:3; }
-    body #showroom.on #panel { position:relative; z-index:2; background:rgba(12,13,15,.98); }
+    /* PHONE: the stage keeps the top of the screen and the panel scrolls in
+       its own area below it (the stage's DOM is transparent -- the figure is
+       drawn on the canvas behind -- so it cannot cover a panel scrolled under it) */
+    body #showroom.on { grid-template-columns:1fr; grid-template-rows:54vh minmax(0, 1fr);
+                        height:100vh; height:100dvh; overflow:hidden; }
+    body #showroom.on #panel { overflow-y:auto; -webkit-overflow-scrolling:touch; }
     #showtitle { top:calc(10px + env(safe-area-inset-top)); left:14px; right:14px; }
     #showtitle h2 { font-size:16px; letter-spacing:.22em; }
     #showtitle .sub { font-size:8px; letter-spacing:.14em; }

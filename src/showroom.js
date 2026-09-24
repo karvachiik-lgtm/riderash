@@ -1203,7 +1203,7 @@ function squat(j, a, b, S) {
 }
 const EMOTES = {
   wave(j, t) {
-    armAim(j, 'right', [-0.85, 0.5, 0.2], [0.2, 1, 0.3], 1.25 + 0.45 * Math.sin(t * 9));
+    armAim(j, 'right', [-0.85, 0.5, 0.2], [0.2, 1, 0.3], 1.25 + 0.45 * Math.sin(t * 9), Math.PI / 2);   // palm to the front
     armAim(j, 'left', [0.12, -1, 0.05], [0, 0, 1], 0.25);
     if (j.neck) { j.neck.rotation.z = -0.14; j.neck.rotation.x = -0.06; }
     if (j.torso) j.torso.rotation.z = 0.06;

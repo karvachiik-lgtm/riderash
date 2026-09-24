@@ -9,6 +9,8 @@ import { buildRoad, buildRoadside, buildBackdrop, centreAt, centreTangent, headA
 import { buildTraffic, updateTraffic, trafficHit, resetTraffic } from './world.js';
 import { buildFinish, placeFinish } from './finishline.js';
 import { TrackDress } from './trackdress.js';
+import { setLanePlan } from './lanes.js';
+import { CrossTraffic } from './crosstraffic.js';
 import { Flagger } from './flagger.js';
 import { trafficContact, applyTrafficHit } from './traffic.js';
 import { buildLighting, followSun } from './lighting.js';
@@ -162,6 +164,8 @@ const assets = { bike: null, rider: null };
 let finishGantry = null;   // the FINISH banner, moved to each race's line in __START__
 let trackDress = null;     // chevrons, rails, warnings, countdown boards, start line (per course)
 let flagger = null;        // the starter in the road with the chequered flag
+let crossTraffic = null;   // cars coming across at the crossroads
+let roadGroup = null, roadsideGroup = null;   // rebuilt when a course's lane layout differs (lanes.js)
 let raceCounter = 0;       // races started this session, so a replayed event gets a new outfit
 
 // The character designer. Constructed lazily the first time it is opened, so a
@@ -443,8 +447,10 @@ async function init() {
     const need = Math.ceil((longest + CFG.ROAD_PAST_FINISH) / CFG.SEG);
     if (need > CFG.ROAD_SEGS) CFG.ROAD_SEGS = need;
   }
-  const road = buildRoad();
-  const side = buildRoadside();
+  // the lane layout of the first course, so the boot road is already right
+  { const ev0 = career.event; setLanePlan(ev0.map, ev0.lenMul); }
+  const road = roadGroup = buildRoad();
+  const side = roadsideGroup = buildRoadside();
   const back = buildBackdrop();
   // THE ROADSIDE WORLD (scenery.js) replaces world.js's buildTown/buildHills/
   // buildClutter. It is dressed PER COURSE from the spine's biomes, so it is
@@ -465,6 +471,7 @@ async function init() {
   scene.add(finishGantry);
   trackDress = new TrackDress(scene);
   try { flagger = new Flagger(scene); } catch (e) { console.warn('[riderash] flagger:', e); flagger = null; }
+  try { crossTraffic = new CrossTraffic(scene); window.__CROSS__ = crossTraffic; } catch (e) { console.warn('[riderash] cross traffic:', e); crossTraffic = null; }
   world.traffic = traffic;
 
   // fills the MODULE-SCOPE `assets`, so the showroom can reach the rider later
@@ -1649,6 +1656,36 @@ function stepGame(dt) {
     }
   }
 
+  // CROSS TRAFFIC at the crossroads: T-bones are wipeouts above a walking pace
+  if (crossTraffic && !window.__TRAFFIC_OFF__) {
+    crossTraffic.update(dt, world.parts.filter((r) => r.phys).map((r) => r.phys.s));
+    for (const rd of world.parts) {
+      const f = rd.fighter;
+      if (!rd.phys || !f || f.down || f.invuln > 0) continue;
+      const hit = crossTraffic.contact(rd.phys);
+      if (!hit) continue;
+      const isP = rd === player;
+      state.trafficHits = (state.trafficHits || 0) + 1;
+      const dist = Math.hypot(rd.phys.s - player.phys.s, rd.phys.lateral - player.phys.lateral);
+      const vol = isP ? 1 : Math.max(0, 1 - dist / 140);
+      if (vol > 0.03) audio.oneShot('crash', vol, 1.0);
+      if (dist < 160) { const at = rd.phys.pos.clone(); at.y += 0.8; fx.spark(at, new THREE.Vector3(0, 0.6, 0), 24, 1.6); }
+      // thrown along the car's way, speed mostly gone
+      rd.phys.lateralV += Math.sign(hit.car.userData.dir) * Math.min(9, hit.car.userData.v * 0.5);
+      rd.phys.speed *= 0.35;
+      if (rd.phys.speed < 4 && hit.closing < 8) continue;   // a nudge at a crawl
+      const who = isP ? 'player' : (rd.name || 'rival');
+      (state.wrecksBy = state.wrecksBy || {})[who] = (state.wrecksBy[who] || 0) + 1;
+      if ((f.hold || f.heldBy) && f._endHold) f._endHold('break', hooks);
+      f.down = true; f.downTimer = CFG.WRECK_TIME; f.active = null; f.invuln = CFG.INVULN_AFTER;
+      rd.phys.yawOffset += (Math.random() - 0.5) * 1.6;
+      state.trafficWrecks = (state.trafficWrecks || 0) + 1;
+      if (isP) { state.warn = 'T-BONED'; state.shake = Math.min(1.4, state.shake + 0.9); hooks.onImpact?.(1.0);
+        state.hitstop = Math.max(state.hitstop, 0.08); }
+      else if (dist < 60) state.warn = 'RIVAL T-BONED';
+    }
+  }
+
   // sun follows the player so shadow detail stays near
   followSun(lights.sun, player.pos);
 
@@ -1671,7 +1708,8 @@ function stepGame(dt) {
     // The cop is on the radar from the moment he takes up his spot, not only
     // once he is chasing: the ambush is something you should see coming.
     radar.update(dt, player, cop && cop.present ? [...rivals, cop] : rivals,
-      world.traffic && world.traffic.userData ? world.traffic.userData.cars : null);
+      [...(world.traffic && world.traffic.userData ? world.traffic.userData.cars : []),
+       ...(crossTraffic ? crossTraffic.cars : [])]);
   } catch (e) { /* the radar must never take the frame down */ }
   updateGaps(dt);
 
@@ -1820,12 +1858,18 @@ window.__START__ = () => {
   // rather than at load -- a race always ends where its own level says.
   const ev = career.event;
   spine.setMap(ev.map, ev.lenMul);
+  // THE LANES ARE PER COURSE (lanes.js): a different layout means a different
+  // deck, markings, kerbs and rails, so the road is rebuilt when it changes.
+  if (setLanePlan(ev.map, ev.lenMul)) {
+    try { rebuildRoad(); } catch (e) { console.warn('[riderash] road rebuild:', e); }
+  }
   // Re-dress the roadside for this course (no-op when it is already dressed).
   try { if (scenery) scenery.setCourse(spine); } catch (e) { console.warn('[riderash] scenery:', e); }
   state.finishS = spine.totalLength;
   placeFinish(finishGantry, state.finishS);
   try { if (trackDress) window.__TRACKDRESS__ = trackDress.build(state.finishS); } catch (e) { console.warn('[riderash] trackdress:', e); }
   // a different starter outfit every race (window.__FLAGGER_OUTFIT__ pins one)
+  if (crossTraffic) crossTraffic.reset();
   if (flagger) {
     flagger.reset(window.__FLAGGER_OUTFIT__ != null ? window.__FLAGGER_OUTFIT__ : (career.state.race || 0) + (career.state.wins || 0) * 3 + raceCounter++);
   }
@@ -2284,6 +2328,31 @@ async function closeShowroom(spec) {
   refreshTitle();
 }
 document.getElementById('design').addEventListener('click', openShowroom);
+
+/** Swap in a road and roadside built for the current lane plan (see lanes.js). */
+function rebuildRoad() {
+  const road = buildRoad(), side = buildRoadside();
+  try { applySurfaces(THREE, road); applySurfaces(THREE, side); } catch (e) { /* plain materials still render */ }
+  side.traverse((n) => { if (n.isMesh) n.castShadow = false; });
+  const setEnv = scene.userData.setMaterialEnv;
+  if (setEnv) road.traverse((n) => {
+    if (!n.isMesh || !n.material) return;
+    for (const m of (Array.isArray(n.material) ? n.material : [n.material])) {
+      if (!m || !m.color) continue;
+      const hex = m.color.getHex();
+      if (hex === PAL.asphalt || hex === PAL.asphaltWorn) setEnv(m, 1.0);
+      else if (m.name === 'ground') setEnv(m, 0.85);
+    }
+  });
+  for (const old of [roadGroup, roadsideGroup]) {
+    if (!old) continue;
+    scene.remove(old);
+    old.traverse((n) => { if (n.geometry) n.geometry.dispose(); });
+  }
+  roadGroup = road; roadsideGroup = side;
+  scene.add(road, side);
+  try { surfaces = new SurfaceDriver(road, spine, scene); } catch (e) { /* keeps the old driver */ }
+}
 window.__SHOWROOM__ = () => (showroom ? { open: showroom.isOpen, spec: showroom.spec } : null);
 // the live instance, for the harness: camera frustum, stage rect and whether the
 // body actually has geometry. Exposed rather than guessed at.

@@ -17,6 +17,7 @@ import * as THREE from 'three';
 import { CFG } from './config.js';
 import { centreAt, headAt } from './level.js';
 import { buildStartLine, placeFinish } from './finishline.js';
+import { edgeAt, laneEvents, crossings, crossingNear } from './lanes.js';
 
 const TIGHT_R = 700;       // m: bends tighter than this get chevrons and a rail
 const CHEV_STEP = 22;      // m between chevrons through a bend
@@ -65,6 +66,32 @@ function textBoard(text, bg = '#1e5aa8', fg = '#fff', w = 256, h = 128, font = 7
   });
 }
 
+// LANE ENDS: a yellow diamond with two lanes, the outer one bending in.
+// `side` +1 is the right-hand lane ending (the rider's side).
+function laneEndsTex(side) {
+  return canvasTex(128, 128, (g, w, h) => {
+    g.translate(w / 2, h / 2); g.rotate(Math.PI / 4);
+    g.fillStyle = '#f2c313'; g.fillRect(-42, -42, 84, 84);
+    g.strokeStyle = '#111'; g.lineWidth = 5; g.strokeRect(-40, -40, 80, 80);
+    g.rotate(-Math.PI / 4);
+    g.strokeStyle = '#111'; g.lineWidth = 8; g.lineCap = 'round';
+    const inner = -side * 11, outer = side * 11;
+    g.beginPath(); g.moveTo(inner, 34); g.lineTo(inner, -34); g.stroke();
+    g.beginPath(); g.moveTo(outer, 34); g.lineTo(outer, 4); g.quadraticCurveTo(outer, -14, inner * 0.2, -30); g.stroke();
+  });
+}
+// CROSSROADS: a yellow diamond with a plus.
+function crossTex() {
+  return canvasTex(128, 128, (g, w, h) => {
+    g.translate(w / 2, h / 2); g.rotate(Math.PI / 4);
+    g.fillStyle = '#f2c313'; g.fillRect(-42, -42, 84, 84);
+    g.strokeStyle = '#111'; g.lineWidth = 5; g.strokeRect(-40, -40, 80, 80);
+    g.rotate(-Math.PI / 4);
+    g.fillStyle = '#111';
+    g.fillRect(-6, -34, 12, 68); g.fillRect(-34, -6, 68, 12);
+  });
+}
+
 function windingTex() {
   return canvasTex(128, 128, (g, w, h) => {
     // a diamond warning sign with an S-bend
@@ -103,6 +130,9 @@ export class TrackDress {
       chevR: new THREE.MeshBasicMaterial({ map: chevronTex(1), name: 'td_chevR' }),
       chevL: new THREE.MeshBasicMaterial({ map: chevronTex(-1), name: 'td_chevL' }),
       wind: new THREE.MeshBasicMaterial({ map: windingTex(), transparent: true, name: 'td_wind' }),
+      endsR: new THREE.MeshBasicMaterial({ map: laneEndsTex(1), transparent: true, name: 'td_endsR' }),
+      endsL: new THREE.MeshBasicMaterial({ map: laneEndsTex(-1), transparent: true, name: 'td_endsL' }),
+      cross: new THREE.MeshBasicMaterial({ map: crossTex(), transparent: true, name: 'td_cross' }),
       post,
       rail: new THREE.MeshStandardMaterial({ color: 0xc7ccd1, roughness: 0.35, metalness: 0.75, name: 'td_rail' }),
       back: new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.8, name: 'td_back' }),
@@ -130,6 +160,8 @@ export class TrackDress {
   /** Dress the course from s = 0 to `finishS`. */
   build(finishS) {
     this._clear();
+    // the kerb line on a side at s: moves with the lanes (lanes.js)
+    const H = (s, side) => edgeAt(Math.max(0, s), side) + CFG.KERB_W;
     const half = CFG.ROAD_W / 2 + CFG.KERB_W;
     const chevR = [], chevL = [], posts = [], rails = [], railPosts = [], winds = [];
     let straightRun = 400, lastChev = -1e9;
@@ -142,10 +174,11 @@ export class TrackDress {
       if (straightRun > 350 && s > 250) winds.push(s - 180);
       straightRun = 0;
       const outside = -Math.sign(k);                     // the side the bend throws you to
-      const lat = outside * (half + 1.3);
+      const lat = outside * (H(s, outside) + 1.3);
+      if (crossingNear(s, 12)) continue;                 // nothing across a crossroads
       // RAIL, continuous along the outside
-      rails.push(roadMatrix(s, outside * (half + 0.9), 0.55).clone());
-      if (Math.round(s / RAIL_STEP) % 2 === 0) railPosts.push(roadMatrix(s, outside * (half + 0.9), 0.4).clone());
+      rails.push(roadMatrix(s, outside * (H(s, outside) + 0.9), 0.55).clone());
+      if (Math.round(s / RAIL_STEP) % 2 === 0) railPosts.push(roadMatrix(s, outside * (H(s, outside) + 0.9), 0.4).clone());
       // CHEVRONS, pointing INTO the bend: the inside is +lateral when k > 0,
       // which from the rider's seat is to his right -> a right-pointing chevron
       if (s - lastChev >= CHEV_STEP) {
@@ -170,9 +203,32 @@ export class TrackDress {
     inst(this.geos.rail, this.mats.rail, rails);
     inst(this.geos.railPost, this.mats.post, railPosts);
     // warning signs on the right verge, each on a post
-    const signs = winds.map((s) => roadMatrix(s, half + 1.6, 2.1).clone());
+    const signs = winds.map((s) => roadMatrix(s, H(s, 1) + 1.6, 2.1).clone());
     inst(this.geos.sign, this.mats.wind, signs);
-    inst(this.geos.post, this.mats.post, winds.map((s) => roadMatrix(s, half + 1.6, 0.8).clone()));
+    inst(this.geos.post, this.mats.post, winds.map((s) => roadMatrix(s, H(s, 1) + 1.6, 0.8).clone()));
+    // LANE ENDS on the rider's side: a sign 250 m and 120 m before each taper,
+    // on the side that loses the lane. CROSSROADS: a sign 200 m before each.
+    const endsR = [], endsL = [], cross = [], sposts = [];
+    for (const e of laneEvents()) {
+      if (e.side !== 1 || e.kind !== 'ends') continue;
+      for (const d of [250, 120]) {
+        const s = e.s - d;
+        if (s < 60 || s > finishS) continue;
+        endsR.push(roadMatrix(s, H(s, 1) + 1.6, 2.1).clone());
+        endsL.push(roadMatrix(s, -(H(s, -1) + 1.6), 2.1).clone());
+        sposts.push(roadMatrix(s, H(s, 1) + 1.6, 0.8).clone(), roadMatrix(s, -(H(s, -1) + 1.6), 0.8).clone());
+      }
+    }
+    for (const c of crossings()) {
+      const s = c - 200;
+      if (s < 60 || s > finishS) continue;
+      cross.push(roadMatrix(s, H(s, 1) + 1.6, 2.1).clone());
+      sposts.push(roadMatrix(s, H(s, 1) + 1.6, 0.8).clone());
+    }
+    inst(this.geos.sign, this.mats.endsR, endsR);
+    inst(this.geos.sign, this.mats.endsL, endsL);
+    inst(this.geos.sign, this.mats.cross, cross);
+    inst(this.geos.post, this.mats.post, sposts);
     // countdown boards
     for (const d of [1000, 500, 200]) {
       const s = finishS - d;
@@ -181,17 +237,18 @@ export class TrackDress {
       for (const side of [-1, 1]) {
         const board = new THREE.Mesh(this.geos.count, mat);
         board.matrixAutoUpdate = false;
-        board.matrix.copy(roadMatrix(s, side * (half + 1.8), 2.3));
+        board.matrix.copy(roadMatrix(s, side * (H(s, side) + 1.8), 2.3));
         board.userData.ownMat = side === 1;
         this.group.add(board);
         const p = new THREE.Mesh(this.geos.post, this.mats.post);
         p.matrixAutoUpdate = false;
-        p.matrix.copy(roadMatrix(s, side * (half + 1.8), 0.8));
+        p.matrix.copy(roadMatrix(s, side * (H(s, side) + 1.8), 0.8));
         this.group.add(p);
       }
     }
     placeFinish(this.start, 12);
-    this.stats = { chevrons: chevR.length + chevL.length, railM: rails.length * RAIL_STEP, warnings: winds.length };
+    this.stats = { chevrons: chevR.length + chevL.length, railM: rails.length * RAIL_STEP, warnings: winds.length,
+      laneSigns: endsR.length, crossSigns: cross.length };
     return this.stats;
   }
 }

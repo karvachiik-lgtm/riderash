@@ -28,6 +28,15 @@ import { CFG } from './config.js';
 import { centreAt, centreTangent, headAt } from './level.js';
 
 const CFG_ROAD_W_HALF = CFG.ROAD_W / 2;
+// THE EDGE MOVES (lanes.js): the tarmac edge on the side a body is on, at its
+// distance. Open at a crossroads, where the cross road's deck is tarmac too.
+import { edgeAt, crossingNear } from './lanes.js';
+function edgeFor(s, lateral) {
+  const e = edgeAt(Math.max(0, s || 0), lateral >= 0 ? 1 : -1);
+  // a little extra room at a crossroads (no kerb or rail there), not so much
+  // that leaving it snaps a rider back onto the road
+  return crossingNear(s, 5.5) ? e + 3 : e;
+}
 const CFG_KERB_W = CFG.KERB_W;
 
 // ---------------------------------------------------------------------------
@@ -1662,7 +1671,7 @@ export class BikePhys {
     this.lateralV *= (1 - h * (PHYS.LATERAL_DAMP * grip));
 
     // ---- 4. surfaces ------------------------------------------------------
-    const halfRoad = CFG_ROAD_W_HALF;
+    const halfRoad = edgeFor(this.s, this.lateral);
     const wasOnRoad = this.onRoad;
     if (Math.abs(this.lateral) > halfRoad) {
       this.onRoad = false;
@@ -1689,12 +1698,12 @@ export class BikePhys {
     // long: a normal run wide is over in well under a second, so this only ever
     // fires on a rider who is genuinely stuck, and by then being returned to
     // the road at a crawl has already cost them the places it should.
-    if (this.offRoadTimer > PHYS.STRAND_TIME && Math.abs(this.lateral) > CFG_ROAD_W_HALF - 0.9) {
+    if (this.offRoadTimer > PHYS.STRAND_TIME && Math.abs(this.lateral) > halfRoad - 0.9) {
       // RETURN THEM PROPERLY, not to the white line. Stopping 5 cm inside the
       // edge left the bike balanced on the boundary, flicking in and out of
       // `onRoad` and taking the off-road drag penalty most frames: rescued runs
       // still showed maxV 17.7 against a clean 42. Aim well inside the tarmac.
-      const target = CFG_ROAD_W_HALF - 0.9;
+      const target = halfRoad - 0.9;
       const step = Math.min(PHYS.STRAND_RATE * h, Math.abs(this.lateral) - target);
       this.lateral -= Math.sign(this.lateral) * step;
       if (this.lateralV * Math.sign(this.lateral) > 0) this.lateralV = 0;
@@ -1868,7 +1877,7 @@ export class BikePhys {
     // it, the lateral impulse is diverted into a forward one instead, so a rider
     // pinned on the barrier can still be pushed off it rather than being held
     // there forever.
-    const half = CFG_ROAD_W_HALF + CFG_KERB_W + 0.9;
+    const half = edgeFor(this.s, this.lateral) + CFG_KERB_W + 0.9;
     const myRailSide = Math.abs(this.lateral) > half - 0.35 ? Math.sign(this.lateral) : 0;
     if (myRailSide !== 0 && side * myRailSide > 0) {
       this.speed += Math.abs(push) * 1.5;
@@ -2007,8 +2016,8 @@ export class BikePhys {
     // scrum, and measured contacts per five-second run went up rather than
     // down. Bleeding the impulse away is the conservative choice and the
     // correct one: the rider still loses the place, nothing gets launched.
-    const railAt = CFG_ROAD_W_HALF + CFG_KERB_W + 0.9;
     const blocked = (body, push) => {
+      const railAt = edgeFor(body.s, body.lateral) + CFG_KERB_W + 0.9;
       const at = Math.abs(body.lateral) > railAt - 0.35 ? Math.sign(body.lateral) : 0;
       return at !== 0 && Math.sign(push) === at;
     };

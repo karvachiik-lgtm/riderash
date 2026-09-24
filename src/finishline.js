@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { CFG } from './config.js';
 import { centreAt, headAt } from './level.js';
+import { edgeAt } from './lanes.js';
 
 function chequerTexture(cols = 16, rows = 2) {
   const c = document.createElement('canvas');
@@ -100,5 +101,11 @@ export function placeFinish(g, s) {
   g.position.copy(_c);
   // the gantry's local X spans the road: face it along the travel direction
   g.rotation.set(0, Math.atan2(_t.x, _t.z), 0);
+  // SPAN THE ROAD THAT IS THERE (lanes.js): stretch across a wider road and
+  // shift to its middle when one side has more lanes than the other
+  const eR = edgeAt(s, 1), eL = edgeAt(s, -1), base = CFG.ROAD_W / 2;
+  g.scale.set((eR + eL) / (2 * base), 1, 1);
+  const mid = (eR - eL) / 2, nx = -_t.z, nz = _t.x;
+  g.position.x += nx * mid; g.position.z += nz * mid;
   g.visible = true;
 }

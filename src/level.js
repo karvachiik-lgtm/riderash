@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { CFG, PAL } from './config.js';
 import { texMaterial, getTexture } from './textures.js';
+import { edgeAt, lanesAt, LANE, crossings, CROSS_HALF } from './lanes.js';
 
 // ---------------------------------------------------------------------------
 // ASPHALT IN DAYLIGHT, NOT A WET MIRROR.
@@ -246,7 +247,11 @@ export function buildRoad() {
   // Build the deck as a triangulated strip, with a worn strip either side of
   // the centre — that gives the two-value road claim 1 asks for, for free.
   const half = CFG.ROAD_W / 2;
-  const build = (width, offset, material, yOff, uvScale) => {
+  // THE ROAD'S EDGES MOVE (lanes.js): every strip is built between two lateral
+  // offsets that are functions of distance. `build(width, offset)` is the old
+  // fixed-width call, kept as a wrapper.
+  const E = (s, side) => edgeAt(Math.max(0, s), side);
+  const buildF = (fA, fB, material, yOff, uvScale) => {
     const pos = [], uv = [], idx = [];
     for (let i = -ROAD_BEHIND_SEGS; i <= N; i++) {
       const j = i + ROAD_BEHIND_SEGS;             // vertex-pair index from 0
@@ -255,7 +260,8 @@ export function buildRoad() {
       const t = centreTangent(z);
       const nx = -t.z, nz = t.x;                 // left normal in xz
       for (const s of [-1, 1]) {
-        pos.push(c.x + nx * (offset + s * width / 2), c.y + yOff, c.z + nz * (offset + s * width / 2));
+        const o = s < 0 ? fA(-z) : fB(-z);
+        pos.push(c.x + nx * o, c.y + yOff, c.z + nz * o);
         uv.push(s * 0.5 + 0.5, (z * uvScale));
       }
       if (j > 0) {
@@ -272,6 +278,8 @@ export function buildRoad() {
     mesh.receiveShadow = true;
     return mesh;
   };
+  const build = (width, offset, material, yOff, uvScale) =>
+    buildF(() => offset - width / 2, () => offset + width / 2, material, yOff, uvScale);
 
   // uvScale is TILES PER METRE along the road. The deck is 7.5 m wide and the
   // texture is square, so for the map not to stretch, one U unit must span the
@@ -280,9 +288,10 @@ export function buildRoad() {
   // vertically against 7.5 m horizontally — a 2.2:1 stretch that read as smeared
   // streaks. 0.133 is square, and at ~7.5 m per tile the generated aggregate
   // lands at roughly real tarmac grain.
-  g.add(build(CFG.ROAD_W, 0, asphalt, 0, 0.133));                // main deck
-  g.add(build(1.15, -half + 1.15, worn, 0.012, 0.133 * 1.9));    // left wheel track
-  g.add(build(1.15, half - 1.15, worn, 0.012, 0.133 * 1.9));     // right wheel track
+  g.add(buildF((s) => -E(s, -1), (s) => E(s, 1), asphalt, 0, 0.133));   // main deck, edge to edge
+  // wheel tracks: polished in the middle of the OUTER lane each side
+  g.add(buildF((s) => -E(s, -1) + 1.15 - 0.575 - 0.6, (s) => -E(s, -1) + 1.15 + 0.575 - 0.6, worn, 0.012, 0.133 * 1.9));
+  g.add(buildF((s) => E(s, 1) - 1.15 - 0.575 + 0.6, (s) => E(s, 1) - 1.15 + 0.575 + 0.6, worn, 0.012, 0.133 * 1.9));
 
   // UV SCALE, and it was double-applied. `build` generates V as z * uvScale, so
   // the deck's 7200 m becomes 7200 * 0.06 = 432 V units across the strip. Setting
@@ -315,7 +324,7 @@ export function buildRoad() {
     const nx = -t.z, nz = t.x;
     const yaw = Math.atan2(t.x, t.z);
     for (const s of [-1, 1]) {
-      const off = s * (half - 0.55);
+      const off = s * (E(-z, s) - 0.55);
       dp.set(c.x + nx * off, c.y + 0.018, c.z + nz * off);
       dq.setFromEuler(new THREE.Euler(0, yaw, 0));
       dm.compose(dp, dq, ds);
@@ -352,6 +361,65 @@ export function buildRoad() {
   centreInst.instanceMatrix.needsUpdate = true;
   g.add(centreInst);
 
+  // --- LANE DIVIDERS: short dashes between the lanes of one direction,
+  // wherever a second lane is open on that side (lanes.js). Through a taper
+  // they run on until the lane is half gone, then stop, as real paint does at
+  // a merge.
+  const laneGeo = new THREE.BoxGeometry(0.12, 0.012, 3.0);
+  const laneInst = new THREE.InstancedMesh(laneGeo, line, edgeCount * 2);
+  laneInst.receiveShadow = true;
+  let li = 0;
+  const LL = { r: 1, l: 1 };
+  for (let z = ROAD_BEHIND_M - 6; z > -CFG.ROAD_SEGS * CFG.SEG; z -= 12) {
+    lanesAt(Math.max(0, -z), LL);
+    const c = centreAt(z), t = centreTangent(z);
+    const nx = -t.z, nz = t.x, yaw = Math.atan2(t.x, t.z);
+    for (const [side, n] of [[1, LL.r], [-1, LL.l]]) {
+      if (n < 1.5) continue;
+      const off = side * LANE;
+      dp.set(c.x + nx * off, c.y + 0.017, c.z + nz * off);
+      dq.setFromEuler(new THREE.Euler(0, yaw, 0));
+      dm.compose(dp, dq, ds);
+      laneInst.setMatrixAt(li++, dm);
+    }
+  }
+  laneInst.count = li;
+  laneInst.instanceMatrix.needsUpdate = true;
+  g.add(laneInst);
+
+  // --- CROSSROADS: the cross road's deck running out both sides, a stop line
+  // across our road either side of it, and zebra stripes (lanes.js crossings).
+  for (const cs of crossings()) {
+    const z = -cs, c = centreAt(z), t = centreTangent(z);
+    const yaw = Math.atan2(t.x, t.z);
+    const cross = new THREE.Mesh(new THREE.PlaneGeometry(CROSS_HALF * 2, 420), asphalt);
+    const holder = new THREE.Group();
+    holder.position.set(c.x, c.y - 0.004, c.z);
+    holder.rotation.y = yaw;
+    cross.rotation.set(-Math.PI / 2, 0, Math.PI / 2);   // runs across ours (local x), 420 m long
+    cross.receiveShadow = true;
+    holder.add(cross);
+    for (const d of [-1, 1]) {
+      // stop lines across our carriageway, and the cross road's own centre line
+      const stop = new THREE.Mesh(new THREE.BoxGeometry(E(cs, 1) + E(cs, -1), 0.012, 0.4), line);
+      stop.position.set((E(cs, 1) - E(cs, -1)) / 2, 0.02, d * (CROSS_HALF + 1.2));
+      holder.add(stop);
+      for (let k = 0; k < 6; k++) {
+        const zeb = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.012, 2.6), line);
+        zeb.position.set(-E(cs, -1) + 1 + k * ((E(cs, 1) + E(cs, -1) - 2) / 5), 0.019, d * (CROSS_HALF + 3.2));
+        holder.add(zeb);
+      }
+    }
+    // the cross road's centre line, stopping at our kerbs
+    for (const d of [-1, 1]) {
+      const from = d > 0 ? E(cs, 1) + 1 : E(cs, -1) + 1;
+      const cl = new THREE.Mesh(new THREE.BoxGeometry(205 - from, 0.012, 0.12), line);
+      cl.position.set(d * (from + (205 - from) / 2), 0.02, 0);
+      holder.add(cl);
+    }
+    g.add(holder);
+  }
+
   // --- tar patches: irregular dark blotches, so the deck is not one flat tone.
   // They are what gives the road a history rather than making it a strip. ---
   // 0x42403c, was 0x232326. Once the deck took a real asphalt albedo (see
@@ -374,7 +442,7 @@ export function buildRoad() {
     const z = -prand() * CFG.ROAD_SEGS * CFG.SEG;
     const c = centreAt(z), t = centreTangent(z);
     const nx = -t.z, nz = t.x;
-    const off = (prand() - 0.5) * (CFG.ROAD_W - 1.4);
+    const off = -E(-z, -1) + 0.7 + prand() * (E(-z, 1) + E(-z, -1) - 1.4);
     dp.set(c.x + nx * off, c.y + 0.02, c.z + nz * off);
     dq.setFromEuler(new THREE.Euler(0, Math.atan2(t.x, t.z) + (prand() - 0.5) * 0.5, 0));
     ds.set(0.5 + prand() * 1.5, 1, 0.7 + prand() * 2.2);
@@ -396,7 +464,7 @@ export function buildRoad() {
     const z = -crand() * CFG.ROAD_SEGS * CFG.SEG;
     const c = centreAt(z), t = centreTangent(z);
     const nx = -t.z, nz = t.x;
-    const off = (crand() - 0.5) * (CFG.ROAD_W - 0.8);
+    const off = -E(-z, -1) + 0.4 + crand() * (E(-z, 1) + E(-z, -1) - 0.8);
     dp.set(c.x + nx * off, c.y + 0.022, c.z + nz * off);
     dq.setFromEuler(new THREE.Euler(0, Math.atan2(t.x, t.z) + (crand() - 0.5) * 1.4, 0));
     ds.set(1, 1, 3 + crand() * 16);
@@ -418,7 +486,7 @@ export function buildRoad() {
     const c = centreAt(z), t = centreTangent(z);
     const nx = -t.z, nz = t.x;
     const side = grand() > 0.5 ? 1 : -1;
-    const off = side * (half + CFG.KERB_W * 0.5 + grand() * 1.6);
+    const off = side * (E(-z, side) + CFG.KERB_W * 0.5 + grand() * 1.6);
     dp.set(c.x + nx * off, c.y + 0.04, c.z + nz * off);
     dq.setFromEuler(new THREE.Euler(grand() * 3, grand() * 3, grand() * 3));
     const sc2 = 0.5 + grand() * 1.5;
@@ -441,8 +509,13 @@ export function buildRoad() {
       const z = -i * SEG - SEG / 2;
       const c = centreAt(z), t = centreTangent(z);
       const nx = -t.z, nz = t.x;
-      const p = new THREE.Vector3(c.x + nx * s * (CFG.ROAD_W / 2 + CFG.KERB_W / 2), c.y + CFG.KERB_H / 2 - 0.02, c.z + nz * s * (CFG.ROAD_W / 2 + CFG.KERB_W / 2));
-      q.setFromEuler(new THREE.Euler(0, Math.atan2(t.x, t.z), 0));
+      const ko = E(-z, s) + CFG.KERB_W / 2;
+      // no kerb across a crossroads
+      if (crossings().some((cs) => Math.abs(-z - cs) < CROSS_HALF + 2)) { m.makeScale(0, 0, 0); inst.setMatrixAt(i + ROAD_BEHIND_SEGS, m); continue; }
+      const p = new THREE.Vector3(c.x + nx * s * ko, c.y + CFG.KERB_H / 2 - 0.02, c.z + nz * s * ko);
+      // through a taper the kerb angles out with the edge instead of stepping
+      const dE = E(-z + SEG / 2, s) - E(-z - SEG / 2, s);
+      q.setFromEuler(new THREE.Euler(0, Math.atan2(t.x, t.z) - Math.atan2(s * dE, SEG), 0));
       m.compose(p, q, sc);
       inst.setMatrixAt(i + ROAD_BEHIND_SEGS, m);
     }
@@ -480,9 +553,19 @@ export function buildRoad() {
   const vergeW = CFG.VERGE_W * 3;
   const vergeInner = shoulderOff + shoulderW / 2;             // = 6.95 m out
   const vergeOff = vergeInner + vergeW / 2;                   // so the inner edge lands there
+  // (shoulder and verge follow the moving edge; `half` above is the one-lane edge)
+  const sOff = (x, side) => E(x, side) - half;
   for (const s of [-1, 1]) {
-    g.add(build(shoulderW, s * shoulderOff, shoulder, -0.02, 0.090));
-    g.add(build(vergeW, s * vergeOff, verge, -0.06, 0.018));
+    const lo = (a) => (x) => s * (a + sOff(x, s));
+    const inS = shoulderOff - shoulderW / 2, outS = shoulderOff + shoulderW / 2;
+    const inV = vergeOff - vergeW / 2, outV = vergeOff + vergeW / 2;
+    if (s > 0) {
+      g.add(buildF(lo(inS), lo(outS), shoulder, -0.02, 0.090));
+      g.add(buildF(lo(inV), lo(outV), verge, -0.06, 0.018));
+    } else {
+      g.add(buildF(lo(outS), lo(inS), shoulder, -0.02, 0.090));
+      g.add(buildF(lo(outV), lo(inV), verge, -0.06, 0.018));
+    }
   }
 
   return g;
@@ -520,7 +603,8 @@ export function buildRoadside(seed = 7) {
     const z = -(i >> 1) * (SEG / 2) - 2;
     const c = centreAt(z), t = centreTangent(z);
     const nx = -t.z, nz = t.x;
-    const off = s * (CFG.ROAD_W / 2 + CFG.KERB_W + 0.55);
+    if (crossings().some((cs) => Math.abs(-z - cs) < CROSS_HALF + 3)) continue;   // open at a crossroads
+    const off = s * (edgeAt(Math.max(0, -z), s) + CFG.KERB_W + 0.55);
     p.set(c.x + nx * off, c.y + 0.37, c.z + nz * off);
     q.setFromEuler(new THREE.Euler(0, Math.atan2(t.x, t.z), 0));
     m.compose(p, q, sc);
@@ -585,7 +669,7 @@ export function buildRoadside(seed = 7) {
       const s = r() > 0.5 ? -1 : 1;
       const c = centreAt(z), t = centreTangent(z);
       const nx = -t.z, nz = t.x;
-      const off = s * (CFG.ROAD_W / 2 + CFG.KERB_W + 2.3);
+      const off = s * (edgeAt(Math.max(0, -z), s) + CFG.KERB_W + 2.3);
       sites.push({
         x: c.x + nx * off, y: c.y, z: c.z + nz * off,
         ry: Math.atan2(t.x, t.z) + Math.PI / 2 * s,
@@ -629,7 +713,7 @@ export function buildRoadside(seed = 7) {
       if (r() > 0.62) continue;
       const c = centreAt(z), t = centreTangent(z);
       const nx = -t.z, nz = t.x;
-      const off = s * (CFG.ROAD_W / 2 + CFG.KERB_W + 1.8 + r() * 14);
+      const off = s * (edgeAt(Math.max(0, -z), s) + CFG.KERB_W + 1.8 + r() * 14);
       const y = c.y - 0.1;
       p.set(c.x + nx * off, y + 0.5, c.z + nz * off);
       q.setFromEuler(new THREE.Euler(0, r() * 6.28, 0));
@@ -658,7 +742,7 @@ export function buildRoadside(seed = 7) {
     const s = -1;
     const c = centreAt(z), t = centreTangent(z);
     const nx = -t.z, nz = t.x;
-    const off = s * (CFG.ROAD_W / 2 + CFG.KERB_W + 5.5);
+    const off = s * (edgeAt(Math.max(0, -z), s) + CFG.KERB_W + 5.5);
     p.set(c.x + nx * off, c.y + 3.7, c.z + nz * off);
     q.setFromEuler(new THREE.Euler(0, 0, 0));
     sc.set(1, 1, 1);

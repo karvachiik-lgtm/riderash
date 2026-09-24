@@ -15,6 +15,7 @@ import { trafficEscape } from './trafficavoid.js';
 import * as THREE from 'three';
 import { BikePhys } from './physics.js';
 import { Fighter, ATTACKS } from './combat.js';
+import { edgeAt, halfAt } from './lanes.js';
 import { CFG, RIVAL_COLORS, RIVAL_NAMES } from './config.js';
 import { cloneWithJoints } from './rigclone.js';
 
@@ -482,7 +483,9 @@ export class Rival {
       others,
       ahead,
       lead: world && world.player && world.player.phys ? p.s - world.player.phys.s : 0,
-      road: { halfWidth: CFG.ROAD_W / 2, curvature: curv },
+      // (the nearer edge where the road is lopsided: a brain that thinks the
+      // road is symmetric must not steer off the narrow side)
+      road: { halfWidth: halfAt(p.s), curvature: curv },
       contact,
       // Vehicles within 5 m behind .. 110 m ahead, as plain numbers (traffic.js
       // trafficNear). The brain steers round them -- see npc.js _avoidTraffic.
@@ -572,7 +575,7 @@ export class Rival {
       const err = (tp.lateral - f.hold.side * CFG.GRAPPLE_GAP) - p.lateral;
       steer = Math.max(-1, Math.min(1, err * 0.3 - (p.lateralV || 0) * 0.12));
       // Throw them INTO the rail if they are already on that side of the road.
-      const half = CFG.ROAD_W / 2;
+      const half = edgeAt(Math.max(0, tp.s), Math.sign(tp.lateral) || 1);
       if (f.hold.t > 0.45 && Math.sign(tp.lateral) === f.hold.side && Math.abs(tp.lateral) > half * 0.55) {
         f.hold.throwNow = true;
       }
@@ -658,7 +661,7 @@ export class Rival {
     };
     // Keep it on the road: a gentle pull back toward its lane home. This reads
     // no player state -- it is the same lane the brain would hold.
-    const lim = CFG.ROAD_W / 2 - 1.6;
+    const lim = edgeAt(Math.max(0, p.s), Math.sign(p.lateral) || 1) - 1.6;
     const laneErr = (this.brain.laneHome ?? 0) - p.lateral;
     control.steer = Math.max(-1, Math.min(1, laneErr * 0.22));
     if (Math.abs(p.lateral) > lim) control.steer = -Math.sign(p.lateral) * 0.6;
@@ -670,7 +673,7 @@ export class Rival {
     // reckless look-ahead and the same seeded eyes-off-the-road windows.
     const care = (this.brain && this.brain.persona && this.brain.persona.trafficLook) || 1;
     if (world && world.traffic && !f.down && (!this.brain || this.brain.trafficAttention(dt, false) > 0)) {
-      const esc = trafficEscape(trafficNear(world.traffic, p.s, 5, 100), p.s, p.lateral, p.speed, 2.4 * Math.min(1, care), CFG.ROAD_W / 2 - 1.0);
+      const esc = trafficEscape(trafficNear(world.traffic, p.s, 5, 100), p.s, p.lateral, p.speed, 2.4 * Math.min(1, care), halfAt(p.s) - 1.0);
       if (esc) {
         control.steer = Math.max(-1, Math.min(1, (esc.target - p.lateral) * 1.5 - (p.lateralV || 0) * 0.25));
         if (esc.brake) { control.brake = true; control.throttle = false; }

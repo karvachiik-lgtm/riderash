@@ -38,6 +38,7 @@
 import * as THREE from 'three';
 import { CFG } from './config.js';
 import { centreAt, centreTangent } from './level.js';
+import { edgeAt, crossingNear, crossings } from './lanes.js';
 import { BIOMES } from './worldspine.js';
 import { texMaterial } from './textures.js';
 import { ASSET } from '../assetlib.js';
@@ -425,7 +426,10 @@ export class Scenery {
       let h = amp * u * (0.72 + 0.38 * n);
       h += bump * smooth(T0, T0 + 30, a) * (Math.sin(s * 0.051 + a * 0.13 + ph) * 0.6 + Math.sin(s * 0.13 - a * 0.07) * 0.4);
       if (a > 560) h = Math.min(h, -10);                   // tuck the outer lip under the beach plane
-      return h;
+      // a crossroads runs out through a flat cutting, not into a hillside
+      let cw = 0;
+      for (const cs of crossings()) cw = Math.max(cw, 1 - smooth(8, 45, Math.abs(s - cs)));
+      return h * (1 - cw);
     };
     this.reliefAt = reliefAt;
 
@@ -443,8 +447,19 @@ export class Scenery {
     const density = this.tier.density;
     // exponent per kind: shrubs and rocks take the full cut, trees half of it
     const THIN = { shrub: 1, rock: 1, tree_pine: 0.5, tree_redwood: 0.5, tree_oak: 0.5, tree_palm: 0.5, joshua_tree: 0.5, cactus_saguaro: 0.5 };
+    // WIDER ROADS PUSH THE SCENERY OUT (lanes.js). Everything below is laid out
+    // relative to the one-lane kerb; `widen` moves a lateral out by however
+    // much the road is wider there, so a four-lane stretch is not lined with
+    // trees standing in its outer lanes.
+    const widen = (s, lat) => {
+      const side = lat >= 0 ? 1 : -1;
+      return lat + side * (edgeAt(Math.max(0, s), side) - CFG.ROAD_W / 2);
+    };
     const put = (key, s, lat, o = {}) => {
       if (!this.kit.has(key)) return;
+      if (!o.raw) lat = widen(s, lat);
+      // the cross road at a crossroads stays clear for its length
+      if (Math.abs(lat) < 230 && crossingNear(s, 24)) return;
       if (Math.abs(lat) < KERB + 2.2 && !o.allowNear) return;    // never on the road or shoulder
       const tb = o.tb || themeAt(s);
       const f = frame(s);
@@ -680,15 +695,15 @@ export class Scenery {
     for (let s = -PRE; s < sEnd; s += 42) {
       const tb = themeAt(s);
       const v = tb.cur.pole === 0 ? (rnd() < 0.25 ? 1 : 0) : tb.cur.pole;
-      const lat = KERB + 7.2;
-      if (!isFree(s, lat, 1)) { prevPole = null; continue; }
+      const lat = widen(s, KERB + 7.2);
+      if (!isFree(s, KERB + 7.2, 1) || crossingNear(s, 9)) { prevPole = null; continue; }
       const f = frame(s);
       // Crossarm ACROSS the road, wires along it. yaw = atan2(-n.z, n.x) maps the
       // asset's X (the arm) onto the road normal n; its front then faces along
       // the direction of travel.
       const yaw = Math.atan2(-f.nz, f.nx);
       const y0 = groundY(s, lat, tb, f);
-      put(`utility_pole:${v}`, s, lat, { yaw, tb, col: jitterCol(rnd, 0.4) });
+      put(`utility_pole:${v}`, s, lat, { yaw, tb, col: jitterCol(rnd, 0.4), raw: true });
       const at = POLE_ATTACH[v];
       const pts = at.xs.map((x) => new THREE.Vector3(f.cx + f.nx * (lat + x), y0 + at.y, f.cz + f.nz * (lat + x)));
       if (prevPole && prevPole.v === v) for (let k = 0; k < pts.length; k++) wire(prevPole.pts[k], pts[k], 0.6);
@@ -697,7 +712,7 @@ export class Scenery {
     let prevL = null;
     for (let z = -30; z > -roadEnd; z -= 46) {
       const s = -z, f = frame(s);
-      const lat = -(CFG.ROAD_W / 2 + CFG.KERB_W + 5.5);
+      const lat = widen(s, -(CFG.ROAD_W / 2 + CFG.KERB_W + 5.5));
       // that arm is yawed atan2(t)+pi/2, which lays it ALONG the road, so its
       // ends are offset along the tangent, not the normal
       const pts = [-0.85, 0.85].map((x) => new THREE.Vector3(f.cx + f.nx * lat + f.tx * x, f.cy + 4.76, f.cz + f.nz * lat + f.tz * x));

@@ -31,6 +31,7 @@
 // so he banks through corners exactly like a rider.
 import * as THREE from 'three';
 import { BikePhys } from './physics.js';
+import { edgeAt, halfAt } from './lanes.js';
 import { CFG } from './config.js';
 import { trafficNear } from './traffic.js';
 import { trafficEscape } from './trafficavoid.js';
@@ -187,7 +188,7 @@ export class Cop {
     // Not past (or just before) the finish: there is no chase left to have.
     if (Number.isFinite(finishS) && s > finishS - 300) { this.nextAt = Infinity; return; }
     const side = Math.random() < 0.5 ? -1 : 1;
-    const lat = side * (CFG.ROAD_W / 2 + COPS.PARK_OFF);
+    const lat = side * (edgeAt(s, side) + COPS.PARK_OFF);
     // Angled in toward the road, the way a speed trap waits (yawOffset is +
     // toward +lateral, so a cop on the + verge turns toward -).
     this.phys.reset({ s, lateral: lat, speed: 0, yawOffset: -side * 0.35 });
@@ -291,7 +292,7 @@ export class Cop {
 
     // Line: off the verge onto the road, into your slipstream while closing, then
     // beside you on the side with more room.
-    const lim = CFG.ROAD_W / 2 - 1.0;
+    const lim = halfAt(p.s) - 1.0;
     if (Math.abs(gap) < 18 && !this.sideLock) this.sideLock = pp.lateral > 0 ? -1 : 1;
     if (Math.abs(gap) > 30) this.sideLock = 0;
     let tLat = Math.abs(gap) < 18 ? pp.lateral + (this.sideLock || 1) * COPS.SIDE : pp.lateral;
@@ -304,7 +305,7 @@ export class Cop {
       // escape line cannot be reached in time, inside a threat band 0.8 m wider
       // than the car -- MEASURED, that held him at the car's speed + 2 (29 m/s)
       // for eight seconds while he sat clear of its flank.
-      const wide = CFG.ROAD_W / 2 - 0.6;
+      const wide = halfAt(p.s) - 0.6;
       const esc = trafficEscape(trafficNear(traffic, p.s, 5, 110), p.s, p.lateral, p.speed, 2.8, wide, 0.7, 2.2);
       if (esc) {
         tLat = esc.target;

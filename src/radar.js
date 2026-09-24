@@ -17,7 +17,9 @@
 // NO GLYPHS. The style lock forbids legible text in the game world, and while a
 // HUD is chrome rather than world, this stays shape-and-colour anyway: the rider
 // is a triangle, rivals are their own bodywork colour, traffic is a dull slab.
-import { centreAt } from './level.js';
+import { centreAt, centreTangent } from './level.js';
+import { edgeAt, lanesAt, LANE, crossings, CROSS_HALF } from './lanes.js';
+const _LN = { r: 1, l: 1 };
 import { CFG } from './config.js';
 
 const RADAR_M = 130;        // (legacy) metres of road shown ahead and behind
@@ -158,6 +160,49 @@ export class Radar {
       g.strokeStyle = roadPx > 7 ? 'rgba(52,56,62,0.95)' : 'rgba(126,134,142,0.34)';
       g.lineWidth = Math.max(3, roadPx);
       g.stroke();
+      // ZOOMED IN, THE REAL SHAPE (lanes.js): the tarmac between its actual
+      // edges, so a road that widens to four lanes or narrows at a merge looks
+      // it; lane dividers where a side has two lanes; the crossroads.
+      if (roadPx > 7) {
+        const L = [], Rr = [], divs = [];
+        for (let s = Math.max(0, s0); s <= s1; s += STEP_M) {
+          const c = centreAt(-s), t = centreTangent(-s), nx = -t.z, nz = t.x;
+          const eR = edgeAt(s, 1), eL = edgeAt(s, -1);
+          this._project(c.x + nx * eR, c.z + nz * eR, px, pz, fwdX, fwdZ, pt); Rr.push(pt[0], pt[1]);
+          this._project(c.x - nx * eL, c.z - nz * eL, px, pz, fwdX, fwdZ, pt); L.push(pt[0], pt[1]);
+          lanesAt(s, _LN);
+          for (const [side, n] of [[1, _LN.r], [-1, _LN.l]]) if (n >= 1.5) {
+            this._project(c.x + nx * side * LANE, c.z + nz * side * LANE, px, pz, fwdX, fwdZ, pt); divs.push(pt[0], pt[1]);
+          }
+        }
+        if (L.length >= 4) {
+          g.beginPath();
+          g.moveTo(L[0], L[1]);
+          for (let i = 2; i < L.length; i += 2) g.lineTo(L[i], L[i + 1]);
+          for (let i = Rr.length - 2; i >= 0; i -= 2) g.lineTo(Rr[i], Rr[i + 1]);
+          g.closePath();
+          g.fillStyle = 'rgba(52,56,62,0.95)';
+          g.fill();
+          g.strokeStyle = 'rgba(228,222,210,0.45)';
+          g.lineWidth = 1.2;
+          g.stroke();
+          g.fillStyle = 'rgba(228,222,210,0.45)';
+          for (let i = 0; i < divs.length; i += 2) g.fillRect(divs[i] - 0.6, divs[i + 1] - 0.6, 1.2, 1.2);
+        }
+        for (const cs of crossings()) {
+          if (cs < s0 || cs > s1) continue;
+          const c = centreAt(-cs), t = centreTangent(-cs), nx = -t.z, nz = t.x;
+          g.beginPath();
+          this._project(c.x - nx * 60, c.z - nz * 60, px, pz, fwdX, fwdZ, pt); g.moveTo(pt[0], pt[1]);
+          this._project(c.x + nx * 60, c.z + nz * 60, px, pz, fwdX, fwdZ, pt); g.lineTo(pt[0], pt[1]);
+          g.strokeStyle = 'rgba(52,56,62,0.95)';
+          g.lineWidth = CROSS_HALF * 2 * this.scale;
+          g.stroke();
+        }
+        g.beginPath();
+        g.moveTo(pts[0], pts[1]);
+        for (let i = 2; i < pts.length; i += 2) g.lineTo(pts[i], pts[i + 1]);
+      }
       // centre line
       g.strokeStyle = roadPx > 7 ? 'rgba(228,222,210,0.6)' : 'rgba(228,222,210,0.30)';
       g.lineWidth = 1;

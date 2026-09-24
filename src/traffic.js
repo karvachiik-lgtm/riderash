@@ -33,6 +33,7 @@ import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { CFG } from './config.js';
 import { centreAt, centreTangent } from './level.js';
+import { edgeAt, openLanes, LANE } from './lanes.js';
 import genSedan from '../assets/sedan.js';
 import genPickup from '../assets/pickup_truck.js';
 import genVan from '../assets/panel_van.js';
@@ -115,7 +116,7 @@ function vehicleMaterial() {
   return m;
 }
 
-function bakeVehicle(group, seed) {
+export function bakeVehicle(group, seed) {
   group.updateMatrixWorld(true);
   const parts = [];
   let s = (seed >>> 0) || 1;
@@ -168,7 +169,15 @@ function pickType(r) {
 // threading gap the bikes live in.
 function laneFor(u) {
   const half = CFG.ROAD_W / 2;
-  return u.dir > 0 ? -(half - 0.6 - u.halfW) : Math.min(half * 0.58, half - 0.45 - u.halfW);
+  const base = u.dir > 0 ? -(half - 0.6 - u.halfW) : Math.min(half * 0.58, half - 0.45 - u.halfW);
+  // MULTI-LANE (lanes.js): the lane above is the INNER lane of the car's side;
+  // an outer lane sits one LANE further out. A car wants its own lane (slow
+  // heavies keep right, others pick), but only if that lane is open where the
+  // car will be in a few seconds -- so it merges in before a lane ends, not at
+  // the taper, and moves out once a new lane has opened.
+  const side = u.dir > 0 ? -1 : 1, fwd = u.dir > 0 ? -1 : 1;
+  const idx = Math.min(u.laneIdx || 0, openLanes(u.s + fwd * 140, side) - 1, openLanes(u.s, side) - 1);
+  return base + side * idx * LANE;
 }
 
 function cruiseFor(u, r) {
@@ -219,6 +228,9 @@ export function buildTraffic(seed = 73) {
     // MEASURED, the seeded draw made all 9 vehicles oncoming on seed 73, and
     // the road had nothing to come up behind.
     u.dir = n % 3 === 1 ? -1 : 1;
+    // which lane it takes when there is more than one: heavies keep to the
+    // outside (slow lane), cars split between the two
+    u.laneIdx = spec.halfW > 1.05 ? 1 : (r() < 0.5 ? 1 : 0);
     u.lane = laneFor(u);
     u.cruise = cruiseFor(u, r);
     u.speed = u.cruise;
@@ -373,8 +385,10 @@ export function updateTraffic(traffic, playerS, dt, t = 0, riders = null) {
     const swTarget = u.passT > 0 ? u.passDir * (u.halfW * 2 + 1.4)
       : u.swerveT > 0 ? -Math.sign(u.lane || 1) * 2.3 : 0;
     u.swerve = (u.swerve || 0) + (swTarget - (u.swerve || 0)) * Math.min(1, dt * 1.2);
+    u.lane = laneFor(u);                          // lanes open and close along the road
+    const eR = edgeAt(Math.max(0, u.s), 1), eL = edgeAt(Math.max(0, u.s), -1);
     const lane = u.lane + u.swerve + Math.sin(t * 0.55 + u.weave) * amp;
-    const want = Math.max(-half + u.halfW + 0.1, Math.min(half - u.halfW - 0.1, lane));
+    const want = Math.max(-eL + u.halfW + 0.1, Math.min(eR - u.halfW - 0.1, lane));
     // LATERAL INERTIA. The lane position used to be written straight from the
     // target, so a swerve or a pass began and ended with no build-up -- a car
     // slid sideways like a cursor. A car is a mass on four tyres: a damped
@@ -386,7 +400,7 @@ export function updateTraffic(traffic, playerS, dt, t = 0, riders = null) {
     const aLat = THREE.MathUtils.clamp((want - u.lp) * 2.2 - u.lv * 2.4, -aMax, aMax);
     u.lv += aLat * dt;
     u.lp += u.lv * dt;
-    const off = Math.max(-half + u.halfW + 0.05, Math.min(half - u.halfW - 0.05, u.lp));
+    const off = Math.max(-eL + u.halfW + 0.05, Math.min(eR - u.halfW - 0.05, u.lp));
     car.position.set(c.x + nx * off, c.y, c.z + nz * off);
     // Oncoming cars face the road's geometric tangent (+z, the way they drive);
     // same-direction ones are flipped. The asset's front is +Z. A car moving
@@ -521,7 +535,7 @@ export function trafficContact(traffic, p, padL = TRAFFIC_PAD_L, padW = TRAFFIC_
  */
 export function applyTrafficHit(p, hit, invuln = false) {
   const u = hit.car.userData;
-  const lim = CFG.ROAD_W / 2 + CFG.KERB_W + 0.6;
+  const lim = edgeAt(Math.max(0, p.s || 0), (p.lateral || 0) >= 0 ? 1 : -1) + CFG.KERB_W + 0.6;
   if (hit.quiet) {
     // positional constraint only: no damage, no wreck, no impulse to the car
     if (hit.kind === 'end') {

@@ -1,0 +1,721 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>RIDERASH</title>
+<meta name="description" content="A three-dimensional Road Rash: a pack brawl at a hundred miles an hour. Punch, kick and swing the chain down coastal and canyon roads.">
+<meta name="theme-color" content="#0a0b0c">
+<!-- Install / Add to Home Screen: standalone fullscreen on Android via the
+     manifest; iOS reads the apple-* tags below and the touch icon. -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js" crossorigin>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+} }
+</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%230a0b0c'/%3E%3Ccircle cx='18' cy='42' r='10' fill='none' stroke='%23ffb45a' stroke-width='5'/%3E%3Ccircle cx='46' cy='42' r='10' fill='none' stroke='%23ffb45a' stroke-width='5'/%3E%3Cpath d='M18 42 L30 26 L40 26 L46 42' fill='none' stroke='%23d8d2c4' stroke-width='5' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  :root { --amber:#ffb45a; --red:#d8342a; --bone:#d8d2c4; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; padding:0; height:100%; overflow:hidden; background:#000;
+              font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; color:#e8e4dc;
+              /* Phones: no pull-to-refresh from a swipe on the road, no
+                 double-tap zoom (iOS ignores user-scalable=no), no grey tap
+                 flash on every button, no font inflation in landscape. */
+              overscroll-behavior:none; touch-action:manipulation;
+              -webkit-tap-highlight-color:transparent; -webkit-text-size-adjust:100%; }
+  canvas { display:block; width:100%; height:100%; touch-action:none; }
+  #ui { position:fixed; inset:0; pointer-events:none; z-index:10; }
+  .pe { pointer-events:auto; }
+
+  #load { position:fixed; inset:0; z-index:40; background:#0a0b0c; display:flex;
+          flex-direction:column; align-items:center; justify-content:center; gap:18px; }
+  #load h1 { margin:0; font-size:clamp(30px,8vw,64px); letter-spacing:.3em; font-weight:400;
+             color:var(--bone); text-indent:.3em; }
+  #load .sub { font-size:12px; letter-spacing:.3em; color:#6d7278; text-indent:.3em; }
+  #bar { width:min(360px,64vw); height:2px; background:#23262a; overflow:hidden; }
+  #barf { height:100%; width:0%; background:var(--amber); transition:width .18s linear; }
+  #loadmsg { font-size:11px; color:#585d63; letter-spacing:.1em; height:14px; }
+
+  .screen { position:fixed; inset:0; z-index:35; display:none; flex-direction:column;
+            align-items:center; justify-content:center; gap:20px; text-align:center;
+            background:radial-gradient(ellipse at 50% 45%, rgba(12,13,15,.70), rgba(4,5,6,.95)); }
+  .screen.on { display:flex; }
+  .screen h2 { margin:0; font-size:clamp(24px,6vw,46px); letter-spacing:.3em; font-weight:400; text-indent:.3em; }
+  .screen p { margin:0; font-size:13px; line-height:1.9; color:#8b9097; letter-spacing:.08em; max-width:min(620px,86vw); }
+  .btn { padding:14px 34px; border:1px solid #4a5057; background:rgba(20,22,25,.86); color:#e8e4dc;
+         font:inherit; font-size:13px; letter-spacing:.24em; text-indent:.24em; cursor:pointer; }
+  .btn:hover, .btn:focus { border-color:var(--amber); color:var(--amber); outline:none; }
+  /* Map picker. Each card previews its own palette so the choice reads at a
+     glance without a screenshot: the swatches are the map's road and verge
+     tints, taken from the same values WorldSpine drives the surfaces with. */
+  .maps { display:flex; gap:10px; justify-content:center; margin:18px 0 6px; }
+  .map { width:132px; padding:10px 8px 9px; cursor:pointer;
+         border:1px solid #3a4047; background:rgba(18,20,23,.8); color:#b9b4ab;
+         font:inherit; font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+         transition:border-color .15s, color .15s, background .15s; }
+  .map:hover { border-color:#7a838c; color:#e8e4dc; }
+  .map.sel { border-color:var(--amber); color:var(--amber); background:rgba(40,30,16,.55); }
+  .map .nm { display:block; margin-bottom:7px; }
+  .map .sw { display:flex; height:9px; margin-bottom:6px; }
+  .map .sw i { flex:1; }
+  .map .bl { display:block; font-size:9px; letter-spacing:.10em; color:#6d737a; }
+  .map.sel .bl { color:#9d8b64; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; }
+  kbd { border:1px solid #40454b; padding:1px 6px; border-radius:2px; color:#b9bec4; font-size:11px; }
+  .pick { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
+  .pick button { padding:10px 16px; border:1px solid #3c4147; background:rgba(18,20,23,.9);
+                 color:#b9bec4; font:inherit; font-size:12px; letter-spacing:.12em; cursor:pointer; }
+  .pick button.sel { border-color:var(--amber); color:var(--amber); background:rgba(40,32,18,.9); }
+  .swatch { display:inline-block; width:9px; height:9px; margin-right:7px; vertical-align:middle; }
+
+  /* pointer-events:none -- the HUD is a full-screen overlay ABOVE the canvas,
+     and input listens on the canvas. Without this every touch landed on the HUD
+     and touch steering/throttle never reached the game during a race. */
+  #hud { position:fixed; inset:0; z-index:12; display:none; pointer-events:none; }
+  #hud .pe { pointer-events:auto; }
+  #hud.on { display:block; }
+  .hud-tl { position:absolute; left:18px; top:16px; }
+  /* SPEEDOMETER (src/hud.js Speedo): an analog dial where Road Rash had its
+     dashboard -- bottom-right on a desktop, opposite the radar, with SCORE and
+     BIKE stacked above it. --spd is the dial's size and every neighbour is
+     placed from it, so resizing the dial can never make them collide. Touch
+     layouts move it (see the landscape/portrait blocks): the bottom corners
+     belong to the thumbs there. --hr is the right gutter, safe-area aware. */
+  #hud { --spd:clamp(140px, 15vw, 190px); --hr:max(18px, env(safe-area-inset-right)); }
+  #speedo { position:absolute; right:var(--hr); bottom:max(16px, env(safe-area-inset-bottom));
+            width:var(--spd); height:var(--spd); display:block;
+            filter:drop-shadow(0 2px 10px rgba(0,0,0,.55)); }
+  .hud-bl { position:absolute; left:max(18px, env(safe-area-inset-left)); bottom:16px; }
+  /* The radar is a local sweep around the rider, not a map of the course --
+     see src/radar.js for why. Sized in CSS and backed at device resolution in
+     JS, or the road edges crawl on a retina panel. */
+  /* Career strip: the event, the bank, and how far up the ladder you are. */
+  #career { display:flex; gap:20px; justify-content:center; align-items:baseline;
+            margin-bottom:12px; font-size:11px; letter-spacing:.12em;
+            text-transform:uppercase; color:#8a9199; }
+  #career b { color:var(--amber); font-size:15px; letter-spacing:.06em; }
+  #career .locked { color:#5a6066; }
+  .bike.sel { border-color:var(--amber); color:var(--amber); background:rgba(40,30,16,.55); }
+  .bike { width:132px; padding:10px 8px 9px; cursor:pointer; }
+  .bike.locked { opacity:.42; cursor:not-allowed; }
+  .bike .pr { display:block; font-size:9px; letter-spacing:.10em; color:#6d737a; margin-top:5px; }
+  #radar { width:148px; height:148px; display:block;
+           filter: drop-shadow(0 2px 10px rgba(0,0,0,.55)); }
+  .hud-br { position:absolute; right:var(--hr); bottom:calc(var(--spd) + 28px); text-align:right; }
+  #bikebox { bottom:calc(var(--spd) + 84px); }
+  .lab { font-size:10px; letter-spacing:.26em; color:#7e838a; }
+  .val { font-size:clamp(22px,3.4vw,34px); letter-spacing:.04em; color:var(--bone);
+         font-variant-numeric:tabular-nums; line-height:1.1; }
+  .val small { font-size:.44em; color:#8b9097; letter-spacing:.18em; margin-left:5px; }
+  #pos { color:var(--amber); }
+  #warn { position:absolute; left:50%; top:22%; transform:translateX(-50%); font-size:14px;
+          letter-spacing:.3em; color:var(--red); opacity:0; text-indent:.3em; }
+  #warn.on { opacity:1; }
+  #boxes { position:absolute; right:var(--hr); top:20px; display:flex; gap:5px; justify-content:flex-end; }
+  #boxes i { width:5px; height:20px; background:var(--amber); display:block; }
+  #boxes i.off { background:#2c3036; }
+  /* Stamina sits under health, top-right. It used to be at bottom:64px on the
+     left -- exactly behind the 148px radar, so the combat resource the whole
+     brawl turns on was never visible. */
+  #combobar { position:absolute; right:var(--hr); top:66px; width:150px; height:4px; background:#2c3036;
+              box-shadow:0 1px 3px rgba(0,0,0,.6); }
+  #combofill { height:100%; width:0%; background:var(--red); }
+  #dmgvign { position:absolute; inset:0; pointer-events:none; opacity:0;
+             box-shadow:inset 0 0 140px 30px rgba(150,20,10,.85); transition:opacity .18s; }
+  #swap { position:absolute; left:50%; top:14%; transform:translateX(-50%); font-size:12px;
+          letter-spacing:.3em; color:#c9c4b8; opacity:0; text-indent:.3em; }
+  #swap.on { opacity:1; }
+
+  /* ---- SHOWROOM ---- the character designer. A live 3D figure on the left, a
+     control panel on the right. The panel is the whole point: every number it
+     shows is a real dimension of the body on screen, derived from the spec, so
+     the interface IS the maths rather than a decoration over it. */
+  #showroom { padding:0; align-items:stretch; justify-content:flex-start; }
+  #showstage { cursor:grab; touch-action:none; user-select:none; }
+  #showstage.dragging { cursor:grabbing; }
+  #showbar { position:absolute; top:84px; left:26px; right:26px; display:flex;
+             flex-direction:column; gap:6px; max-width:520px; }
+  #showbar .pre { gap:5px; }
+  #showbar .pre button { flex:0 0 auto; min-width:64px; padding:7px 10px; background:rgba(14,16,19,.72); }
+  #showbar .anims { flex-wrap:wrap; }
+  #showfoot { position:absolute; bottom:18px; left:26px; right:26px; text-align:left; }
+  #showspec { position:static !important; margin-top:6px; }
+  #s-fit { font-size:10px; letter-spacing:.14em; color:#7f858c; text-transform:uppercase; min-height:14px; }
+  #s-fit .ok { color:#8fc27a; } #s-fit .bad { color:#e0704f; }
+  #panel .kit { display:grid; grid-template-columns:1fr 1fr; gap:14px 12px; }
+  #panel .kit .swatches { gap:5px; margin-top:6px; }
+  #panel .kit .sws { width:22px; height:22px; }
+  #panel .presets .bd { font-size:9px; }
+  #panel .actions { margin-top:auto; display:flex; gap:8px; padding-top:10px; }
+  #panel .actions .btn { flex:1; padding:12px 8px; font-size:11px; }
+  #panel .actions .primary { border-color:var(--amber); color:var(--amber); }
+  #showroom.on { display:grid; grid-template-columns:1fr 320px; }
+  #showstage { position:relative; display:flex; flex-direction:column;
+               align-items:center; justify-content:center; }
+  #showtitle { position:absolute; top:22px; left:26px; text-align:left; }
+  #showtitle h2 { margin:0; font-size:22px; letter-spacing:.28em; }
+  #showtitle .sub { font-size:10px; letter-spacing:.22em; color:#6d7278; margin-top:6px; }
+  #showspec { position:absolute; bottom:20px; left:26px; text-align:left;
+              font-size:11px; line-height:1.8; color:#7f858c; }
+  #showspec b { color:var(--amber); font-weight:400; }
+  #panel { border-left:1px solid #2a2e33; background:rgba(12,13,15,.92);
+           padding:22px 18px 18px; overflow-y:auto; display:flex;
+           flex-direction:column; gap:22px; }
+  #panel h3 { margin:0 0 2px; font-size:10px; letter-spacing:.24em;
+              color:#6d7278; font-weight:400; text-transform:uppercase; }
+  .grp { display:flex; flex-direction:column; gap:7px; }
+  .grp .row2 { display:flex; align-items:center; gap:9px; }
+  .grp label { font-size:10px; letter-spacing:.12em; color:#9aa0a7;
+               min-width:74px; text-transform:uppercase; }
+  .grp input[type=range] { flex:1; accent-color:#ffb45a; height:3px; }
+  .grp .val { font-size:11px; color:var(--amber); min-width:46px; text-align:right; }
+  .swatches { display:flex; gap:7px; flex-wrap:wrap; }
+  .sws { width:26px; height:26px; border:1px solid #3a4047; cursor:pointer;
+         border-radius:2px; }
+  .sws.sel { border-color:var(--amber); outline:1px solid var(--amber); }
+  .builds { display:flex; gap:6px; }
+  .bd { flex:1; padding:7px 4px; font:inherit; font-size:9px; letter-spacing:.1em;
+        border:1px solid #3a4047; background:rgba(18,20,23,.8); color:#b9b4ab;
+        cursor:pointer; text-transform:uppercase; }
+  .bd:hover { border-color:#7a838c; color:#e8e4dc; }
+  .bd.sel { border-color:var(--amber); color:var(--amber); background:rgba(40,30,16,.55); }
+  .pre { display:flex; gap:6px; }
+  .pre button { flex:1; padding:8px 2px; font:inherit; font-size:9px;
+                letter-spacing:.08em; border:1px solid #3a4047;
+                background:rgba(18,20,23,.8); color:#b9b4ab; cursor:pointer; }
+  .pre button:hover { border-color:#7a838c; color:#e8e4dc; }
+  .pre button.sel { border-color:var(--amber); color:var(--amber); }
+  /* HUD legibility. Every readout sits over a live 3D frame that can be white
+     sky, black storm or sunlit tarmac, so colour alone cannot carry it: each
+     label and value gets a soft dark halo that reads on any background. */
+  #hud .lab, #hud .val, #warn, #swap { text-shadow: 0 1px 2px rgba(0,0,0,.85), 0 0 10px rgba(0,0,0,.45); }
+  .lab { color:#b4b9bf; }
+  #warn { font-size:18px; font-weight:600; }
+  #healthlab { position:absolute; right:var(--hr); top:44px; }
+  #stamlab { position:absolute; right:var(--hr); top:74px; }
+  #target { position:absolute; left:50%; top:16px; transform:translateX(-50%); text-align:center;
+            opacity:0; transition:opacity .2s; min-width:180px; }
+  #target.on { opacity:1; }
+  #target .nm { font-size:12px; letter-spacing:.24em; color:#e8e4dc;
+                text-shadow:0 1px 2px rgba(0,0,0,.85); }
+  #target .tb { margin:5px auto 0; width:180px; height:4px; background:rgba(20,22,25,.8); }
+  #target .tb i { display:block; height:100%; width:100%; background:var(--amber); transition:width .15s; }
+  #fpsbox { position:absolute; right:var(--hr); top:96px; font-size:10px; color:#8a9199; display:none;
+            text-shadow:0 1px 2px #000; }
+  #fpsbox.on { display:block; }
+
+  /* The garage cards are the same component as the map cards, and a long blurb
+     used to overlap the swatch strip. Fixed height, clamped copy. */
+  .bike { display:flex; flex-direction:column; min-height:112px; }
+  .bike .bl { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;
+              line-height:1.35; min-height:3.6em; }
+  .bike .pr { margin-top:auto; padding-top:5px; }
+  .bike:disabled, .bike.locked { filter:saturate(.4); }
+
+  /* PAUSE and SETTINGS share one panel so every option is reachable from both
+     the title and mid-race. */
+  #pause h2 { margin-bottom:6px; }
+  .menu { display:flex; flex-direction:column; gap:10px; min-width:260px; }
+  .menu .btn { width:100%; }
+  .setg { display:grid; grid-template-columns:110px 1fr 44px; gap:10px 12px; align-items:center;
+          font-size:11px; letter-spacing:.14em; color:#9aa0a7; text-transform:uppercase;
+          min-width:min(420px,86vw); text-align:left; }
+  .setg input[type=range] { accent-color:#ffb45a; width:100%; }
+  .setg output { color:var(--amber); text-align:right; }
+  .setg select { background:#16181b; color:#e8e4dc; border:1px solid #3a4047; font:inherit;
+                 font-size:11px; padding:5px 6px; grid-column:2 / 4; }
+  .setg label.ck { grid-column:2 / 4; display:flex; gap:8px; align-items:center; }
+  #settings { display:none; }
+  #settings.on { display:flex; flex-direction:column; align-items:center; gap:18px; }
+  .hint { font-size:10px; letter-spacing:.14em; color:#5f646a; text-transform:uppercase; }
+
+  /* Pause, and on touch CAM / SND beside it: the keyboard's Esc, C and M. */
+  #hudbtns { position:absolute; left:50%; bottom:16px; transform:translateX(-50%); display:flex; gap:8px; }
+  .hb { width:48px; height:34px; border:1px solid #4a5057; background:rgba(12,13,15,.55); color:#c9c4b8;
+        font:inherit; font-size:10px; letter-spacing:.08em; cursor:pointer; opacity:.6; padding:0;
+        touch-action:manipulation; }
+  .hb:hover, .hb:active { opacity:1; border-color:var(--amber); color:var(--amber); }
+  /* the pause glyph: two bars, drawn, so it is crisp at any size and needs no font */
+  #pausebtn { display:flex; align-items:center; justify-content:center; gap:5px; }
+  #pausebtn i { display:block; width:4px; height:14px; background:currentColor; border-radius:1px; }
+  /* TOUCH: the one HUD button lives in the TOP-LEFT CORNER, the place every
+     phone racer puts pause, and the readouts beside it move over to make room.
+     Camera and sound are items in the pause menu, not permanent screen clutter. */
+  body.touch #hudbtns { left:max(12px, env(safe-area-inset-left)); top:calc(10px + env(safe-area-inset-top));
+                        bottom:auto; transform:none; }
+  body.touch .hb { width:44px; height:44px; border-radius:50%; opacity:.8; background:rgba(12,13,15,.5); }
+  body.touch .hud-tl { left:calc(max(12px, env(safe-area-inset-left)) + 56px); }
+  body.touch .hud-tl[style*="top:84px"] { left:calc(max(12px, env(safe-area-inset-left)) + 56px); }
+  /* Touch controls: shown only on coarse pointers (see touchpad.js). Word
+     labels, not J/K/L: a phone player has never seen the keyboard legend. */
+  #touchpad { display:none; }
+  #touchpad.on { display:block; }
+  .tp { position:absolute; width:62px; height:62px; border-radius:50%; border:1px solid rgba(232,228,220,.35);
+        background:rgba(12,13,15,.38); color:#e8e4dc; font:inherit; font-size:10px; letter-spacing:.06em;
+        padding:0; touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none;
+        text-shadow:0 1px 2px rgba(0,0,0,.8); }
+  .tp.on { background:rgba(255,180,90,.45); border-color:var(--amber); }
+  /* Analog steering pad (touchpad.js): the nub follows the thumb. */
+  #tp-steer { position:absolute; border-radius:40px; border:1px solid rgba(232,228,220,.35);
+              background:rgba(12,13,15,.38); touch-action:none; user-select:none; -webkit-user-select:none; }
+  #tp-steer.on { border-color:var(--amber); }
+  body.tilt #tp-steer { display:none; }      /* the phone IS the wheel */
+  #tp-steer .tick { position:absolute; top:22%; bottom:22%; width:1px; background:rgba(232,228,220,.25); }
+  #tp-steer .tick.c { left:50%; background:rgba(232,228,220,.45); }
+  #tp-steer .tick.l { left:25%; } #tp-steer .tick.r { left:75%; }
+  #tp-steer .arrow { position:absolute; top:50%; transform:translateY(-50%); font-size:14px; color:rgba(232,228,220,.55); }
+  #tp-steer .arrow.l { left:12px; } #tp-steer .arrow.r { right:12px; }
+  #tp-steer .nub { position:absolute; left:50%; top:50%; width:46px; height:46px; margin:-23px 0 0 -23px;
+                   border-radius:50%; background:rgba(232,228,220,.22); border:1px solid rgba(232,228,220,.6);
+                   transition:transform .06s linear; pointer-events:none; }
+  #tp-steer.on .nub { background:rgba(255,180,90,.5); border-color:var(--amber); transition:none; }
+  #tp-gas { font-size:13px; }
+  #tp-boost, #tp-tuck { border-style:dashed; }
+  /* Held by a rival: every attack button struggles, so all of them pulse. */
+  .tp.mash { border-color:var(--red); animation:mash .3s infinite alternate; }
+  @keyframes mash { from { background:rgba(150,20,10,.25); } to { background:rgba(150,20,10,.6); } }
+  /* Landscape layout (the default; portrait overrides below). */
+  #tp-steer   { left:16px;  bottom:18px; width:164px; height:78px; }
+  #tp-tuck    { left:192px; bottom:18px; width:56px; height:56px; }
+  #tp-gas     { right:16px;  bottom:18px; width:86px; height:86px; }
+  #tp-brake   { right:112px; bottom:18px; }
+  #tp-boost   { right:186px; bottom:18px; width:56px; height:56px; }
+  #tp-punch   { right:16px;  bottom:116px; }
+  #tp-kick    { right:86px;  bottom:116px; }
+  #tp-chain   { right:156px; bottom:116px; }
+  #tp-grapple { right:226px; bottom:116px; }
+  /* The touch layer spans the SAFE area, so a notch or rounded corner on a
+     phone held sideways never eats the steer pad or GAS. */
+  #touchpad { position:absolute; top:0; bottom:0; left:env(safe-area-inset-left, 0px);
+              right:env(safe-area-inset-right, 0px); }
+  @media (orientation: landscape) {
+    body.touch #radar.hud-bl { bottom:auto; top:150px; width:110px; height:110px; }
+    body.touch #touchpad { bottom:env(safe-area-inset-bottom, 0px); }
+    /* Speedometer TOP CENTRE, between the two thumb zones and under nothing a
+       finger rests on; it is also where the eye already is (the road ahead).
+       The rival tag, police flag and warnings stack below it. */
+    body.touch #hud { --spd:clamp(92px, 27vh, 150px); }
+    body.touch #speedo { right:auto; bottom:auto; left:50%; transform:translateX(-50%);
+                         top:calc(6px + env(safe-area-inset-top)); }
+    body.touch #target { top:calc(var(--spd) + 12px + env(safe-area-inset-top)); }
+    body.touch #copflag { top:calc(var(--spd) + 42px + env(safe-area-inset-top)); }
+    body.touch #warn { top:calc(var(--spd) + 74px + env(safe-area-inset-top)); }
+    body.touch #swap { top:calc(var(--spd) + 100px + env(safe-area-inset-top)); }
+    body.touch .hud-bl[style*="bottom:176px"] { display:none; }
+    body.touch .hud-br { display:none; }
+  }
+  /* SHORT LANDSCAPE (a phone on its side, ~375px tall). The menus are taller
+     than the screen, and a .screen is a fixed flex column that does not
+     scroll -- RIDE sat below the bottom edge where nothing could reach it.
+     Same fix as portrait: scroll the screen, pin the actions. */
+  @media (orientation: landscape) and (max-height: 540px) {
+    .screen { overflow-y:auto; justify-content:flex-start;
+              padding:calc(14px + env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) 14px max(14px, env(safe-area-inset-left)); }
+    .screen h2 { font-size:22px; }
+    .screen p { font-size:11px; line-height:1.6; }
+    #titleactions { position:sticky; bottom:0; z-index:2; padding:8px 0 calc(8px + env(safe-area-inset-bottom));
+                    background:linear-gradient(to top, rgba(10,11,12,.96) 70%, rgba(10,11,12,0)); width:100%; }
+    #titleactions .btn { padding:8px 14px; font-size:11px; }
+    #titleactions #resetcareer { padding:4px 8px; font-size:9px; border-color:transparent; }
+    .menu .btn { padding:9px; }
+    #panel .actions { position:sticky; bottom:0; background:rgba(12,13,15,.96); padding:8px 0; }
+  }
+  body.touch #titleactions + p, body.touch #pause .hint { display:none; }
+  /* Gamepad menu navigation: make the focused control unmistakable. */
+  body.padnav .screen button:focus, body.padnav .screen select:focus, body.padnav .screen input:focus {
+    outline:2px solid var(--amber); outline-offset:3px; }
+  .touchonly { display:none; }
+  body.touch .touchonly { display:inline; }
+  body.touch .mouse { display:none; }
+  /* The police tag: shown for the whole pursuit, not a 1.4 s warning that the
+     next event overwrites. Red/blue like the lamps. */
+  #copflag { position:absolute; left:50%; top:52px; transform:translateX(-50%); display:none;
+             font-size:12px; letter-spacing:.3em; padding:3px 10px; border:1px solid currentColor;
+             background:rgba(8,9,11,.72); text-indent:.3em; font-weight:600;
+             animation:copflash .34s steps(1) infinite; }
+  #copflag.on { display:block; }
+  @keyframes copflash { 0% { color:#ff3b3b; } 50% { color:#4d7dff; } }
+  .board { margin:14px auto 0; border-collapse:collapse; font-size:11px; letter-spacing:.14em;
+           color:#8b9097; min-width:240px; }
+  .board td { padding:3px 12px; text-align:left; border-bottom:1px solid #1e2226; }
+  .board td:first-child { color:#5f646a; width:48px; }
+  .board tr.me td { color:var(--amber); }
+  /* ---- PORTRAIT (a phone held upright) ---------------------------------
+     The landscape HUD spreads across four corners of a wide frame; upright,
+     the corners collide and the bottom belongs to the thumbs. Everything
+     readable goes into two compact rows at the top, the radar tucks under
+     them, and the lower third is left to the controls and the road. Safe-area
+     insets keep it clear of the notch and the home bar. */
+  @media (orientation: portrait) {
+    #hud { padding-top:env(safe-area-inset-top); }
+    .val { font-size:22px; }
+    .lab { font-size:9px; letter-spacing:.2em; }
+    .hud-tl { left:12px; top:calc(10px + env(safe-area-inset-top)); }
+    .hud-tl[style*="top:84px"] { top:calc(10px + env(safe-area-inset-top)) !important; left:84px; }
+    /* Speedometer top-right, in the slot the SPEED digits had: out of both
+       thumbs' reach, in line with POSITION/TIME, health and stamina below it. */
+    #hud { --spd:clamp(84px, 27vw, 124px); }
+    #speedo { right:12px; bottom:auto; top:calc(8px + env(safe-area-inset-top)); }
+    #copflag { font-size:10px; letter-spacing:.2em; padding:2px 8px; }
+    #boxes { right:12px; top:calc(var(--spd) + 20px + env(safe-area-inset-top)); }
+    #boxes i { width:4px; height:14px; }
+    #healthlab { right:12px; top:calc(var(--spd) + 38px + env(safe-area-inset-top)); }
+    #combobar { right:12px; top:calc(var(--spd) + 56px + env(safe-area-inset-top)); width:110px; }
+    #stamlab { right:12px; top:calc(var(--spd) + 62px + env(safe-area-inset-top)); }
+    #radar.hud-bl { left:12px; bottom:auto; top:calc(62px + env(safe-area-inset-top)); width:92px; height:92px; }
+    .hud-bl[style*="bottom:176px"] { display:none; }
+    .hud-br { right:12px; bottom:auto; top:calc(var(--spd) + 80px + env(safe-area-inset-top)); }
+    .hud-br .val { font-size:16px; }
+    #bikebox { display:none; }
+    #target { top:calc(var(--spd) + 130px + env(safe-area-inset-top)); }
+    #target .tb { width:140px; }
+    #warn { top:30%; font-size:14px; }
+    body.touch .hud-tl { left:66px; }
+    body.touch .hud-tl[style*="top:84px"] { left:134px; }
+    #fpsbox { top:calc(var(--spd) + 122px + env(safe-area-inset-top)); }
+
+    /* Thumbs: steering bottom-left, gas/brake bottom-right, the four attacks in
+       a row above them where the right thumb rolls up from the throttle. */
+    .tp { width:60px; height:60px; }
+    #tp-steer   { left:14px;  bottom:calc(24px + env(safe-area-inset-bottom)); width:160px; height:76px; }
+    #tp-boost   { left:14px;  bottom:calc(112px + env(safe-area-inset-bottom)); width:54px; height:54px; }
+    #tp-tuck    { left:14px;  bottom:calc(174px + env(safe-area-inset-bottom)); width:54px; height:54px; }
+    #tp-gas     { right:14px;  bottom:calc(24px + env(safe-area-inset-bottom)); width:84px; height:84px; }
+    #tp-brake   { right:106px; bottom:calc(24px + env(safe-area-inset-bottom)); }
+    #tp-punch   { right:14px;  bottom:calc(122px + env(safe-area-inset-bottom)); }
+    #tp-kick    { right:82px;  bottom:calc(122px + env(safe-area-inset-bottom)); }
+    #tp-chain   { right:150px; bottom:calc(122px + env(safe-area-inset-bottom)); }
+    #tp-grapple { right:218px; bottom:calc(122px + env(safe-area-inset-bottom)); }
+    /* 320 px wide (iPhone SE): the row above could not fit -- steer ran under
+       BRAKE and GRAB sat on BOOST. Same arrangement, one size smaller. */
+    @media (max-width: 360px) {
+      .tp { width:50px; height:50px; font-size:9px; }
+      #tp-steer   { width:130px; height:68px; }
+      #tp-steer .nub { width:40px; height:40px; margin:-20px 0 0 -20px; }
+      #tp-boost, #tp-tuck { width:48px; height:48px; }
+      #tp-tuck    { bottom:calc(166px + env(safe-area-inset-bottom)); }
+      #tp-gas     { width:72px; height:72px; }
+      #tp-brake   { right:92px; }
+      #tp-punch   { right:14px;  bottom:calc(106px + env(safe-area-inset-bottom)); }
+      #tp-kick    { right:72px;  bottom:calc(106px + env(safe-area-inset-bottom)); }
+      #tp-chain   { right:130px; bottom:calc(106px + env(safe-area-inset-bottom)); }
+      #tp-grapple { right:188px; bottom:calc(106px + env(safe-area-inset-bottom)); }
+    }
+
+    /* Menus: one column, scrollable, nothing wider than the screen. */
+    .screen { overflow-y:auto; justify-content:flex-start; padding:calc(24px + env(safe-area-inset-top)) 14px 24px; }
+    .maps { flex-wrap:wrap; }
+    .map { width:44vw; }
+    .bike { width:44vw; }
+    .setg { grid-template-columns:90px 1fr 38px; }
+    .menu { min-width:0; width:min(320px,90vw); }
+    /* Character designer: the stage gets most of the height and its bands
+       slim down -- showroom.js frames the figure in the space BETWEEN the pose
+       bar and the stats, so every row the bar wraps onto shrank the rider. */
+    body #showroom.on { grid-template-columns:1fr; grid-template-rows:62vh auto; overflow-y:auto; }
+    #showtitle { top:calc(10px + env(safe-area-inset-top)); left:14px; right:14px; }
+    #showtitle h2 { font-size:16px; letter-spacing:.22em; }
+    #showtitle .sub { font-size:8px; letter-spacing:.14em; }
+    #showbar { top:calc(58px + env(safe-area-inset-top)); left:10px; right:10px; gap:5px; }
+    #showbar .pre, #showbar .anims { flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none;
+                                     -webkit-overflow-scrolling:touch; }
+    #showbar .pre::-webkit-scrollbar { display:none; }
+    #showbar .pre button { min-width:0; padding:7px 11px; font-size:10px; }
+    #showfoot { left:14px; right:14px; bottom:8px; }
+    #showspec { font-size:10px; line-height:1.6; }
+    #panel { border-left:0; border-top:1px solid #2a2e33; overflow:visible; }
+    #panel .kit .sws { width:28px; height:28px; }
+    #panel .actions { position:sticky; bottom:0; background:rgba(12,13,15,.96);
+                      padding:10px 0 calc(10px + env(safe-area-inset-bottom)); }
+    /* RIDE is ~200px below the fold on a phone; pin the action row to the
+       bottom of the scrolling title so it is always one tap away. */
+    #titleactions { position:sticky; bottom:0; z-index:2; padding:12px 0 calc(12px + env(safe-area-inset-bottom));
+                    background:linear-gradient(to top, rgba(10,11,12,.96) 70%, rgba(10,11,12,0)); width:100%; }
+    #titleactions .btn { padding:10px 14px; font-size:12px; }
+    #start { flex-basis:100%; }
+    #titleactions #resetcareer { padding:4px 8px; font-size:9px; border-color:transparent; flex-basis:100%; }
+    /* the keyboard legend means nothing on a phone */
+  }
+  #fatal { position:fixed; inset:0; z-index:60; display:none; background:#0a0b0c; color:#e8e4dc;
+           flex-direction:column; align-items:center; justify-content:center; gap:16px; text-align:center;
+           padding:24px; }
+  #fatal.on { display:flex; }
+  #fatal h2 { margin:0; letter-spacing:.3em; font-weight:400; }
+  #fatal p { max-width:560px; color:#8b9097; font-size:13px; line-height:1.8; margin:0; }
+  #fatal code { color:#c9a36a; font-size:11px; word-break:break-word; }
+
+  @media (max-width: 760px) {
+    .maps { flex-wrap:wrap; }
+    .map { width:44vw; }
+    #showroom.on { grid-template-columns:1fr; grid-template-rows:45vh 1fr; }
+  }
+  /* ==== [npc-persona] CHARACTER CARDS (src/charcard.js) ==== read-only rider
+     cards: title "tonight's field" chips, pause standings chips, the card. */
+  #ccfield, #ccstand { margin:0 0 12px; max-width:min(760px,94vw); }
+  .cclab { font-size:9px; letter-spacing:.22em; color:#8b9097; margin-bottom:6px; text-align:center; }
+  .cclab span { color:#5a6066; letter-spacing:.12em; margin-left:8px; }
+  .ccrow { display:flex; flex-wrap:wrap; gap:6px; justify-content:center; }
+  .ccchip { background:rgba(20,21,24,.75); border:1px solid #3a3d42; color:var(--bone); font:inherit;
+            font-size:12px; letter-spacing:.12em; padding:6px 10px; cursor:pointer; display:flex;
+            flex-direction:column; align-items:center; min-width:84px; }
+  .ccchip small { font-size:8px; letter-spacing:.14em; color:#7d838a; margin-top:2px; text-transform:uppercase; }
+  .ccchip:hover, .ccchip:focus { border-color:var(--amber); color:var(--amber); outline:none; }
+  .ccchip.you { border-color:#5a4a2a; color:var(--amber); cursor:default; }
+  #ccard { position:fixed; left:50%; top:50%; z-index:60; width:min(700px,94vw); max-height:94vh;
+           transform:translate(-50%,-50%); display:none; perspective:1400px; }
+  #ccard.on { display:block; }
+  #ccard.peek { pointer-events:auto; }
+  #ccard .cc-inner { position:relative; transition:transform .6s; transform-style:preserve-3d; }
+  #ccard.flip .cc-inner { transform:rotateY(180deg); }
+  #ccard .cc-face { backface-visibility:hidden; -webkit-backface-visibility:hidden;
+           background:linear-gradient(160deg,rgba(34,30,26,.97),rgba(14,15,17,.97)); border:1px solid var(--amber);
+           box-shadow:0 10px 40px rgba(0,0,0,.6); display:flex; gap:14px; padding:14px; color:var(--bone);
+           overflow:auto; max-height:94vh; box-sizing:border-box; }
+  #ccard .cc-back { position:absolute; inset:0; transform:rotateY(180deg); align-items:center; justify-content:center;
+           background:#1a1a1a; }
+  .cc-left { position:relative; flex:0 0 auto; }
+  .cc-tt, .cc-mug { width:210px; height:240px; display:block; cursor:pointer;
+           background:radial-gradient(circle at 50% 40%,#3a3228,#141517 70%); border:1px solid #3a3d42; }
+  .cc-mug { width:240px; height:274px; cursor:default; }
+  .cc-bubble { position:absolute; left:8px; right:8px; top:8px; background:var(--bone); color:#141517; font-size:12px;
+           padding:6px 8px; border-radius:8px; opacity:0; transition:opacity .2s; pointer-events:none; }
+  .cc-bubble.on { opacity:1; }
+  .cc-right { flex:1 1 auto; min-width:0; font-size:12px; line-height:1.5; }
+  .cc-name { font-size:22px; letter-spacing:.2em; color:var(--amber); display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; }
+  .cc-nm.link { cursor:pointer; }
+  .cc-mood { font-size:9px; letter-spacing:.18em; color:#d8342a; }
+  .cc-style { font-size:10px; letter-spacing:.12em; color:#b9c0c7; text-transform:uppercase; margin:2px 0 6px; }
+  .cc-bio { margin:0 0 8px !important; font-size:12px !important; line-height:1.5 !important; color:#aab0b6 !important; letter-spacing:.02em !important; }
+  .ccst { display:grid; grid-template-columns:86px 1fr 18px; align-items:center; gap:8px; font-size:9px; letter-spacing:.16em; color:#8b9097; }
+  .ccst i { height:6px; background:#26282c; display:block; }
+  .ccst b { display:block; height:100%; background:linear-gradient(90deg,#ffb45a,#d8342a); }
+  .ccst em { font-style:normal; color:var(--bone); text-align:right; }
+  .cc-sig, .cc-machine, .cc-race { margin-top:7px; font-size:11px; color:#c9c4b6; }
+  .cc-sig b, .cc-machine b, .cc-race b { color:var(--amber); font-weight:400; font-size:9px; letter-spacing:.18em; margin-right:4px; }
+  .cc-race .red { color:#ff5a4a; }
+  .cc-quote { margin-top:7px; font-style:italic; color:var(--bone); }
+  .cc-x { position:absolute; right:6px; top:4px; background:none; border:0; color:#8b9097; font-size:22px; cursor:pointer; z-index:2; }
+  .cc-x:hover { color:var(--amber); }
+  .cc-flip { margin-top:10px; background:none; border:1px solid #5a4a2a; color:var(--amber); font:inherit; font-size:10px;
+           letter-spacing:.2em; padding:4px 10px; cursor:pointer; }
+  .cc-back .cc-flip { position:absolute; bottom:12px; right:14px; }
+  .cc-plac { background:#101010; border:2px solid #d8d2c4; padding:10px 14px; font-family:monospace; color:#d8d2c4; max-width:260px; }
+  .cc-plac .pn { font-size:20px; letter-spacing:.2em; } .cc-plac .pb { color:var(--amber); margin:4px 0; }
+  .cc-plac .pc { font-size:10px; line-height:1.5; color:#aaa; }
+  #cctoast { position:fixed; left:50%; top:22%; transform:translateX(-50%); z-index:40; pointer-events:none;
+           font-size:clamp(13px,2vw,18px); letter-spacing:.14em; color:var(--bone); text-shadow:0 2px 6px #000;
+           opacity:0; transition:opacity .25s; white-space:nowrap; }
+  #cctoast.on { opacity:1; }
+  @media (max-width:640px) {
+    #ccard .cc-front { flex-direction:column; align-items:center; }
+    .cc-tt { width:180px; height:206px; }
+    #ccard .cc-back { flex-direction:column; }
+  }
+  /* ==== [npc-persona] END */
+</style>
+</head>
+<body>
+<noscript><div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#e8e4dc;background:#0a0b0c;font-family:monospace;text-align:center;padding:24px">RIDERASH needs JavaScript and WebGL. Enable JavaScript and reload.</div></noscript>
+<canvas id="c"></canvas>
+
+<div id="load">
+  <h1>RIDERASH</h1>
+  <div class="sub" id="loadsub">COAST ROAD CIRCUIT</div>
+  <div id="bar"><div id="barf"></div></div>
+  <div id="loadmsg">loading</div>
+</div>
+
+
+<div class="screen" id="showroom">
+  <div id="showstage">
+    <div id="showtitle">
+      <h2>BUILD YOUR RIDER</h2>
+      <div class="sub"><span class="mouse">DRAG TO TURN · SCROLL TO ZOOM · DOUBLE-CLICK TO RESET</span><span class="touchonly">DRAG TO TURN · PINCH TO ZOOM · DOUBLE-TAP TO RESET</span></div>
+    </div>
+    <div id="showbar">
+      <div class="pre" id="s-pose" role="group" aria-label="Stance"></div>
+      <div class="pre anims" id="s-anim" role="group" aria-label="Animation"></div>
+    </div>
+    <div id="showfoot">
+      <div id="s-fit"></div>
+      <div id="showspec"></div>
+    </div>
+  </div>
+  <div id="panel">
+    <div class="grp">
+      <h3>Presets</h3>
+      <div class="builds presets" id="s-presets"></div>
+    </div>
+    <div class="grp">
+      <h3>Body</h3>
+      <div class="row2"><label for="s-height">Height</label>
+        <input type="range" id="s-height" min="1.50" max="2.05" step="0.01" value="1.75">
+        <span class="val" id="v-height">1.75 m</span></div>
+      <div class="row2"><label for="s-shoulders">Shoulders</label>
+        <input type="range" id="s-shoulders" min="0.80" max="1.22" step="0.01" value="1.00">
+        <span class="val" id="v-shoulders">1.00</span></div>
+      <div class="row2"><label for="s-limbs">Limbs</label>
+        <input type="range" id="s-limbs" min="0.90" max="1.12" step="0.01" value="1.00">
+        <span class="val" id="v-limbs">1.00</span></div>
+      <div class="builds" id="s-builds" role="group" aria-label="Build"></div>
+    </div>
+    <div class="grp kit">
+      <div><h3>Leathers</h3><div class="swatches" id="s-jacket"></div></div>
+      <div><h3>Pants</h3><div class="swatches" id="s-pants"></div></div>
+      <div><h3>Helmet</h3><div class="swatches" id="s-helmet"></div></div>
+      <div><h3>Accent</h3><div class="swatches" id="s-accent"></div></div>
+    </div>
+    <div class="actions">
+      <button class="btn pe" id="s-random">RANDOM</button>
+      <button class="btn pe primary" id="s-done">RIDE THIS</button>
+    </div>
+  </div>
+</div>
+
+<div class="screen on" id="title">
+  <h2>RIDERASH</h2>
+  <p>Five riders. One road. The race is a brawl.<br>
+     Punch, kick and swing the chain at ninety miles an hour.<br>
+     Riders who go down get back up. Riders who win, don't.</p>
+
+  <div id="career"></div>
+  <div id="garage" class="maps"></div>
+  <div id="garagenote" style="font-size:9px;letter-spacing:.14em;color:#5a6066;text-transform:uppercase;margin-bottom:10px"></div>
+
+  <div id="maps" class="maps"></div>
+  <div id="mapnote" style="font-size:9px;letter-spacing:.14em;color:#5a6066;text-transform:uppercase;margin-bottom:14px"></div>
+
+  <div class="row" id="titleactions">
+    <button class="btn pe" id="start">RIDE</button>
+    <button class="btn pe" id="design" style="opacity:.85">BUILD RIDER</button>
+    <button class="btn pe" id="opensettings" style="opacity:.75">SETTINGS</button>
+    <button class="btn pe" id="resetcareer" style="opacity:.55">RESET CAREER</button>
+  </div>
+  <p style="font-size:11px;color:#5f646a">
+    <kbd>W</kbd>/<kbd>↑</kbd> throttle &nbsp; <kbd>S</kbd>/<kbd>↓</kbd> brake &nbsp;
+    <kbd>A</kbd><kbd>D</kbd> steer &nbsp; <kbd>J</kbd> punch &nbsp; <kbd>K</kbd> kick &nbsp;
+    <kbd>L</kbd> chain &nbsp; <kbd>G</kbd> grab/throw &nbsp; <kbd>Shift</kbd> tuck &nbsp; <kbd>Space</kbd> boost<br>
+     <kbd>C</kbd> camera &nbsp; <kbd>1</kbd>-<kbd>7</kbd> views &nbsp; <kbd>M</kbd> mute &nbsp; <kbd>Esc</kbd>/<kbd>P</kbd> pause
+  </p>
+  <p style="font-size:11px;color:#8b6a5a;letter-spacing:.06em">
+    Hear a siren? Stay on the bike. Wreck near a cop and you're <b>BUSTED</b>: fined, and the race doesn't count.
+  </p>
+</div>
+
+<div class="screen" id="over">
+  <h2 id="overh">WIPED OUT</h2>
+  <p id="overp"></p>
+  <div class="row"><button class="btn pe" id="again">RIDE AGAIN</button></div>
+</div>
+
+<div class="screen" id="pause">
+  <h2>PAUSED</h2>
+  <p id="glnote" class="hint" style="display:none"></p>
+  <div class="menu" id="pausemenu">
+    <button class="btn pe" id="p-resume">RESUME</button>
+    <button class="btn pe" id="p-restart">RESTART RACE</button>
+    <button class="btn pe" id="p-camera">CAMERA</button>
+    <button class="btn pe" id="p-sound">SOUND</button>
+    <button class="btn pe" id="p-settings">SETTINGS</button>
+    <button class="btn pe" id="p-quit">QUIT TO TITLE</button>
+  </div>
+  <div class="hint">Esc to resume</div>
+</div>
+
+<div class="screen" id="settingsscreen">
+  <div id="settings" class="on">
+    <h2>SETTINGS</h2>
+    <div class="setg">
+      <span>Master</span><input type="range" id="set-master" aria-label="Master volume" min="0" max="1" step="0.05"><output id="o-master"></output>
+      <span>Effects</span><input type="range" id="set-sfx" aria-label="Effects volume" min="0" max="1" step="0.05"><output id="o-sfx"></output>
+      <span>Music</span><input type="range" id="set-music" aria-label="Music volume" min="0" max="1" step="0.05"><output id="o-music"></output>
+      <span>Quality</span><select id="set-quality" aria-label="Quality">
+        <option value="auto">Auto (adapts to frame rate)</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+      </select>
+      <span>Camera</span><select id="set-camera" aria-label="Default camera"></select>
+      <span>Frame rate</span><label class="ck"><input type="checkbox" id="set-fps"> show FPS counter</label>
+      <span>Touch pad</span><select id="set-touch" aria-label="On-screen touch controls">
+        <option value="auto">Auto (when you touch the screen)</option>
+        <option value="on">Always on</option>
+        <option value="off">Off</option>
+      </select>
+      <span>Tilt steer</span><label class="ck"><input type="checkbox" id="set-tilt"> steer by tilting the phone</label>
+      <span></span><span id="tiltnote" class="hint" style="grid-column:2 / 4;text-transform:none"></span>
+    </div>
+    <button class="btn pe" id="set-done">BACK</button>
+  </div>
+</div>
+
+<div id="fatal">
+  <h2>RIDERASH</h2>
+  <p id="fataltxt">Something went wrong starting the game.</p>
+  <code id="fatalcode"></code>
+  <button class="btn pe" onclick="location.reload()">RELOAD</button>
+</div>
+
+<div id="hud">
+  <div class="hud-tl"><div class="lab">POSITION</div><div class="val" id="pos">6<small>/6</small></div></div>
+  <canvas id="speedo" role="img" aria-label="speedometer"></canvas>
+  <div class="hud-tl" style="top:84px"><div class="lab">TIME</div><div class="val" id="timer">0:00<small></small></div></div>
+  <div id="boxes"></div>
+  <div id="healthlab" class="lab">HEALTH</div>
+  <div id="stamlab" class="lab">STAMINA</div>
+  <div id="combobar"><div id="combofill"></div></div>
+  <div id="target"><div class="nm" id="targetnm"></div><div class="tb"><i id="targetbar"></i></div></div>
+  <div id="fpsbox"></div>
+  <div id="hudbtns">
+    <button id="pausebtn" class="pe hb" aria-label="Pause"><i></i><i></i></button>
+  </div>
+  <canvas id="radar" class="hud-bl" width="148" height="148"></canvas>
+  <div class="hud-bl" style="bottom:176px"><div class="lab">DISTANCE</div><div class="val" id="dist">0<small>M</small></div></div>
+  <div class="hud-br"><div class="lab">SCORE</div><div class="val" id="score">0<small>PTS</small></div></div>
+  <div class="hud-br" id="bikebox"><div class="lab">BIKE</div><div class="val" id="dmg">OK<small></small></div></div>
+  <div id="warn"></div>
+  <div id="copflag">POLICE</div>
+  <div id="swap"></div>
+  <div id="dmgvign"></div>
+</div>
+
+<script>
+  // LOAD WATCHDOG. A classic script, so it runs even when the module graph
+  // cannot: if three.js fails to arrive from the CDN, or a module throws at
+  // import, the loading bar would otherwise sit at 0% forever.
+  (function () {
+    function fail(msg, detail) {
+      if (window.__READY__) return;
+      var f = document.getElementById('fatal');
+      document.getElementById('fataltxt').textContent = msg;
+      document.getElementById('fatalcode').textContent = detail || '';
+      f.classList.add('on');
+    }
+    window.__FATAL__ = fail;
+    window.addEventListener('error', function (e) {
+      if (window.__READY__) return;
+      var t = e && e.target;
+      if (t && t.tagName === 'SCRIPT') fail('A game script failed to load. Check your connection and reload.', t.src);
+      else fail('The game hit an error while loading.', (e && e.message) || '');
+    }, true);
+    window.addEventListener('unhandledrejection', function (e) {
+      if (window.__READY__) return;
+      fail('The game hit an error while loading.', String(e && e.reason && (e.reason.message || e.reason)));
+    });
+    setTimeout(function () {
+      if (!window.__READY__ && !document.getElementById('fatal').classList.contains('on'))
+        fail('Loading is taking far longer than it should. Check your connection and reload.', '');
+    }, 45000);
+  })();
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>

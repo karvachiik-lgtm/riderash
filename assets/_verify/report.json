@@ -1,0 +1,78 @@
+[
+ {
+  "ok": true,
+  "mounts": null,
+  "meshes": 147,
+  "tris": 5412,
+  "materials": 11,
+  "size": [
+   0.62,
+   1.396,
+   2.02
+  ],
+  "groundOffset": 0,
+  "centreOffset": [
+   0,
+   0
+  ],
+  "sides": {
+   "front": {
+    "coverage": 0.0683,
+    "edgeDensity": 0.2033
+   },
+   "right": {
+    "coverage": 0.1829,
+    "edgeDensity": 0.2218
+   },
+   "back": {
+    "coverage": 0.086,
+    "edgeDensity": 0.2845
+   },
+   "left": {
+    "coverage": 0.177,
+    "edgeDensity": 0.2285
+   }
+  },
+  "error": null,
+  "name": "bike",
+  "problems": []
+ },
+ {
+  "ok": true,
+  "mounts": null,
+  "meshes": 38,
+  "tris": 4310,
+  "materials": 10,
+  "size": [
+   0.53,
+   1.483,
+   0.917
+  ],
+  "groundOffset": 0,
+  "centreOffset": [
+   0,
+   0
+  ],
+  "sides": {
+   "front": {
+    "coverage": 0.1342,
+    "edgeDensity": 0.0905
+   },
+   "right": {
+    "coverage": 0.0951,
+    "edgeDensity": 0.0941
+   },
+   "back": {
+    "coverage": 0.1027,
+    "edgeDensity": 0.085
+   },
+   "left": {
+    "coverage": 0.1085,
+    "edgeDensity": 0.1111
+   }
+  },
+  "error": null,
+  "name": "rider",
+  "problems": []
+ }
+]

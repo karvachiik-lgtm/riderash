@@ -23,6 +23,7 @@
 import * as THREE from 'three';
 import { makeSpec, BUILDS, makeLook, LOOK_OPTIONS } from './bodyspec.js';
 import { SCENES, buildScene, disposeScene } from './showscenes.js';
+import { FLAG_OUTFITS, flagOutfitSpec } from './flagger.js';
 import { cloneWithJoints } from './rigclone.js';
 import { RIDING } from './reach.js';
 import { CFG } from './config.js';
@@ -69,6 +70,9 @@ const CHOICE_LABELS = {
   tribal: 'Tribal', sleeve: 'Sleeve', flames: 'Flames', bands: 'Bands', neck: 'Neck',
   shades: 'Shades', aviator: 'Aviator', goggles: 'Goggles', silver: 'Silver',
   bandana: 'Bandana', fingerless: 'Fingerless',
+  crop: 'Crop top', dress: 'Dress', jeans: 'Jeans', shorts: 'Shorts', skirt: 'Skirt',
+  plain: 'Plain', floral: 'Floral', dots: 'Polka', stripes: 'Stripes', m: 'Masculine', f: 'Feminine',
+  sunhat: 'Sun hat', cap: 'Cap', boots: 'Boots', low: 'Low shoes', sneakers: 'Sneakers',
 };
 const KEY_LABELS = {
   helmet: { none: 'No lid' }, beard: { full: 'Full beard', none: 'Clean' },
@@ -381,13 +385,30 @@ export class Showroom {
       }
     }
 
+    // ---- LOOKS: the race starter's outfits, to try on ----
+    const looksTab = document.querySelector('#panel .tab[data-tab="looks"]');
+    if (looksTab && !document.getElementById('s-starter')) {
+      const g = grp(looksTab, 'Starter looks');
+      const grid = document.createElement('div'); grid.className = 'pgrid'; grid.id = 's-starter'; g.appendChild(grid);
+      for (const name of Object.keys(FLAG_OUTFITS)) {
+        const O = FLAG_OUTFITS[name];
+        const b = btn(grid, '', '', () => this.applyPreset(name), { preset: name });
+        const dots = document.createElement('span'); dots.className = 'dots';
+        for (const c of [O.look.hairColor, O.colors.jacket, O.colors.accent]) { const i = document.createElement('i'); i.style.background = hex(c); dots.appendChild(i); }
+        b.appendChild(dots); b.appendChild(document.createTextNode(name));
+      }
+      this._syncers.push(() => { for (const b of grid.children) b.classList.toggle('sel', b.dataset.preset === this._preset); });
+    }
+
     // ---- BODY ----
     e.builds.innerHTML = '';
     for (const [key, b] of Object.entries(BUILDS)) {
       btn(e.builds, 'bd', b.label, () => this.set({ build: key }), { build: key });
     }
     const skinHost = document.getElementById('s-skin');
-    if (skinHost) { skinHost.remove(); swatches(document.querySelector('#panel [data-tab="body"] .grp:last-child'), 'colors', 'skin', PALETTE.skin); }
+    if (skinHost) { skinHost.remove(); swatches(document.querySelector('#panel .tab[data-tab="body"] .grp:last-child'), 'colors', 'skin', PALETTE.skin); }
+    const bodyTab = document.querySelector('#panel .tab[data-tab="body"]');
+    if (bodyTab && !bodyTab.querySelector('.figure')) { const g = grp(bodyTab, 'Figure'); g.classList.add('figure'); chips(g, 'figure'); }
 
     // ---- HEAD ----
     const H = document.getElementById('t-head');
@@ -408,6 +429,7 @@ export class Showroom {
       slider(g, 'Head size', 0.85, 1.35, 0.01, () => this.spec.look.headSize, (v) => this.set({ look: { headSize: v } }), (v) => Math.round(v * 100) + '%');
       sub(g, 'Facial hair'); chips(g, 'beard');
       sub(g, 'Eyewear'); chips(g, 'glasses');
+      sub(g, 'Hat (without a lid)'); chips(g, 'hat');
       toggles(g, [['earring', 'Earrings']]);
     }
 
@@ -418,7 +440,9 @@ export class Showroom {
       let g = grp(O, 'Top');
       chips(g, 'top');
       swatches(g, 'colors', 'jacket', PALETTE.jacket);
-      g = grp(O, 'Pants'); swatches(g, 'colors', 'pants', PALETTE.pants);
+      sub(g, 'Print (cloth tops and dresses)'); chips(g, 'pattern');
+      g = grp(O, 'Bottoms'); chips(g, 'bottom'); swatches(g, 'colors', 'pants', PALETTE.pants);
+      sub(g, 'A dress brings its own skirt');
       g = grp(O, 'Accent'); swatches(g, 'colors', 'accent', PALETTE.accent);
       g = grp(O, 'Tattoos');
       chips(g, 'tattoo');
@@ -427,7 +451,7 @@ export class Showroom {
       g = grp(O, 'Hands and feet');
       chips(g, 'gloves');
       swatches(g, 'look', 'gloveColor', PALETTE.glove);
-      sub(g, 'Boots'); swatches(g, 'look', 'bootColor', PALETTE.boot);
+      sub(g, 'Footwear'); chips(g, 'shoes'); swatches(g, 'look', 'bootColor', PALETTE.boot);
       g = grp(O, 'Accessories');
       sub(g, 'Neck chain'); chips(g, 'chain');
       sub(g, 'Scarf'); chips(g, 'scarf');
@@ -670,7 +694,7 @@ export class Showroom {
   }
 
   applyPreset(name) {
-    const P = PRESETS[name];
+    const P = PRESETS[name] || (FLAG_OUTFITS[name] ? flagOutfitSpec(name) : null);
     if (!P) return;
     // a preset is a whole character: anything it does not name goes back to stock
     this.spec = makeSpec({ ...P, colors: { skin: 0x9c7358, ...P.colors }, look: makeLook(P.look) });
@@ -702,6 +726,9 @@ export class Showroom {
         scarf: pick(['none', 'none', 'bandana']), scarfColor: pick(PALETTE.scarf),
         earring: Math.random() < 0.3, spikes: Math.random() < 0.2, backpack: Math.random() < 0.25,
         gloves: pick(['full', 'full', 'fingerless', 'none']), gloveColor: pick(PALETTE.glove), bootColor: pick(PALETTE.boot),
+        figure: pick(['m', 'm', 'f']), bottom: pick(['jeans', 'jeans', 'jeans', 'shorts', 'skirt']),
+        pattern: pick(['plain', 'plain', 'plain', ...LOOK_OPTIONS.pattern]), hat: pick(['none', 'none', 'none', 'sunhat', 'cap']),
+        shoes: pick(['boots', 'boots', 'low', 'sneakers']),
       },
     });
     this._preset = null;

@@ -162,6 +162,7 @@ const assets = { bike: null, rider: null };
 let finishGantry = null;   // the FINISH banner, moved to each race's line in __START__
 let trackDress = null;     // chevrons, rails, warnings, countdown boards, start line (per course)
 let flagger = null;        // the starter in the road with the chequered flag
+let raceCounter = 0;       // races started this session, so a replayed event gets a new outfit
 
 // The character designer. Constructed lazily the first time it is opened, so a
 // player who never opens it never pays for its scene.
@@ -865,7 +866,24 @@ function updateCamera(dt, g) {
     camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 3.2);
     camera.updateProjectionMatrix();
   }
+
+  // THE STARTER SHOT. The countdown opens on the starter, close, as she waves
+  // the flag -- then the camera sweeps back to the chase view in the last
+  // second, so GO lands on the pack. Blended with the chase pose computed
+  // above (position lerp, orientation slerp), so the hand-off has no cut.
+  if (flagger && g.countdown > 0 && !window.__NO_INTRO__) {
+    const k = THREE.MathUtils.clamp((g.countdown - 0.3) / 1.1, 0, 1);
+    const w = k * k * (3 - 2 * k);
+    if (w > 0.001 && flagger.introPose(_introPos, _introLook, CFG.COUNTDOWN - g.countdown)) {
+      _introQ.copy(camera.quaternion);
+      camera.position.lerp(_introPos, w);
+      camera.lookAt(_introLook);
+      _introQ2.copy(camera.quaternion);               // (slerpQuaternions reads its target
+      camera.quaternion.slerpQuaternions(_introQ, _introQ2, w);   // after writing `this`)
+    }
+  }
 }
+const _introPos = new THREE.Vector3(), _introLook = new THREE.Vector3(), _introQ = new THREE.Quaternion(), _introQ2 = new THREE.Quaternion();
 
 // ---------- game state ----------
 const state = {
@@ -1807,7 +1825,10 @@ window.__START__ = () => {
   state.finishS = spine.totalLength;
   placeFinish(finishGantry, state.finishS);
   try { if (trackDress) window.__TRACKDRESS__ = trackDress.build(state.finishS); } catch (e) { console.warn('[riderash] trackdress:', e); }
-  if (flagger) flagger.reset();
+  // a different starter outfit every race (window.__FLAGGER_OUTFIT__ pins one)
+  if (flagger) {
+    flagger.reset(window.__FLAGGER_OUTFIT__ != null ? window.__FLAGGER_OUTFIT__ : (career.state.race || 0) + (career.state.wins || 0) * 3 + raceCounter++);
+  }
   world.raceLen = spine.totalLength;
   resetRace();
   state.running = true;

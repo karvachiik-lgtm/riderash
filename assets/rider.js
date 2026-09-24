@@ -38,13 +38,21 @@ export default function (THREE) {
   // look (an old save, a rival) builds the same body as before, mesh for mesh.
   const L = Object.assign({
     helmet: 'full', helmetSize: 1, headSize: 1, visor: 'smoke', stripe: 'racing', finish: 'gloss', hair: 'short',
-    hairColor: 0x2a1d14, beard: 'none', top: 'leather', tattoo: 'none', inkColor: 0x1c2433,
+    hairColor: 0x2a1d14, beard: 'none', top: 'leather', bottom: 'jeans', pattern: 'plain', figure: 'm',
+    hat: 'none', shoes: 'boots', tattoo: 'none', inkColor: 0x1c2433,
     glasses: 'none', chain: 'none', scarf: 'none', scarfColor: 0x8a1f1f, earring: false,
     spikes: false, backpack: false, gloves: 'full', gloveColor: 0x232020, bootColor: 0x1f1c1a,
   }, S.look || {});
   const TOP = L.top;
   const leatherTop = TOP === 'leather';
-  const bareArms = TOP === 'tank' || TOP === 'vest';
+  const bareArms = TOP === 'tank' || TOP === 'vest' || TOP === 'dress';
+  // FIGURE: 'f' re-cuts the same rig -- waist in, hips out, a bust line, a
+  // narrower yoke, slimmer limbs. Lengths and joints are the spec's either way.
+  const FEM = L.figure === 'f';
+  // what is below the waist: a dress brings its own skirt
+  const BOTTOM = TOP === 'dress' ? 'dress' : L.bottom;
+  const bareLegs = BOTTOM === 'skirt' || BOTTOM === 'dress';
+  const shortsOn = BOTTOM === 'shorts';
   const faceShown = L.helmet !== 'full';
 
   // ---- materials ----------------------------------------------------------
@@ -58,6 +66,7 @@ export default function (THREE) {
     color: c, roughness: r, metalness: m, clearcoat: cc, clearcoatRoughness: ccr, flatShading: !!flat,
   });
   const M = (c, r, m, flat) => new THREE.MeshStandardMaterial({ color: c, roughness: r ?? 0.7, metalness: m ?? 0.05, flatShading: !!flat });
+  const mix = (a, b, k) => new THREE.Color(a).lerp(new THREE.Color(b), k);
   const shade = (hex, k) => {               // darker / lighter variant of a spec colour
     const col = new THREE.Color(hex); col.multiplyScalar(k); return col;
   };
@@ -77,9 +86,10 @@ export default function (THREE) {
   const glove   = P(L.gloveColor, 0.62, 0.05, 0.3, 0.4, true); glove.name = 'fabric';
   // Cloth tops (tee, tank, hoodie) are matte cotton in the jacket colour.
   const cotton  = M(C.jacket, 0.92, 0.0, true); cotton.name = 'fabric';
+  if (L.pattern !== 'plain') { cotton.map = patternTex(L.pattern, C.jacket); cotton.color.setHex(0xffffff); }
+  const skirtMat = BOTTOM === 'dress' ? cotton : M(C.pants, 0.85, 0.0, true); skirtMat.name = 'fabric';
   const cottonDk = M(shade(C.jacket, 0.72), 0.94, 0.0, true); cottonDk.name = 'fabric';
   const hairMat = M(L.hairColor, L.hair === 'slick' ? 0.32 : 0.86, 0.0, true); hairMat.name = 'fabric';
-  const mix = (a, b, k) => new THREE.Color(a).lerp(new THREE.Color(b), k);
   const stubbleMat = M(mix(C.skin, L.hairColor, 0.55), 0.95, 0.0); stubbleMat.name = 'fabric';
   const ink = inkMaterial(L.tattoo === 'neck' ? 'none' : L.tattoo);
   const neckInk = L.tattoo === 'neck' || L.tattoo === 'sleeve' ? inkMaterial('tribal') : null;
@@ -87,7 +97,7 @@ export default function (THREE) {
   const silver  = M(0xcfd4d9, 0.22, 0.95); silver.name = 'metal';
   const dark    = M(0x121416, 0.35, 0.3);
   const white   = M(0xe9e4da, 0.5, 0.0);
-  const lip     = M(shade(C.skin, 0.62), 0.7, 0.0);
+  const lip     = FEM ? P(mix(C.skin, 0xb03a50, 0.7), 0.35, 0.0, 0.6, 0.2) : M(shade(C.skin, 0.62), 0.7, 0.0);
   const scarfMat = M(L.scarfColor, 0.88, 0.0, true); scarfMat.name = 'fabric';
   const lensMat = P(0x3a5a7a, 0.05, 0.6, 1, 0.02); lensMat.name = 'lens';
   const accent  = M(C.accent, 0.55, 0.05, true);
@@ -127,12 +137,45 @@ export default function (THREE) {
     pts.push(new THREE.Vector2(0.0001, -len));
     return new THREE.LatheGeometry(pts, sides, Math.PI / sides);
   };
-  const R0 = S.limbR;
+  const R0 = S.limbR * (FEM ? 0.86 : 1);
   // LOOK MESHES ARE NOT MEASURED. The rig is normalised by its bounding box
   // (see the bottom of this file) and a backpack or a ponytail must not slide
   // the body along the saddle; `lk` tags a mesh the normaliser skips.
   const lk = (m) => { m.userData.noMeasure = true; return m; };
   const add = (parent, m) => { parent.add(lk(m)); return m; };
+
+  // FABRIC PRINTS for cloth tops and dresses: a repeating tile, pixel-painted.
+  function patternTex(kind, baseHex) {
+    const W = 32, H = 32, d = new Uint8Array(W * H * 4);
+    const rgb = (h) => [(h >> 16) & 255, (h >> 8) & 255, h & 255];
+    const base = rgb(baseHex), white = [246, 242, 232], pink = [238, 150, 170], sun = [242, 196, 70], leaf = [70, 130, 80];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      let c = base;
+      if (kind === 'dots') {
+        const dx = (x % 16) - 8, dy = (y % 16) - 8;
+        if (dx * dx + dy * dy < 12) c = white;
+      } else if (kind === 'stripes') {
+        if ((y % 8) < 3) c = white;
+      } else if (kind === 'floral') {
+        // two flowers per tile, five petals round a gold centre, a leaf
+        for (const [fx, fy, pc] of [[8, 9, white], [24, 25, pink]]) {
+          const dx = x - fx, dy = y - fy, r = Math.hypot(dx, dy), a = Math.atan2(dy, dx);
+          if (r < 1.6) c = sun;
+          else if (r < 3.2 + 1.6 * Math.cos(a * 5)) c = pc;
+          else if (Math.abs(dx - 5) < 2.5 && Math.abs(dy + 4 - dx * 0.3) < 1.1) c = leaf;
+        }
+      }
+      const i = (y * W + x) * 4;
+      d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = 255;
+    }
+    const t = new THREE.DataTexture(d, W, H);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(5, 3);
+    t.magFilter = THREE.LinearFilter;
+    t.needsUpdate = true;
+    return t;
+  }
 
   // TATTOOS: ink painted into a small DataTexture over the skin tone -- pure
   // code, no canvas, no image. The lathe segments carry UVs with u around the
@@ -189,12 +232,27 @@ export default function (THREE) {
   const pelvis = new THREE.Group();
   pelvis.position.set(0, S.hipY, 0);
   g.add(pelvis);
-  pelvis.add(mk(cbox(S.pelvisW, S.pelvisH, S.pelvisD, 0.03), denim, 0, 0, 0));
-  // belt, and a steel buckle at the front
-  pelvis.add(mk(cbox(S.pelvisW * 1.03, S.pelvisH * 0.2, S.pelvisD * 1.03, 0.012), seam, 0, S.pelvisH * 0.42, 0));
-  pelvis.add(mk(cbox(0.06, S.pelvisH * 0.2, 0.014, 0.004), steel, 0, S.pelvisH * 0.42, S.pelvisD * 0.52));
-  // back pockets, as raised panels
-  for (const s of [-1, 1]) pelvis.add(mk(cbox(S.pelvisW * 0.3, S.pelvisH * 0.42, 0.012, 0.004), denim, s * S.pelvisW * 0.22, -S.pelvisH * 0.04, -S.pelvisD * 0.51));
+  const seatBlock = pelvis.add(mk(cbox(S.pelvisW, S.pelvisH, S.pelvisD, 0.03), bareLegs ? skirtMat : denim, 0, 0, 0));
+  void seatBlock;
+  if (!bareLegs) {
+    // belt, and a steel buckle at the front
+    pelvis.add(mk(cbox(S.pelvisW * 1.03, S.pelvisH * 0.2, S.pelvisD * 1.03, 0.012), seam, 0, S.pelvisH * 0.42, 0));
+    pelvis.add(mk(cbox(0.06, S.pelvisH * 0.2, 0.014, 0.004), steel, 0, S.pelvisH * 0.42, S.pelvisD * 0.52));
+    // back pockets, as raised panels
+    for (const s of [-1, 1]) pelvis.add(mk(cbox(S.pelvisW * 0.3, S.pelvisH * 0.42, 0.012, 0.004), denim, s * S.pelvisW * 0.22, -S.pelvisH * 0.04, -S.pelvisD * 0.51));
+  } else {
+    // THE SKIRT: an open flared cone off the hips, to above the knee (a
+    // dress) or mid-thigh (a skirt); a sash where a belt would be
+    const len = S.thigh * (BOTTOM === 'dress' ? 0.82 : 0.66), top = S.pelvisW * (FEM ? 0.6 : 0.56);
+    const sk = add(pelvis, mk(new THREE.CylinderGeometry(top, top * 1.75, len, 16, 2, true), skirtMat, 0, S.pelvisH * 0.3 - len / 2, 0));
+    sk.scale.set(1, 1, (S.pelvisD / S.pelvisW) * 1.15);
+    sk.material = skirtMat.clone(); sk.material.side = THREE.DoubleSide;
+    const hemGeo = new THREE.TorusGeometry(top * 1.75, 0.008, 4, 24);
+    const hem = add(pelvis, mk(hemGeo, BOTTOM === 'dress' ? accent : seam, 0, S.pelvisH * 0.3 - len, 0, Math.PI / 2));
+    hem.scale.set(1, (S.pelvisD / S.pelvisW) * 1.15, 1);
+    const sash = add(pelvis, mk(new THREE.CylinderGeometry(top * 1.02, top * 1.02, S.pelvisH * 0.16, 16), accent, 0, S.pelvisH * 0.42, 0));
+    sash.scale.set(1, 1, (S.pelvisD / S.pelvisW) * 1.15);
+  }
 
   // ---- torso, pitched forward into a racing tuck ----
   const torso = new THREE.Group();
@@ -223,11 +281,14 @@ export default function (THREE) {
   // spec's shoulder pivots sit 0.67 m apart at 1.75 m, so a chest the width of
   // the waist leaves the arms hanging off a pole. Chunky and heroic, per
   // STYLE-LOCK's "exaggerated proportions".
-  const TRUNK_PROF = [[0.0, 0.86], [0.10, 0.90], [0.40, 1.02], [0.62, 1.14], [0.82, 1.24], [1.0, 1.18]];
+  const TRUNK_PROF = FEM
+    // hip, a nipped waist, the bust line, a narrower yoke
+    ? [[0.0, 0.98], [0.10, 0.94], [0.38, 0.76], [0.60, 0.90], [0.78, 1.0], [1.0, 0.84]]
+    : [[0.0, 0.86], [0.10, 0.90], [0.40, 1.02], [0.62, 1.14], [0.82, 1.24], [1.0, 1.18]];
   const TRUNK_LEN = T * 0.90;
   const trunkGeo = seg(TRUNK_LEN, TRUNK_PROF);
   trunkGeo.rotateX(Math.PI);                  // grow UP from the lumbar joint
-  const torsoMat = (leatherTop || TOP === 'vest') ? leather : cotton;
+  const torsoMat = (leatherTop || TOP === 'vest') ? leather : TOP === 'crop' ? skin : cotton;
   const trunk = mk(trunkGeo, torsoMat, 0, 0.0, 0);
   trunk.scale.set(TW * 0.5, 1, TD * 0.5);
   // the jacket's surface half-depth at height y: details are placed ON it, not
@@ -241,19 +302,41 @@ export default function (THREE) {
     return TRUNK_PROF[TRUNK_PROF.length - 1][1] * TD * 0.5;
   };
   torso.add(trunk);
+  if (TOP === 'crop') {
+    // a cropped tee: the cloth from under the bust up, the midriff bare
+    const from = 0.52, prof = [];
+    for (const [t, r] of [[1.0, 0], [0.9, 0], [0.75, 0], [0.6, 0], [from, 0]]) {
+      let rr = TRUNK_PROF[0][1];
+      for (let i = 1; i < TRUNK_PROF.length; i++) if (t <= TRUNK_PROF[i][0]) { const [t0, r0] = TRUNK_PROF[i - 1], [t1, r1] = TRUNK_PROF[i]; rr = r0 + (r1 - r0) * (t - t0) / (t1 - t0); break; }
+      prof.push([(1 - t) / (1 - from), rr * 1.05 + r]);
+    }
+    const band = add(torso, mk(seg(TRUNK_LEN * (1 - from), prof), cotton, 0, TRUNK_LEN, 0));
+    band.scale.set(TW * 0.5, 1, TD * 0.5);
+  }
   // THE SHOULDER LINE: one rounded mass from deltoid to deltoid, a lathe laid
   // along X -- full round over the trapezius, tapering into each shoulder
   // ball. This replaced a flat chamfered slab 1.4 shoulder-widths wide, which
   // from behind read as a robot's yoke (the old block also did this).
   {
-    const half = S.shoulderW * 0.76;
+    const half = S.shoulderW * (FEM ? 0.66 : 0.76);
     const pts = [];
     for (const [t, r] of [[-1.0, 0.0001], [-1.0, 0.62], [-0.8, 0.86], [-0.45, 1.0], [0.45, 1.0], [0.8, 0.86], [1.0, 0.62], [1.0, 0.0001]]) pts.push(new THREE.Vector2(r, t * half));
     const geo = new THREE.LatheGeometry(pts, 8);
     geo.rotateZ(Math.PI / 2);
-    const yoke = mk(geo, torsoMat, 0, T * 0.94, TD * 0.03);
-    yoke.scale.set(1, T * 0.15, TD * 0.46);
+    // a dress is cut on straps: the shoulders are bare skin, the straps cross them
+    const yoke = mk(geo, TOP === 'crop' ? cotton : TOP === 'dress' ? skin : torsoMat, 0, T * 0.94, TD * 0.03);
+    yoke.scale.set(1, T * (FEM ? 0.11 : 0.15), TD * (FEM ? 0.4 : 0.46));
     torso.add(yoke);
+    if (TOP === 'dress') {
+      for (const s of [-1, 1]) {
+        // a flat band over the top of the shoulder, front to back, lying on it
+        const strap = add(torso, mk(new THREE.TorusGeometry(TD * 0.36, 0.008, 4, 12, Math.PI), cotton, s * S.shoulderW * 0.34, T * 0.9, TD * 0.03, 0, Math.PI / 2, 0));
+        strap.scale.set(1, (T * 0.085) / (TD * 0.36), 1);
+      }
+      // the neckline: the bodice stops at the bust, skin above it
+      const top = add(torso, mk(new THREE.CylinderGeometry(TW * 0.5 * 0.86, TW * 0.5 * 0.99, T * 0.18, 12, 1, true), skin, 0, T * 0.92, 0));
+      top.scale.set(1, 1, TD / TW);
+    }
   }
   // yoke seam (front and back) and the side panel seams: raised dark welts
   // yoke seam front and back, a spine welt, and the offset biker's zip --
@@ -322,7 +405,7 @@ export default function (THREE) {
   const neck = new THREE.Group();
   neck.position.set(0, T * 1.13, TD * 0.04);
   torso.add(neck);
-  neck.add(mk(new THREE.CylinderGeometry(S.headR * 0.38, S.headR * 0.44, S.neckLen, 8), skin, 0, S.neckLen * 0.5, 0));
+  neck.add(mk(new THREE.CylinderGeometry(S.headR * (FEM ? 0.32 : 0.38), S.headR * (FEM ? 0.37 : 0.44), S.neckLen, 8), skin, 0, S.neckLen * 0.5, 0));
   const head = new THREE.Group();
   head.position.set(0, S.neckLen, 0);
   neck.add(head);
@@ -434,7 +517,9 @@ export default function (THREE) {
       const ex = s * hR * 0.33, ey = hy + hR * 0.1;
       add(head, mk(new THREE.SphereGeometry(hR * 0.13, 8, 6), white, ex, ey, faceZ(hR * 0.1, ex) - hR * 0.06));
       add(head, mk(new THREE.SphereGeometry(hR * 0.075, 6, 4), dark, ex, ey, faceZ(hR * 0.1, ex) + hR * 0.03));
-      add(head, mk(cbox(hR * 0.34, hR * 0.08, hR * 0.1, 0.01), hairMat, ex, ey + hR * 0.2, faceZ(hR * 0.3, ex) + hR * 0.01, 0.1, 0, s * 0.12));
+      add(head, mk(cbox(hR * (FEM ? 0.3 : 0.34), hR * (FEM ? 0.05 : 0.08), hR * 0.1, 0.01), hairMat, ex, ey + hR * (FEM ? 0.24 : 0.2), faceZ(hR * 0.3, ex) + hR * 0.01, 0.1, 0, s * (FEM ? 0.2 : 0.12)));
+      // lashes: a dark upper lid line, flicked out at the corner
+      if (FEM) add(head, mk(cbox(hR * 0.3, hR * 0.045, hR * 0.06, 0.005), dark, ex + s * hR * 0.02, ey + hR * 0.1, faceZ(hR * 0.1, ex) + hR * 0.02, 0.2, 0, -s * 0.15));
       const ear = add(head, mk(new THREE.SphereGeometry(hR * 0.24, 8, 6), skin, s * hR * 0.88, hy - hR * 0.02, -hR * 0.05));
       ear.scale.set(0.42, 1, 0.7);
       if (L.earring) add(head, mk(new THREE.TorusGeometry(hR * 0.07, hR * 0.02, 4, 10), gold, s * hR * 0.93, hy - hR * 0.26, -hR * 0.02, 0, Math.PI / 2, 0));
@@ -476,6 +561,22 @@ export default function (THREE) {
   // which is what riders actually do with one.
   if (L.helmet === 'none') buildHair(true);
   else buildHair(false);
+  // ---- hats (bare head only) ----
+  if (L.helmet === 'none' && L.hat === 'sunhat') {
+    const straw = M(0xd9bf86, 0.9, 0.0, true); straw.name = 'fabric';
+    const hy2 = hy + hR * 0.62;
+    const brim = add(head, mk(new THREE.CylinderGeometry(hR * 2.05, hR * 2.15, hR * 0.05, 20), straw, 0, hy2, -hR * 0.05, -0.12));
+    void brim;
+    const crown = add(head, mk(new THREE.SphereGeometry(hR * 1.08, 14, 6, 0, Math.PI * 2, 0, Math.PI * 0.5), straw, 0, hy2, -hR * 0.05, -0.12));
+    crown.scale.set(0.95, 0.9, 1.0);
+    add(head, mk(new THREE.CylinderGeometry(hR * 1.04, hR * 1.06, hR * 0.2, 16, 1, true), accent, 0, hy2 + hR * 0.1, -hR * 0.05, -0.12));
+  }
+  if (L.helmet === 'none' && L.hat === 'cap') {
+    const cap = add(head, mk(new THREE.SphereGeometry(hR * 1.08, 14, 6, 0, Math.PI * 2, 0, Math.PI * 0.5), cottonDk, 0, hy + hR * 0.28, 0, -0.15));
+    cap.scale.set(0.95, 0.85, 1.0);
+    add(head, mk(cbox(hR * 1.2, hR * 0.06, hR * 0.9, 0.01), cottonDk, 0, hy + hR * 0.42, hR * 1.05, -0.12));
+    add(head, mk(new THREE.SphereGeometry(hR * 0.1, 6, 4), accent, 0, hy + hR * 1.18, -hR * 0.1));
+  }
   function buildHair(full) {
     const cap = (k, theta, tilt, mat) => {
       const c = add(head, mk(new THREE.SphereGeometry(hR * k, 14, 8, 0, Math.PI * 2, 0, theta), mat, 0, hy, 0, tilt));
@@ -552,7 +653,7 @@ export default function (THREE) {
   for (const side of ['left', 'right']) {
     const s = side === 'left' ? 1 : -1;
     const shoulder = new THREE.Group();
-    shoulder.position.set(s * S.shoulderW * 0.76, T * 0.97, TD * 0.04);
+    shoulder.position.set(s * S.shoulderW * (FEM ? 0.66 : 0.76), T * (FEM ? 0.95 : 0.97), TD * 0.04);
     torso.add(shoulder);
     // WHAT COVERS THE ARM: leathers all the way down; a hoodie's cotton; a
     // tee's short sleeve over bare (maybe inked) skin; a tank or vest, bare.
@@ -585,7 +686,7 @@ export default function (THREE) {
     upper.add(mk(seg(S.upperArm, [[0.0, R0 * 1.05 * bk], [0.22, R0 * 1.10 * bk], [0.5, R0 * 1.0 * bk], [0.85, R0 * 0.84 * bk], [1.0, R0 * 0.80 * bk]]), sleeveMat, 0, 0, 0));
     // sleeve seam, and an accent piping down the outside of the sleeve
     if (leatherTop) upper.add(mk(cbox(0.01, S.upperArm * 0.8, 0.012, 0.003), accent, s * R0 * 1.0, -S.upperArm * 0.48, 0));
-    if (TOP === 'tee') {
+    if (TOP === 'tee' || TOP === 'crop') {
       // the short sleeve, open at the hem
       add(upper, mk(seg(S.upperArm * 0.46, [[0.0, R0 * 1.2], [0.5, R0 * 1.16], [1.0, R0 * 1.12]]), cotton, 0, R0 * 0.1, 0));
       add(upper, mk(new THREE.CylinderGeometry(R0 * 1.14, R0 * 1.14, S.upperArm * 0.05, 8), cottonDk, 0, -S.upperArm * 0.43, 0));
@@ -639,7 +740,9 @@ export default function (THREE) {
     const hip = new THREE.Group();
     hip.position.set(s * S.hipW * 0.5, -S.pelvisD * 0.17, 0.02);
     pelvis.add(hip);
-    hip.add(mk(new THREE.SphereGeometry(R0 * 1.40, 8, 6), denim, 0, 0, 0));
+    // BARE LEGS under a skirt or dress; SHORTS leave the thigh's top in denim
+    const legMat = bareLegs || shortsOn ? skin : denim;
+    hip.add(mk(new THREE.SphereGeometry(R0 * 1.40, 8, 6), bareLegs ? skin : denim, 0, 0, 0));
     // KNEES FORWARD. +x on this joint swings the thigh toward -Z, the TAIL (the
     // rider faces +Z), so the old +1.48 folded the thigh backwards and the rest
     // pose had the knee 0.33 m behind the hip -- the mirror-image leg. The race
@@ -652,39 +755,59 @@ export default function (THREE) {
     const thigh = new THREE.Group();          // pivots AT the hip
     hip.add(thigh);
     // quad bulk high, narrowing into the knee
-    thigh.add(mk(seg(S.thigh, [[0.0, R0 * 1.36], [0.28, R0 * 1.42], [0.7, R0 * 1.18], [1.0, R0 * 1.02]]), denim, 0, 0, 0));
+    const lk2 = legMat === denim ? 1 : 0.94;            // bare skin sits inside where denim stood
+    thigh.add(mk(seg(S.thigh, [[0.0, R0 * 1.36 * lk2], [0.28, R0 * 1.42 * lk2], [0.7, R0 * 1.18 * lk2], [1.0, R0 * 1.02 * lk2]]), legMat, 0, 0, 0));
     // outseam: a darker welt down the outside of the jeans
-    thigh.add(mk(cbox(0.01, S.thigh * 0.84, 0.012, 0.003), seam, s * R0 * 1.30, -S.thigh * 0.5, 0));
+    if (legMat === denim) thigh.add(mk(cbox(0.01, S.thigh * 0.84, 0.012, 0.003), seam, s * R0 * 1.30, -S.thigh * 0.5, 0));
+    if (shortsOn) {
+      add(thigh, mk(seg(S.thigh * 0.34, [[0.0, R0 * 1.46], [1.0, R0 * 1.44]]), denim, 0, R0 * 0.1, 0));
+      add(thigh, mk(new THREE.CylinderGeometry(R0 * 1.47, R0 * 1.47, S.thigh * 0.04, 8), cuffMat, 0, -S.thigh * 0.33, 0));
+    }
 
     const knee = new THREE.Group();
     knee.position.set(0, -S.thigh, 0);
     thigh.add(knee);
-    knee.add(mk(new THREE.SphereGeometry(R0 * 1.08, 8, 6), denim, 0, 0, 0));
+    knee.add(mk(new THREE.SphereGeometry(R0 * 1.08 * lk2, 8, 6), legMat, 0, 0, 0));
     // KNEE PAD on the kneecap. The knee folds the shin toward -Z, so the cap is
     // on +Z. A hard shell with a strap: the biker detail that reads at speed.
-    knee.add(mk(cbox(R0 * 1.55, R0 * 1.85, R0 * 0.62, 0.016), pad, 0, -R0 * 0.35, R0 * 0.92));
-    knee.add(mk(cbox(R0 * 2.30, R0 * 0.22, R0 * 2.10, 0.006), seam, 0, -R0 * 1.05, 0));
+    if (legMat === denim) {
+      knee.add(mk(cbox(R0 * 1.55, R0 * 1.85, R0 * 0.62, 0.016), pad, 0, -R0 * 0.35, R0 * 0.92));
+      knee.add(mk(cbox(R0 * 2.30, R0 * 0.22, R0 * 2.10, 0.006), seam, 0, -R0 * 1.05, 0));
+    }
     knee.rotation.x = R.knee ?? 2.44;          // + folds the shin BACK, down to the peg
 
     const shin = new THREE.Group();           // pivots AT the knee
     knee.add(shin);
-    shin.add(mk(seg(S.shin * 0.78, [[0.0, R0 * 1.10], [0.3, R0 * 1.16], [0.8, R0 * 1.00], [1.0, R0 * 1.00]]), denim, 0, 0, 0));
-    shin.add(mk(cbox(0.01, S.shin * 0.6, 0.012, 0.003), seam, s * R0 * 1.10, -S.shin * 0.40, 0));
-    // TURNED-UP CUFF sitting on the boot shaft
-    shin.add(mk(new THREE.CylinderGeometry(R0 * 1.18, R0 * 1.20, S.shin * 0.09, 8), cuffMat, 0, -S.shin * 0.70, 0));
+    // (a bare calf tapers to a slim ankle; jeans hang straight)
+    const calf = legMat === denim ? [[0.0, R0 * 1.10], [0.3, R0 * 1.16], [0.8, R0 * 1.00], [1.0, R0 * 1.00]]
+      : [[0.0, R0 * 1.0], [0.3, R0 * 1.1], [0.75, R0 * 0.78], [1.0, R0 * 0.66]];
+    shin.add(mk(seg(S.shin * 0.78, calf), legMat, 0, 0, 0));
+    if (legMat === denim) {
+      shin.add(mk(cbox(0.01, S.shin * 0.6, 0.012, 0.003), seam, s * R0 * 1.10, -S.shin * 0.40, 0));
+      // TURNED-UP CUFF sitting on the boot shaft
+      shin.add(mk(new THREE.CylinderGeometry(R0 * 1.18, R0 * 1.20, S.shin * 0.09, 8), cuffMat, 0, -S.shin * 0.70, 0));
+    }
     // THE BOOT. Its BOTTOM is exactly where the old boot's was
     // (-shin - 0.695 foot): the rig normalises to its lowest point, and the
     // seat socket depends on that origin not moving.
     const sb = -S.shin - S.foot * 0.695;       // sole underside
     const shTop = -S.shin * 0.68, shBot = sb + S.foot * 0.36;
-    shin.add(mk(cbox(R0 * 1.90, shTop - shBot, R0 * 2.05, 0.02), boot, 0, (shTop + shBot) / 2, -S.foot * 0.04));   // shaft
+    const lowShoe = L.shoes !== 'boots';
+    if (!lowShoe) shin.add(mk(cbox(R0 * 1.90, shTop - shBot, R0 * 2.05, 0.02), boot, 0, (shTop + shBot) / 2, -S.foot * 0.04));   // shaft
+    else {
+      // a low shoe: the leg carries on down to the ankle
+      const aTop = -S.shin * 0.76, aBot = sb + S.foot * 0.46;
+      add(shin, mk(new THREE.CylinderGeometry(legMat === denim ? R0 * 1.0 : R0 * 0.62, legMat === denim ? R0 * 1.0 : R0 * 0.6, aTop - aBot, 8), legMat, 0, (aTop + aBot) / 2, 0));
+    }
     shin.add(mk(cbox(R0 * 1.80, S.foot * 0.40, S.foot * 0.92, 0.03), boot, 0, sb + S.foot * 0.10 + S.foot * 0.20, S.foot * 0.22));   // vamp
     shin.add(mk(cbox(R0 * 1.70, S.foot * 0.22, S.foot * 0.26, 0.03), pad, 0, sb + S.foot * 0.22, S.foot * 0.62));   // toe cap
-    shin.add(mk(cbox(R0 * 1.96, S.foot * 0.10, S.foot * 1.02, 0.01), trim, 0, sb + S.foot * 0.05, S.foot * 0.20));  // sole
+    shin.add(mk(cbox(R0 * 1.96, S.foot * 0.10, S.foot * 1.02, 0.01), L.shoes === 'sneakers' ? white : trim, 0, sb + S.foot * 0.05, S.foot * 0.20));  // sole
     shin.add(mk(cbox(R0 * 1.86, S.foot * 0.24, S.foot * 0.30, 0.012), trim, 0, sb + S.foot * 0.12, -S.foot * 0.20)); // heel
     // strap and buckle across the instep, buckle on the outside
-    shin.add(mk(cbox(R0 * 1.98, S.foot * 0.06, R0 * 2.12, 0.004), seam, 0, -S.shin * 0.92, -S.foot * 0.04));
-    shin.add(mk(cbox(0.012, 0.034, 0.042, 0.003), steel, s * R0 * 0.99, -S.shin * 0.92, -S.foot * 0.02));
+    if (!lowShoe) {
+      shin.add(mk(cbox(R0 * 1.98, S.foot * 0.06, R0 * 2.12, 0.004), seam, 0, -S.shin * 0.92, -S.foot * 0.04));
+      shin.add(mk(cbox(0.012, 0.034, 0.042, 0.003), steel, s * R0 * 0.99, -S.shin * 0.92, -S.foot * 0.02));
+    }
     // the gear-shift / brake scuff pad on top of the toe
     shin.add(mk(cbox(R0 * 1.2, 0.012, S.foot * 0.22, 0.004), trim, 0, sb + S.foot * 0.42, S.foot * 0.40));
 

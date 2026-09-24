@@ -34,6 +34,48 @@ export const FLAGGER = {
   HIDE_AFTER: 260,      // m past the start the player has to be before she is culled
 };
 
+// THE STARTER'S WARDROBE. She is the first person the player sees in every
+// race, so she changes outfit from race to race and each look is styled as a
+// whole: silhouette, colour, print, hair, accessories. Same spec + look system
+// as every rider (and they are in the showroom, under Looks, to try on).
+export const FLAG_OUTFITS = {
+  Sundress: { height: 1.7, skin: 0xe0ac87,
+    colors: { jacket: 0xf2c94c, pants: 0xf2c94c, accent: 0xf0efe8 },
+    look: { top: 'dress', pattern: 'floral', hat: 'sunhat', hair: 'long', hairColor: 0x6b4526, glasses: 'shades',
+            earring: true, shoes: 'low', bootColor: 0xc9a06a } },
+  'Grid Queen': { height: 1.74, skin: 0xc68e64,
+    colors: { jacket: 0xd8262e, pants: 0xd8262e, accent: 0xf0efe8 },
+    look: { top: 'dress', pattern: 'plain', hair: 'ponytail', hairColor: 0xe0cc8a, earring: true,
+            shoes: 'boots', bootColor: 0xf0efe8, chain: 'silver' } },
+  'Summer Denim': { height: 1.68, skin: 0x9c7358,
+    colors: { jacket: 0xf0efe8, pants: 0x5a7ab0, accent: 0xd46a9a },
+    look: { top: 'crop', bottom: 'shorts', hair: 'bun', hairColor: 0x1a1512, glasses: 'aviator', chain: 'gold',
+            shoes: 'sneakers', bootColor: 0xf0efe8, earring: true } },
+  'Polka Dot': { height: 1.66, skin: 0xf1c9a5,
+    colors: { jacket: 0xb3261e, pants: 0xb3261e, accent: 0x121314 },
+    look: { top: 'dress', pattern: 'dots', hair: 'long', hairColor: 0x1a1512, scarf: 'bandana', scarfColor: 0xf0efe8,
+            shoes: 'low', bootColor: 0xb3261e, glasses: 'shades' } },
+  'Rock Chick': { height: 1.72, skin: 0xe0ac87,
+    colors: { jacket: 0x121314, pants: 0x8a1f3a, accent: 0xc4b03a },
+    look: { top: 'leather', bottom: 'skirt', hair: 'long', hairColor: 0x2a1512, gloves: 'none', earring: true,
+            chain: 'silver', shoes: 'boots', bootColor: 0x121314, glasses: 'shades', tattoo: 'none' } },
+  'Riviera': { height: 1.76, skin: 0x7a5236,
+    colors: { jacket: 0xf0efe8, pants: 0xf0efe8, accent: 0xc4b03a },
+    look: { top: 'dress', pattern: 'stripes', hat: 'sunhat', hair: 'afro', hairColor: 0x1a1512, glasses: 'aviator',
+            chain: 'gold', earring: true, shoes: 'low', bootColor: 0xc4b03a } },
+};
+export const FLAG_OUTFIT_ORDER = Object.keys(FLAG_OUTFITS);
+
+/** A full spec input for an outfit (the showroom uses this too). */
+export function flagOutfitSpec(name) {
+  const O = FLAG_OUTFITS[name] || FLAG_OUTFITS.Sundress;
+  return {
+    height: O.height, build: 'lean', shoulderWide: 0.84, limbLong: 1.04,
+    colors: { helmet: 0x1a1d20, skin: O.skin, ...O.colors },
+    look: { helmet: 'none', gloves: 'none', figure: 'f', headSize: 1.04, ...O.look },
+  };
+}
+
 function checker() {
   const W = 16, H = 12, d = new Uint8Array(W * H * 4);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
@@ -52,12 +94,26 @@ export class Flagger {
     this.scene = scene;
     this.group = new THREE.Group();
     this.group.name = 'flagger';
-    this.spec = makeSpec({
-      height: 1.68, build: 'lean', shoulderWide: 0.88, limbLong: 1.03,
-      colors: { jacket: 0xf0efe8, pants: 0x1a1d20, helmet: 0x1a1d20, accent: 0xb3261e, skin: 0xc68e64 },
-      look: { helmet: 'none', hair: 'long', hairColor: 0x3b2616, top: 'tank', gloves: 'none',
-              glasses: 'shades', earring: true, bootColor: 0xb3261e, headSize: 1.04 },
-    });
+    this.outfit = null;
+    this.dress(FLAG_OUTFIT_ORDER[0]);
+    scene.add(this.group);
+    this.group.visible = false;
+    this.t = 0;
+    this.goT = -1;
+    this.lateral = FLAGGER.LATERAL;
+    this.s = FLAGGER.S_AHEAD;
+  }
+
+  /** Put her in an outfit (rebuilds the figure; cheap, once per race). */
+  dress(name) {
+    if (!FLAG_OUTFITS[name]) name = FLAG_OUTFIT_ORDER[0];
+    if (name === this.outfit && this.body) return;
+    if (this.body) {
+      this.group.remove(this.body);
+      this.body.traverse((n) => { if (n.isMesh) { n.geometry.dispose(); } });
+    }
+    this.outfit = name;
+    this.spec = makeSpec(flagOutfitSpec(name));
     this.body = buildRider(THREE, { spec: this.spec });
     this.joints = this.body.userData.joints;
     this.group.add(this.body);
@@ -67,12 +123,6 @@ export class Flagger {
     this._buildFlag();
     this.body.traverse((n) => { if (n.isMesh) { n.castShadow = true; n.receiveShadow = true; } });
     this.flagCloth.castShadow = false;
-    scene.add(this.group);
-    this.group.visible = false;
-    this.t = 0;
-    this.goT = -1;
-    this.lateral = FLAGGER.LATERAL;
-    this.s = FLAGGER.S_AHEAD;
   }
 
   /** The flag: a pole out of the right fist, and a cloth that ripples. */
@@ -98,8 +148,9 @@ export class Flagger {
     this.flagCloth = cloth;
   }
 
-  /** New race: back to her spot in front of the grid, flag up. */
-  reset() {
+  /** New race: a new outfit, back to her spot in front of the grid, flag up. */
+  reset(raceNo = 0) {
+    this.dress(FLAG_OUTFIT_ORDER[((raceNo % FLAG_OUTFIT_ORDER.length) + FLAG_OUTFIT_ORDER.length) % FLAG_OUTFIT_ORDER.length]);
     this.t = 0;
     this.goT = -1;
     this.lateral = FLAGGER.LATERAL;
@@ -173,6 +224,23 @@ export class Flagger {
     armAim(j, 'left', [0.7, -0.62, -0.2], [-0.8, 0.2, 0.3], 1.9);
     if (j.neck) j.neck.rotation.x = since < 0 ? -0.1 : 0.05;
     this._ripple(wave);
+  }
+
+  /**
+   * The countdown close-up: a camera in front of her, a little low (a hero
+   * angle), drifting round her as she waves. Writes a position and a look
+   * target; false when she is not out.
+   */
+  introPose(pos, look, t) {
+    if (!this.group.visible) return false;
+    const g = this.group, ry = g.rotation.y;
+    const fx = Math.sin(ry), fz = Math.cos(ry);          // where she faces
+    const rx = Math.cos(ry), rz = -Math.sin(ry);          // her right-hand side
+    const side = 1.2 - t * 0.5, dist = 3.6 + t * 0.35;
+    pos.set(g.position.x + fx * dist + rx * side, g.position.y + 1.0, g.position.z + fz * dist + rz * side);
+    // aim above the waist: the raised flag and her head both in frame
+    look.set(g.position.x, g.position.y + this.spec.height * 0.62, g.position.z);
+    return true;
   }
 
   /** Cloth: a travelling wave down the fly, growing away from the pole. */

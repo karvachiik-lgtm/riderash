@@ -129,8 +129,23 @@ const mat = (c, r, m) => {
 // It is derived from this sum on purpose: the backdrop plane sits just below
 // the road's lowest possible point, and getting that wrong is what buried the
 // entire carriageway for a whole session (HANDOFF 5.9).
+// THE TWISTIES. The two sweeps above never bend tighter than R ~880 m, which
+// at 48 m/s is a 0.27 g motorway curve: MEASURED, a whole race could be won
+// holding only the throttle with the bars never touched. Road Rash was raced on
+// back roads. So a third, shorter wave (~500 m, amplitude 14 m -> tightest
+// R ~460 m, ~0.5 g flat out) is faded in and out by a slow envelope: the course
+// alternates between open sweepers and ~1.7 km twisty sections where you have
+// to lean, and where running wide puts you into the oncoming lane.
+// AMP 24 (R ~270 m) was tried first and MEASURED too much for the pack: one
+// rival wrecked on traffic 9-12 times a race. At 14 the field wrecks ~2 times a
+// race in total, and a rider who never steers still runs wide into traffic.
+// The envelope is zero at z = 0, so every race still starts on a straight.
+// Height is untouched, so ROAD_Y_MIN below does not change.
+export const TWIST = { AMP: 14, FREQ: 0.0125, ENV: 0.0009 };
 export function centreAt(z, out = new THREE.Vector3()) {
-  const x = Math.sin(z * 0.0067) * 18 + Math.sin(z * 0.0024 + 1.7) * 58;
+  const env = Math.sin(z * TWIST.ENV);
+  const x = Math.sin(z * 0.0067) * 18 + Math.sin(z * 0.0024 + 1.7) * 58
+          + env * env * TWIST.AMP * Math.sin(z * TWIST.FREQ + 0.6);
   const y = Math.sin(z * 0.0016 + 0.4) * 2.6 + Math.sin(z * 0.0043) * 0.9
           + Math.sin(z * 0.011 + 2.1) * 2.3 + Math.sin(z * 0.042 + 1.3) * 0.55;
   return out.set(x, y, z);

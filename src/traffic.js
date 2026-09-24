@@ -286,7 +286,8 @@ export function updateTraffic(traffic, playerS, dt, t = 0, riders = null) {
       const want = 8 + u.speed * 1.4;          // 1.4 s time headway + 8 m standstill
       if (gap < want) target = Math.min(target, Math.max(0, v.speed + (gap - want) * 0.5));
     }
-    if (riders) {
+    let blockedBy = null;
+    if (riders && !(u.passT > 0)) {
       for (const rd of riders) {
         const p = rd && rd.phys;
         if (!p) continue;
@@ -302,8 +303,23 @@ export function updateTraffic(traffic, playerS, dt, t = 0, riders = null) {
         const want = 6 + u.speed * 1.2;
         const rv = down ? 0 : Math.max(0, p.speed * (u.dir > 0 ? -1 : 1));
         if (gap < want) target = Math.min(target, Math.max(0, rv + (gap - want) * 0.6));
+        if (gap < 14 && rv < 3) blockedBy = p;
       }
     }
+    // A DRIVER GOES ROUND. A car that stopped for a rider in its lane used to sit
+    // there for good, and a rider remounting in front of it pushed into it
+    // until the contacts wore him out -- MEASURED, ten wrecks in a row at a
+    // standstill. After a moment's wait it pulls out and passes on the other
+    // side, ignoring that rider while it does.
+    if (blockedBy) {
+      u.blockedT = (u.blockedT || 0) + dt;
+      if (u.blockedT > 1.6) {
+        u.passT = 4.0;
+        u.passDir = Math.sign((u.at ?? u.lane) - blockedBy.lateral) || -Math.sign(u.lane || 1);
+        u.blockedT = 0;
+      }
+    } else u.blockedT = 0;
+    if (u.passT > 0) { u.passT -= dt; target = Math.max(target, Math.min(u.cruise, 9)); }
     if (u.stun > 0) { u.stun -= dt; target = 0; }   // just hit something: stand on the brakes
     // accelerate gently (2.2 m/s^2, a loaded vehicle), brake hard (7 m/s^2)
     u.speed += THREE.MathUtils.clamp(target - u.speed, -7 * dt, 2.2 * dt);
@@ -334,7 +350,22 @@ export function updateTraffic(traffic, playerS, dt, t = 0, riders = null) {
     // +/-0.28 m for a sedan, +/-0.14 for a semi, so a lorry does not wander
     // across the threading gap.
     const amp = 0.28 * Math.min(1, (0.9 / u.halfW) ** 2);
-    const lane = u.lane + Math.sin(t * 0.55 + u.weave) * amp;
+    // CARS DRIFT OVER THE LINE. With every car pinned to its lane the gap
+    // between the lanes was a guaranteed-safe corridor: riding the centre line
+    // with the throttle held never met a car. Road Rash traffic did not behave;
+    // now and then a car or van ahead of the player (never a lorry or a bus)
+    // wanders 2.3 m toward the centre for a few seconds -- overtaking,
+    // cutting the bend, not looking -- and eases back. Rare, eased, and only in
+    // front of the player, so it reads as a hazard you can see coming.
+    const ahead = u.s - playerS;
+    if (u.swerveT > 0) u.swerveT -= dt;
+    else if (u.halfW < 1.05 && ahead > 60 && ahead < 220 && Math.random() < dt * CFG.TRAFFIC_SWERVE_RATE) {
+      u.swerveT = 2.5 + Math.random() * 2.5;
+    }
+    const swTarget = u.passT > 0 ? u.passDir * (u.halfW * 2 + 1.4)
+      : u.swerveT > 0 ? -Math.sign(u.lane || 1) * 2.3 : 0;
+    u.swerve = (u.swerve || 0) + (swTarget - (u.swerve || 0)) * Math.min(1, dt * 1.2);
+    const lane = u.lane + u.swerve + Math.sin(t * 0.55 + u.weave) * amp;
     const off = Math.max(-half + u.halfW + 0.1, Math.min(half - u.halfW - 0.1, lane));
     car.position.set(c.x + nx * off, c.y, c.z + nz * off);
     // Oncoming cars face the road's geometric tangent (+z, the way they drive);
@@ -365,6 +396,7 @@ export function resetTraffic(traffic, playerS = 0) {
     const u = car.userData;
     u.s = playerS + 260 + i * 165 + Math.random() * 90;
     u.lane = laneFor(u);
+    u.swerve = 0; u.swerveT = 0; u.passT = 0; u.blockedT = 0;
     u.at = undefined; u.prevAt = undefined; u.prevS = u.s;
     u.speed = u.cruise; u.stun = 0;
     if (u.cd) u.cd.clear();
@@ -462,6 +494,9 @@ export function applyTrafficHit(p, hit, invuln = false) {
     else p.speed = Math.max(p.speed, Math.max(0, hit.carVs) + 1.5);   // shunted from behind
     p.lateralV = (p.lateralV || 0) * 0.5 + (Math.random() - 0.5) * 2.0;
     u.speed = Math.max(0, u.speed - v * BIKE_MASS / (BIKE_MASS + u.mass));
+    // A NUDGE IS NOT A CRASH. Leaning on a stopped car at walking pace used to
+    // cost 3+ HP every contact and stun the car in place, which pinned both.
+    if (v < 2) return { wreck: false, severity: v, dmg: 0 };
     u.stun = Math.max(u.stun || 0, v > TRAFFIC_WRECK_END ? 2.5 : 0.8);
     const wreck = !invuln && v > TRAFFIC_WRECK_END;
     return { wreck, severity: v, dmg: wreck ? 28 + v * 0.9 : 3 + v * 1.4 };
@@ -471,7 +506,8 @@ export function applyTrafficHit(p, hit, invuln = false) {
   p.lateralV = hit.side * (1.5 + vl * 0.5);
   p.speed *= 1 - Math.min(0.25, 0.04 + hit.relAlong / 400);
   const wreck = !invuln && vl > TRAFFIC_WRECK_SIDE;
-  return { wreck, severity: Math.max(vl, hit.relAlong * 0.08), dmg: 4 + vl * 2.5 };
+  const soft = vl < 1.5 && Math.abs(hit.relAlong || 0) < 3;
+  return { wreck, severity: Math.max(vl, hit.relAlong * 0.08), dmg: soft ? 0 : 4 + vl * 2.5 };
 }
 
 /**

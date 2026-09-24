@@ -117,7 +117,7 @@ export class Rival {
     // holds all race. It is set here and re-set every race in applyEntry, and it
     // NEVER reads the player. See NpcBrain._paceIntent for the bug this fixes.
     this.paceRank = 0.5;
-    this.brain.assignPace(opts.reference || CFG.RIVAL_REFERENCE_PACE, this.paceRank);
+    this.fitMachine(opts.reference || CFG.RIVAL_REFERENCE_PACE);
 
     // laneHome is a NUMBER (§5.19). It is owned by the brain now; mirrored here
     // because other modules and the harness read `rival.laneHome`.
@@ -325,7 +325,7 @@ export class Rival {
     if (Number.isFinite(entry.paceRank)) this.paceRank = entry.paceRank;
     if (this.brain) {
       this.brain.skill = this.skill;
-      this.brain.assignPace(entry.reference || CFG.RIVAL_REFERENCE_PACE, this.paceRank);
+      this.fitMachine(entry.reference || CFG.RIVAL_REFERENCE_PACE);
     }
     // A club is re-issued every race: a rider who lost it to the player last
     // race should have it back at the next start line.
@@ -366,6 +366,23 @@ export class Rival {
     this.fighter.invuln = 0;
     for (const k in this.fighter.cooldowns) this.fighter.cooldowns[k] = 0;
     return this;
+  }
+
+  /**
+   * Assign this rider's pace for the level, then fit a machine that can reach
+   * it. The brain used to be capped at CFG.MAX_SPEED -- the RAT's terminal -- so
+   * however fast a contender was meant to be, it rode a RAT and could never pass
+   * a player holding the throttle. The machine is the rider's, like a Road Rash
+   * rival's bike: power is solved from the pace (top speed ~ sqrt(power)), with
+   * a small margin so the pace is reachable out of a corner, never below a RAT.
+   */
+  fitMachine(reference) {
+    this.brain.maxSpeed = Infinity;
+    const pace = this.brain.assignPace(reference, this.paceRank);
+    const power = Math.max(1, Math.pow((pace * 1.02) / CFG.MAX_SPEED, 2));
+    this.phys.setMachine({ power });
+    this.brain.maxSpeed = this.phys.topSpeed;
+    return pace;
   }
 
   get pos() { return this.phys.pos; }

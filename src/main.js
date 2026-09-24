@@ -1100,6 +1100,7 @@ function frameBody(dt) {
 // GL the game manages ~1.5 fps and a 3 s countdown costs 40 s of wall clock; this
 // runs the same frameBody the browser does, just without waiting on the GPU.
 window.__STATE__ = state;
+window.__CFG__ = CFG;       // harness: flip tunables at runtime
 window.__SIM__ = (sec, renderAfter = false) => {
   const prev = window.__NORENDER__;
   window.__NORENDER__ = true;
@@ -1291,9 +1292,16 @@ function stepGame(dt) {
   if (state.countdown <= 0) { for (const r of rivals) r.update(dt, world, hooks); }
   // THE POLICE. After the pack, so a bust is judged on this frame's crash.
   if (cop && state.countdown <= 0) {
-    const ev = cop.update(dt, player, state.running && !state.raceOver, world.traffic);
+    const ev = cop.update(dt, player, state.running && !state.raceOver, world.traffic, hooks, state.finishS);
+    // A CHASING cop is a fighter like anyone: in the list while he chases (so the
+    // player's punches can find him), out of it otherwise (nobody punches a
+    // parked cop, and a cop who left is not a target).
+    const inList = world.fighters.includes(cop.fighter);
+    if (cop.active && !inList) world.fighters.push(cop.fighter);
+    else if (!cop.active && inList) world.fighters.splice(world.fighters.indexOf(cop.fighter), 1);
     if (ev === 'arrived') state.warn = 'COPS!';
-    else if (ev === 'gone') state.warn = 'LOST THE COP';
+    else if (ev === 'down') state.warn = 'COP DOWN!';
+    else if (ev === 'gone') state.warn = cop.fighter.down ? '' : 'LOST THE COP';
     else if (ev === 'busted' && !state.raceOver) { state.raceOver = true; bustRace(); }
     const flag = document.getElementById('copflag');
     if (flag) flag.classList.toggle('on', cop.active && !state.raceOver);
@@ -1337,6 +1345,8 @@ function stepGame(dt) {
           const v = bodies[vi];
           const f = v.fighter;
           if (!f.down && !f.invuln) {
+            { const who = 'contact:' + (v === player ? 'player' : (v.name || 'rival'));
+              (state.wrecksBy = state.wrecksBy || {})[who] = (state.wrecksBy[who] || 0) + 1; }
             f.down = true;
             f.downTimer = CFG.WRECK_TIME;
             f.active = null;
@@ -1487,7 +1497,9 @@ function stepGame(dt) {
         const at = rd.phys.pos.clone(); at.y += 0.8;
         fx.spark(at, new THREE.Vector3(0, 0.6, 0), res.wreck ? 24 : 10, res.wreck ? 1.6 : 0.9);
       }
-      if (res.wreck || f.hp <= 0) {
+      if (res.wreck || (f.hp <= 0 && !(f.invuln > 0))) {
+        const who = isP ? 'player' : (rd.name || 'rival');
+        (state.wrecksBy = state.wrecksBy || {})[who] = (state.wrecksBy[who] || 0) + 1;
         // Same fields the bike-to-bike wreck sets, attacker-less: a traffic
         // wipeout is nobody's knockdown, so it does not score for the player.
         if ((f.hold || f.heldBy) && f._endHold) f._endHold('break', hooks);
@@ -1746,7 +1758,7 @@ function resetRace() {
     if (player && career.bike) player.setBike(bikeSource(assets, BIKE_FOR_TIER[career.bike.id] || 'sport'), career.bike.colour);
   } catch (e) { console.warn('[riderash] setBike:', e); }
   state.time = 0; state.score = 0; state.hits = 0; state.knockDowns = 0; state.contacts = 0; state.trafficHits = 0; state.trafficWrecks = 0;
-  state.raceOver = false; state.shake = 0; state.hitstop = 0; state.swapped = 0; state.lastPos = 6;
+  state.raceOver = false; state.shake = 0; state.hitstop = 0; state.wrecksBy = {}; state.swapped = 0; state.lastPos = 6;
   camInitialised = false; camRoll = 0; crashHold = 0;
   // THE PACK FOR THIS RACE, built once from the roster and the career event.
   // Built here rather than at load because the event changes between races and
@@ -1772,7 +1784,12 @@ function resetRace() {
   if (cop) cop.reset(career.event.level, career.state.race > 0 || career.state.wins > 0);
   // Full integrator reset -- see BikePhys.reset. Setting four fields by hand
   // leaked lateralV from the previous race and started the next one at the rail.
-  player.phys.reset({ s: 8, lateral: 0, yawOffset: 0, speed: 8 });
+  // The player's machine is the bike they bought -- see BikePhys.setMachine.
+  if (career.bike) player.phys.setMachine(career.bike);
+  // START BEHIND THE PACK. The player used to line up on the front row, level
+  // with the leaders, so the race began already won. Road Rash puts you at the
+  // back: you have to ride through the field, and that is where the fights are.
+  player.phys.reset({ s: 1.5, lateral: 1.1, yawOffset: 0, speed: 8 });
   // The player's fighter, reset in FULL -- same class of leak as BikePhys and
   // Rival (§5.16). `downTimer`, `invuln`, `hitFlash` and the per-attack
   // cooldowns were all carrying into the next race.

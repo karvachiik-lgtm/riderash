@@ -50,9 +50,9 @@ export function trafficEscape(cars, s, lateral, speed, look = 1.8, lim = 4.2, pa
   else if (okR) target = right;
   else target = lateral;
   // Already outside the escape line on that side: HOLD it, do not steer in.
-  if (target === left && lateral <= left) return { target: lateral, brake: false, ttc: bestT, vs: best.vs, hold: true };
-  if (target === right && lateral >= right) return { target: lateral, brake: false, ttc: bestT, vs: best.vs, hold: true };
+  if (target === left && lateral <= left) return { target: lateral, brake: false, ttc: bestT, vs: best.vs, hold: true, car: best };
+  if (target === right && lateral >= right) return { target: lateral, brake: false, ttc: bestT, vs: best.vs, hold: true, car: best };
   const need = Math.abs(target - lateral);
   const brake = (!okL && !okR) || need / authority > bestT;
-  return { target, brake, ttc: bestT, vs: best.vs };
+  return { target, brake, ttc: bestT, vs: best.vs, car: best };
 }

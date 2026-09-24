@@ -156,6 +156,7 @@ export const CFG = {
   // same tarmac at the start line.
   TRAFFIC_GAP_MIN: 380,
   TRAFFIC_GAP_SPAN: 620,
+  TRAFFIC_SWERVE_RATE: 0.02,   // per s, per eligible car ahead: chance it drifts over the centre line
   TRAFFIC_FLEET_LEN: 5600, // m of road the fleet is laid over (see buildTraffic)
 
   // --- bike-to-bike contact -------------------------------------------------

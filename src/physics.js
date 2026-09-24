@@ -226,6 +226,14 @@ CAMBER_SHARE: 0.45,         // stiffness-set point: realised share at CAMBER_REF
   // split is what makes a bike turn IN. Modest, and exposed so it can be measured.
   CAMBER_FRONT_SHARE: 0.55,
   LANE_HOLD: 0.45,            // 1/s pull back toward the centreline
+  // 1 = physical: the road turning under the bike changes its road-relative
+  // heading (see the end of step()). 0 restores the old auto-follow.
+  ROAD_CARRY: 1.0,
+  // Gain on the AI's bend feed-forward (step 2). Swept on the twisty road with
+  // the pack's lane controller: 0 -> 0.92 m worst tracking error, 0.35 -> 0.14 m
+  // (the pre-ROAD_CARRY figure was 0.15), 0.5 -> 0.46 m (it starts to lead).
+  AI_FF: 0.35,
+  PLAYER_AUTOPILOT: 0.30,     // fraction of SELF_CENTRE / LANE_HOLD the player keeps
   SELF_CENTRE: 1.9,           // 1/s the heading returns to the road's line
   SELF_CENTRE_OFF: 1.1,       // ditto, off the tarmac
   // Fraction of the self-centring that YIELDS while the bars are held over. See
@@ -618,6 +626,11 @@ export class BikePhys {
     this.steerAngleVel = 0;
     // Arcade steering assist: the player gets it, the AI does not. See step() 2.
     this.arcade = !!opts.arcade;
+    // THE MACHINE. career.js BIKES carries power / grip / mass multipliers for
+    // every bike you can buy, and nothing ever read them: a 52 000 SUPERBIKE was
+    // a RAT in a different paint. They are a property of the bike, not of a
+    // race, so reset() leaves them alone; see setMachine().
+    this.machine = { power: 1, grip: 1, mass: 1 };
     this.revFrac = 0.0;                     // engine revs, drives the audio
     this.wheelSpin = 0;
     this.onRoad = true;
@@ -701,6 +714,7 @@ export class BikePhys {
    * symptom will appear somewhere far away.
    */
   reset(opts = {}) {
+    this._kappa = 0;
     this.s = opts.s ?? 0;
     this.lateral = opts.lateral ?? 0;
     this.speed = opts.speed ?? 0;
@@ -832,6 +846,20 @@ export class BikePhys {
   }
 
   /**
+   * Fit a machine: career BIKES multipliers. Engine force scales with `power`,
+   * so the drag-limited top speed scales with sqrt(power) -- exactly the
+   * relation career.js's LEVELS `reference` speeds were derived from.
+   */
+  setMachine(m = {}) {
+    const f = (v) => (Number.isFinite(v) && v > 0 ? v : 1);
+    this.machine = { power: f(m.power), grip: f(m.grip), mass: f(m.mass) };
+    return this;
+  }
+
+  /** This machine's top speed on the flat, m/s (drag-limited). */
+  get topSpeed() { return CFG.MAX_SPEED * Math.sqrt(this.machine.power); }
+
+  /**
    * WHERE THE BIKE PIVOTS WHEN IT TURNS: THE REAR CONTACT, NOT THE MIDDLE.
    *
    * The kinematic bicycle model (the one every vehicle-dynamics text starts
@@ -907,7 +935,7 @@ export class BikePhys {
     //
     // Reading CFG.MAX_SPEED removes the duplicate, and ENGINE_TRIM is chosen so
     // the balance actually converges there rather than merely being asserted.
-    const topSpeed = CFG.MAX_SPEED;
+    const topSpeed = this.topSpeed;
     const frac = Math.max(0, this.speed) / topSpeed;
     this.revFrac = Math.min(1, Math.max(0, frac * 0.94 + (throttle ? 0.12 : 0)));
 
@@ -926,7 +954,7 @@ export class BikePhys {
       // is what strandered a rider in the dirt; damping it means you can always
       // claw your way back.
       const surface = this.onRoad ? 1.0 : PHYS.OFROAD_THROTTLE;
-      const Fe = PHYS.ENGINE_PEAK * curve * tuckBonus * surface;
+      const Fe = PHYS.ENGINE_PEAK * curve * tuckBonus * surface * this.machine.power;
       F += Fe; FxTyre += Fe;
 
       // Launch assist: below walking pace, the rider paddles and slips the
@@ -987,7 +1015,7 @@ export class BikePhys {
       F -= Math.sign(this.speed) * cRoll * loadN;
     }
 
-    const a = F / PHYS.MASS;
+    const a = F / (PHYS.MASS * this.machine.mass);
     this.speed += a * h;
     if (this.speed < 0) this.speed = 0;
 
@@ -1148,7 +1176,20 @@ export class BikePhys {
     const authority = THREE.MathUtils.lerp(1.0, PHYS.STEER_RATE_FAST / PHYS.STEER_RATE, speedFrac);
     // Bar input ramps rather than snapping. h*10 reached 63% of full lock in a
     // tenth of a second, which on a keyboard is indistinguishable from a step.
-    this.steer += (steer - this.steer) * Math.min(1, h * PHYS.STEER_SMOOTH);
+    // THE AI READS THE ROAD. Since the road no longer turns the bike for it (see
+    // ROAD_CARRY), a rider has to lean into every bend -- a human sees it
+    // coming, but the pack's controllers only corrected the lateral ERROR after
+    // the bike had already run wide (MEASURED: up to 0.93 m off line in the
+    // twisties, and a lot more traffic wrecks). So non-player bikes add the lean
+    // the bend needs as a feed-forward: tan(lean) = k v^2 / g, mapped back
+    // through the same targetLean = steer * LEAN_MAX * speedLean used below.
+    let steerIn = steer;
+    if (!this.arcade && this._kappa && this.speed > 4) {
+      const sl = 0.30 + 0.70 * Math.min(1, this.speed / 20);
+      const leanNeed = Math.atan(this._kappa * this.speed * this.speed / PHYS.GRAVITY) / Math.max(0.2, PHYS.TURN_GAIN);
+      steerIn = THREE.MathUtils.clamp(steer + PHYS.AI_FF * leanNeed / (PHYS.LEAN_MAX * sl), -1, 1);
+    }
+    this.steer += (steerIn - this.steer) * Math.min(1, h * PHYS.STEER_SMOOTH);
 
     // The lean needed to hold a given corner tightens with speed; at a
     // standstill there is nothing to lean against.
@@ -1382,7 +1423,14 @@ export class BikePhys {
     // unchanged), held full lock keeps (1 - CENTRE_YIELD) of it so a long hold
     // still converges instead of running to the 1.9 rad clamp. `this.steer` is
     // the smoothed bar, so the rate returns as the bars come back, not in a step.
-    const yawCentreBase = this.onRoad ? PHYS.SELF_CENTRE : PHYS.SELF_CENTRE_OFF;
+    // THE PLAYER DOES NOT GET AN AUTOPILOT. This term aligns the heading with the
+    // ROAD, and the lane hold below pulls toward the centreline; at full strength
+    // the two together rode every bend for a rider with no hands on the bars
+    // (MEASURED: a whole race at lateral 0.0 holding only the throttle). The AI
+    // keeps them -- it steers itself anyway -- and the player keeps a fraction,
+    // enough to stop a slow creep on a straight but not enough to take a bend.
+    const autopilot = this.arcade ? PHYS.PLAYER_AUTOPILOT : 1;
+    const yawCentreBase = (this.onRoad ? PHYS.SELF_CENTRE : PHYS.SELF_CENTRE_OFF) * autopilot;
     const yawCentre = yawCentreBase * (1 - PHYS.CENTRE_YIELD * Math.min(1, Math.abs(this.steer)));
     const holdHeading = leanTurn / Math.max(0.3, yawCentreBase);
     this.yawOffset += (holdHeading - this.yawOffset) * Math.min(1, h * yawCentre);
@@ -1413,7 +1461,7 @@ export class BikePhys {
       // how much steering is NOT being asked for. Hands off, full strength. Leaning
       // into a corner, it gets out of the way.
       const unsteered = 1 - Math.min(1, Math.abs(this.steer) / 0.25);
-      this.lateralV -= this.lateral * h * PHYS.LANE_HOLD * unsteered;
+      this.lateralV -= this.lateral * h * PHYS.LANE_HOLD * unsteered * (this.arcade ? PHYS.PLAYER_AUTOPILOT : 1);
     } else {
       // OFF THE TARMAC, A RIDER STEERS BACK. The lane hold used to stop dead at
       // the road edge, so anyone knocked onto the verge tracked the barrier for
@@ -1492,7 +1540,7 @@ export class BikePhys {
     this.slipFront += (targetF - this.slipFront) * relax;
     this.slipRear += (targetR - this.slipRear) * relax;
 
-    this.grip = this.onRoad ? PHYS.ONROAD_GRIP : PHYS.OFROAD_GRIP;
+    this.grip = (this.onRoad ? PHYS.ONROAD_GRIP : PHYS.OFROAD_GRIP) * this.machine.grip;
     // THE FRICTION CIRCLE, NOW APPLIED THE WAY THE REFERENCE DEFINES IT.
     //
     // A tyre has ONE grip budget and it is shared between cornering and braking.
@@ -1706,7 +1754,32 @@ export class BikePhys {
     this.s += Math.max(0, this.speed * along) * h;
     this.wheelSpin += (this.speed / PHYS.WHEEL_R) * h;
 
+    const roadYawBefore = this.roadYaw;
     this.sync();
+
+    // THE ROAD TURNS; THE BIKE DOES NOT, UNLESS IT IS STEERED.
+    //
+    // `yawOffset` is measured against the road, so leaving it untouched while
+    // the road bends silently turned the bike WITH the road: MEASURED, a whole
+    // race holding only the throttle ran at lateral 0.0 through every bend. A
+    // machine's world heading only changes when it yaws, so as the road turns
+    // under it the heading RELATIVE to the road changes by the same amount.
+    // With world yaw = roadYaw - yawOffset, holding the world heading means
+    // yawOffset grows by the road's turn. Unsteered, a bike now runs wide in a
+    // bend, and the rider has to lean it round -- which is the job.
+    if (Number.isFinite(roadYawBefore) && PHYS.ROAD_CARRY > 0) {
+      const d = Math.atan2(Math.sin(this.roadYaw - roadYawBefore), Math.cos(this.roadYaw - roadYawBefore));
+      if (Math.abs(d) < 0.2) {
+        // road curvature, 1/m, signed so that a positive value needs a positive
+        // (rightward, +lateral) lean. The sign was MEASURED, not derived: the
+        // other one doubled the AI's tracking error (see PHYS.AI_FF).
+        const ds = Math.max(0, this.speed * along) * h;
+        if (ds > 1e-4) this._kappa = -d / ds;
+        this.yawOffset = THREE.MathUtils.clamp(this.yawOffset + d * PHYS.ROAD_CARRY, -1.9, 1.9);
+        this.yaw = this.roadYaw - this.yawOffset;
+        this.forward.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+      }
+    }
   }
 
   // Visual state, interpolated between the last two physics states. Rendering

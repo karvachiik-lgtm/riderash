@@ -1,3 +1,4 @@
+import { CFG } from './config.js';
 // RideRash — the career.
 //
 // WHY THIS EXISTS. Road Rash is not one race, it is a ladder: you ride, you are
@@ -53,12 +54,20 @@ const COURSES = [
 // 5.43 in HANDOFF.md for the derivation). Every rival's target speed is
 // distributed around this number, which is why placement changes across the
 // career WITHOUT any rival ever reading the player's speed.
+// THE REFERENCE IS DERIVED, AND IT HAD DRIFTED. These were literals (46.1,
+// 49.4, 52.0, 55.0, 58.1): the RAT's measured terminal times sqrt(power) for
+// each tier. The physics was retuned afterwards and the RAT now sustains
+// CFG.MAX_SPEED (48.16) -- and the bike power multipliers were never applied at
+// all -- so every rival's pace sat below a player who just held the throttle.
+// Now: the expected tier's real top speed, from the same numbers BikePhys uses.
+export const TIER_POWER = [1.00, 1.14, 1.26, 1.40, 1.56];
+const tierTop = (tier) => CFG.MAX_SPEED * Math.sqrt(TIER_POWER[tier - 1] || 1);
 const LEVELS = [
-  { tier: 1, lenMul: 1.00, purse: 1200, skill: 0.80, aggro: 0.60, reference: 46.1 },
-  { tier: 2, lenMul: 1.20, purse: 2600, skill: 0.92, aggro: 0.78, reference: 49.4 },
-  { tier: 3, lenMul: 1.45, purse: 5200, skill: 1.04, aggro: 0.96, reference: 52.0 },
-  { tier: 4, lenMul: 1.75, purse: 9500, skill: 1.16, aggro: 1.14, reference: 55.0 },
-  { tier: 5, lenMul: 2.05, purse: 17000, skill: 1.28, aggro: 1.32, reference: 58.1 },
+  { tier: 1, lenMul: 1.00, purse: 1200, skill: 0.80, aggro: 0.60, reference: tierTop(1) },
+  { tier: 2, lenMul: 1.20, purse: 2600, skill: 0.92, aggro: 0.78, reference: tierTop(2) },
+  { tier: 3, lenMul: 1.45, purse: 5200, skill: 1.04, aggro: 0.96, reference: tierTop(3) },
+  { tier: 4, lenMul: 1.75, purse: 9500, skill: 1.16, aggro: 1.14, reference: tierTop(4) },
+  { tier: 5, lenMul: 2.05, purse: 17000, skill: 1.28, aggro: 1.32, reference: tierTop(5) },
 ];
 
 /** Flattened 25-race schedule. Index is the career race number. */
@@ -97,15 +106,15 @@ export const COURSES_UI = COURSES.map((c) => ({ map: c.map, name: c.name }));
 // riding one class behind the field, which is the engine of the game. Level 1
 // won clean is ~3.5-4k; each tier then roughly matches a level's take.
 export const BIKES = [
-  { id: 'rat',     name: 'RAT',     price: 0,      power: 1.00, grip: 1.00, mass: 1.00, colour: 0xc4442a,
+  { id: 'rat',     name: 'RAT',     price: 0,      power: TIER_POWER[0], grip: 1.00, mass: 1.00, colour: 0xc4442a,
     blurb: 'Sun-bleached and rusted. It is what you have.' },
-  { id: 'racer',   name: 'RACER',   price: 4200,   power: 1.14, grip: 1.08, mass: 0.96, colour: 0x2f6f8f,
+  { id: 'racer',   name: 'RACER',   price: 4200,   power: TIER_POWER[1], grip: 1.08, mass: 0.96, colour: 0x2f6f8f,
     blurb: 'Lighter, stickier, and it revs out properly.' },
-  { id: 'brawler', name: 'BRAWLER', price: 11000,  power: 1.26, grip: 1.13, mass: 1.09, colour: 0xb8912e,
+  { id: 'brawler', name: 'BRAWLER', price: 11000,  power: TIER_POWER[2], grip: 1.13, mass: 1.09, colour: 0xb8912e,
     blurb: 'Heavy enough to win a shoving match. Fast enough to matter.' },
-  { id: 'works',   name: 'WORKS',   price: 26000,  power: 1.40, grip: 1.19, mass: 1.04, colour: 0x6a3fd4,
+  { id: 'works',   name: 'WORKS',   price: 26000,  power: TIER_POWER[3], grip: 1.19, mass: 1.04, colour: 0x6a3fd4,
     blurb: 'Factory parts, a team truck, and no excuses left.' },
-  { id: 'super',   name: 'SUPERBIKE', price: 52000, power: 1.56, grip: 1.25, mass: 1.00, colour: 0x1fbf6a,
+  { id: 'super',   name: 'SUPERBIKE', price: 52000, power: TIER_POWER[4], grip: 1.25, mass: 1.00, colour: 0x1fbf6a,
     blurb: 'The fastest thing on the coast. Ride it like you stole it.' },
 ];
 

@@ -479,9 +479,15 @@ export class Dismount {
   // there to the saddle.
   _beginMount() {
     const player = this.player, p = player.phys, w = this.walk;
+    this._placeBike();          // where it LIES, before its heading is changed below
     p.s = w.bikeS;
     p.lateral = w.bikeLateral;
-    p.yawOffset = this._wrap(w.bikeYawOffset);
+    // HE POINTS IT DOWN THE ROAD. The machine lies at whatever angle it slid to
+    // (up to 90 degrees across the carriageway); remounting at that heading
+    // push-started the rider straight across the road, into the oncoming lane
+    // or a stopped car. Picking the bike up, a rider turns it to face the way
+    // he is going -- the mount blend rotates it round as he climbs on.
+    p.yawOffset = THREE.MathUtils.clamp(this._wrap(w.bikeYawOffset), -0.25, 0.25);
     w.bikeYawOffset = p.yawOffset;
     p.speed = 0; p.lateralV = 0; p.lean = 0; p.airY = 0;
     p.sync();
@@ -490,7 +496,6 @@ export class Dismount {
     player.group.updateMatrixWorld(true);
     const bike = player.bike, rider = player.rider;
     if (bike) {
-      this._placeBike();
       player.group.attach(bike);
       this._mBikeP = bike.position.clone();
       this._mBikeQ = bike.quaternion.clone();
@@ -584,8 +589,16 @@ export class Dismount {
     p.airY = 0; p.airVY = 0;
     p.sync();
 
+    // BACK ON WITH SOMETHING LEFT. The fighter's own onRemount hook restores HP,
+    // but this walk-back path ends the crash itself and never called it, so a
+    // rider knocked to 0 HP remounted at 0 -- and the first scrape afterwards was
+    // an `hp <= 0` wreck. MEASURED: ten wrecks in a row at a standstill against
+    // the car that had stopped for him. Same restore as onRemount.
     const f = this.player.fighter;
-    if (f) { f.down = false; f.downTimer = 0; f.invuln = CFG.INVULN_AFTER; }
+    if (f) {
+      f.down = false; f.downTimer = 0; f.invuln = CFG.INVULN_AFTER;
+      f.hp = Math.max(f.hp || 0, 20, (f.maxHp || 100) * 0.55);
+    }
 
     this._reattach();
     if (this.player.bikeLean !== undefined) this.player.bikeLean = 0;

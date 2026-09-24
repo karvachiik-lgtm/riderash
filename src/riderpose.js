@@ -767,3 +767,21 @@ export function poseCombat(joints, f, phys, time, attacksTable) {
     if (show) driveChain(joints, f, chainPh, time);
   }
 }
+
+// ---------------------------------------------------------------------------
+// ARM AIMING, for gestures (the showroom's emotes, the race starter's flag):
+// point the upper arm along `dir` in the torso's frame (+x the body's left, +y
+// up, +z forward) and bend the elbow toward `hint` by `flex` radians.
+const _aX = new THREE.Vector3(), _aY = new THREE.Vector3(), _aZ = new THREE.Vector3(), _aB = new THREE.Matrix4();
+export function armAim(j, side, dir, hint, flex) {
+  const A = j[side + 'Arm'] || (j.arms && j.arms[side]);
+  if (!A || !A.upper) return;
+  _aY.set(-dir[0], -dir[1], -dir[2]).normalize();          // the segment hangs down its local -Y
+  _aZ.set(hint[0], hint[1], hint[2]);
+  _aZ.addScaledVector(_aY, -_aZ.dot(_aY));
+  if (_aZ.lengthSq() < 1e-6) _aZ.set(0, 0, 1).addScaledVector(_aY, -_aY.z);
+  _aZ.normalize();
+  _aX.crossVectors(_aY, _aZ);
+  A.upper.quaternion.setFromRotationMatrix(_aB.makeBasis(_aX, _aY, _aZ));
+  if (A.elbow) A.elbow.rotation.set(-flex, 0, 0);          // - flexes toward local +Z
+}

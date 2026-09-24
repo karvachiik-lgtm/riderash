@@ -27,7 +27,7 @@ import { cloneWithJoints } from './rigclone.js';
 import { RIDING } from './reach.js';
 import { CFG } from './config.js';
 import { ATTACKS } from './combat.js';
-import { clearAxes, applyAction, poseSeated, poseStanding, poseCombat, solveSeat, actionDuration } from './riderpose.js';
+import { clearAxes, applyAction, poseSeated, poseStanding, poseCombat, solveSeat, actionDuration, armAim } from './riderpose.js';
 // The race's own rider builder. assets/rider.js may not import anything, but it
 // may be imported: building the body here, from the live spec, is what makes a
 // slider change the figure rather than just the numbers under it.
@@ -1102,19 +1102,6 @@ export class Showroom {
 // toward a hint direction by `flex` radians. Writing arm poses as "point the
 // arm there" instead of three Euler angles is what makes eight emotes short
 // enough to read and impossible to mirror by accident.
-const _X = new THREE.Vector3(), _Y = new THREE.Vector3(), _Z = new THREE.Vector3(), _B = new THREE.Matrix4();
-function armAim(j, side, dir, hint, flex) {
-  const A = j[side + 'Arm'] || (j.arms && j.arms[side]);
-  if (!A || !A.upper) return;
-  _Y.set(-dir[0], -dir[1], -dir[2]).normalize();          // the segment hangs down its local -Y
-  _Z.set(hint[0], hint[1], hint[2]).addScaledVector(_Y, -0);
-  _Z.addScaledVector(_Y, -_Z.dot(_Y));
-  if (_Z.lengthSq() < 1e-6) _Z.set(0, 0, 1).addScaledVector(_Y, -_Y.z);
-  _Z.normalize();
-  _X.crossVectors(_Y, _Z);
-  A.upper.quaternion.setFromRotationMatrix(_B.makeBasis(_X, _Y, _Z));
-  if (A.elbow) A.elbow.rotation.set(-flex, 0, 0);          // - flexes toward local +Z
-}
 const lerp3 = (a, b, k) => [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k];
 const sm = (x) => { const t = Math.max(0, Math.min(1, x)); return t * t * (3 - 2 * t); };
 /** Bend both knees by `a` and lower the body so the boots stay on the floor. */

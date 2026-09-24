@@ -9,14 +9,14 @@
 //   RAILS      steel guard rail along that outside edge;
 //   WARNINGS   a "winding road" sign before each twisty section;
 //   COUNTDOWN  1000 / 500 / 200 m boards before the finish;
-//   START      a gantry over the grid (the FINISH one is finishline.js).
+//   START      the chequered line (the starter with the flag is flagger.js).
 //
 // Built per course in __START__ (the finish moves with the course), instanced
 // per kind, all code-built (HANDOFF §4.2: no imported meshes or textures).
 import * as THREE from 'three';
 import { CFG } from './config.js';
 import { centreAt, headAt } from './level.js';
-import { buildFinish, placeFinish } from './finishline.js';
+import { buildStartLine, placeFinish } from './finishline.js';
 
 const TIGHT_R = 700;       // m: bends tighter than this get chevrons and a rail
 const CHEV_STEP = 22;      // m between chevrons through a bend
@@ -115,7 +115,7 @@ export class TrackDress {
       sign: new THREE.PlaneGeometry(1.3, 1.3),
       count: new THREE.PlaneGeometry(1.8, 0.9),
     };
-    this.start = buildFinish('START');
+    this.start = buildStartLine();
     this.scene.add(this.start);
   }
 

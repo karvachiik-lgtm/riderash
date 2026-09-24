@@ -9,6 +9,7 @@ import { buildRoad, buildRoadside, buildBackdrop, centreAt, centreTangent, headA
 import { buildTraffic, updateTraffic, trafficHit, resetTraffic } from './world.js';
 import { buildFinish, placeFinish } from './finishline.js';
 import { TrackDress } from './trackdress.js';
+import { Flagger } from './flagger.js';
 import { trafficContact, applyTrafficHit } from './traffic.js';
 import { buildLighting, followSun } from './lighting.js';
 import { Player } from './player.js';
@@ -159,7 +160,8 @@ let playerSpec = makeSpec({ height: 1.75, build: 'normal', colors: { ...(CFG.PLA
 // constructed after the loader has run. `loadAssets` fills it in.
 const assets = { bike: null, rider: null };
 let finishGantry = null;   // the FINISH banner, moved to each race's line in __START__
-let trackDress = null;     // chevrons, rails, warnings, countdown boards, START gantry (per course)
+let trackDress = null;     // chevrons, rails, warnings, countdown boards, start line (per course)
+let flagger = null;        // the starter in the road with the chequered flag
 
 // The character designer. Constructed lazily the first time it is opened, so a
 // player who never opens it never pays for its scene.
@@ -461,6 +463,7 @@ async function init() {
   finishGantry = buildFinish();
   scene.add(finishGantry);
   trackDress = new TrackDress(scene);
+  try { flagger = new Flagger(scene); } catch (e) { console.warn('[riderash] flagger:', e); flagger = null; }
   world.traffic = traffic;
 
   // fills the MODULE-SCOPE `assets`, so the showroom can reach the rider later
@@ -1242,6 +1245,7 @@ function updateGaps(dt) {
 function stepGame(dt) {
   state.time += dt;
   if (state.countdown <= 0) trackStats(dt);
+  if (flagger) flagger.update(dt, state.countdown, player ? player.phys.s : 0);
   if (state.shake > 0) state.shake = Math.max(0, state.shake - dt * 2.6);
   if (state.swapped > 0) state.swapped -= dt;
 
@@ -1803,6 +1807,7 @@ window.__START__ = () => {
   state.finishS = spine.totalLength;
   placeFinish(finishGantry, state.finishS);
   try { if (trackDress) window.__TRACKDRESS__ = trackDress.build(state.finishS); } catch (e) { console.warn('[riderash] trackdress:', e); }
+  if (flagger) flagger.reset();
   world.raceLen = spine.totalLength;
   resetRace();
   state.running = true;

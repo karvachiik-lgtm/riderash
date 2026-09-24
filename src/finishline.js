@@ -40,6 +40,22 @@ function textTexture(text) {
   return t;
 }
 
+/**
+ * THE START is a line on the road and a person with a flag (src/flagger.js),
+ * as in Road Rash -- no gantry. The same chequered strip as the finish.
+ */
+export function buildStartLine() {
+  const g = new THREE.Group();
+  g.name = 'start';
+  const strip = new THREE.Mesh(new THREE.PlaneGeometry(CFG.ROAD_W, 1.2),
+    new THREE.MeshStandardMaterial({ map: chequerTexture(20, 2), roughness: 0.8, name: 'finish_strip' }));
+  strip.rotation.x = -Math.PI / 2;
+  strip.position.y = 0.03;
+  strip.receiveShadow = true;
+  g.add(strip);
+  return g;
+}
+
 export function buildFinish(label = 'FINISH') {
   const g = new THREE.Group();
   g.name = label.toLowerCase();

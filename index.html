@@ -377,7 +377,9 @@
     #bikebox { display:none; }
     #target { top:calc(var(--spd) + 130px + env(safe-area-inset-top)); }
     #target .tb { width:140px; }
-    #warn { top:30%; font-size:14px; }
+    /* below the target nameplate (at --spd + 130px): at top:30% on an 844 px
+       phone it landed ON the rival's name and health bar */
+    #warn { top:calc(var(--spd) + 172px + env(safe-area-inset-top)); font-size:14px; }
     body.touch .hud-tl { left:66px; }
     body.touch .hud-tl[style*="top:84px"] { left:134px; }
     #fpsbox { top:calc(var(--spd) + 122px + env(safe-area-inset-top)); }

@@ -244,7 +244,11 @@ CAMBER_SHARE: 0.45,         // stiffness-set point: realised share at CAMBER_REF
   // ---- riding verbs. See step() 1c/1d and the airborne block in 4. ----
   // The weight-transfer model already computed everything these need; none of
   // this adds a new force model, it reads the one that was already there.
-  WHEELIE_LOAD: 0.20,         // loadFracFront below this and the front is light
+  // 0.20 put EVERY full-throttle launch -- the race start and every remount --
+  // into a 26 deg wheelie held for 3.5 s (front load sat at 0.11-0.14 all the
+  // way to 30 m/s; MEASURED). At 0.11 a hard launch lifts the front briefly and
+  // sets it down; a sustained wheelie takes a genuinely light front end.
+  WHEELIE_LOAD: 0.11,
   WHEELIE_RATE: 3.4,          // rad/s the nose comes up
   WHEELIE_MAX: 0.62,          // rad, ~36 deg -- past this you loop it
   STOPPIE_LOAD: 0.80,         // loadFracFront above this and the rear is light

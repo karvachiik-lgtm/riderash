@@ -1257,9 +1257,11 @@ function stepGame(dt) {
     if (rag && rag.contact > 0.15) {
       const v = rag.velocity(_slideV).length();
       slideDustT -= dt;
+      // Dark and sparse: pale puffs bloomed into a glowing orb round the body
+      // (seen in the screenshot pass); grit off tarmac is dark grey-brown.
       if (v > 3 && slideDustT <= 0) {
-        slideDustT = 0.05;
-        fx.dust(rag.pelvis, v > 12 ? 3 : 1, 0x8a8070);
+        slideDustT = 0.08;
+        fx.dust(rag.pelvis, v > 12 ? 2 : 1, 0x5a5348);
       }
     }
   }

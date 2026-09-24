@@ -48,15 +48,20 @@ export const COPS = {
   FIRST_DELAY: [6, 14],      // s after the flag before the first cop takes up a spot
   GAP_BY_LEVEL: [55, 45, 36, 30, 24],   // s between cops, level 1..5 (fewer early, as in the original)
   PARK_AHEAD: [520, 820],    // m ahead of the player he parks: far enough to see him coming
-  PARK_OFF: 1.7,             // m beyond the kerb, on the verge
+  PARK_OFF: 0.3,             // m beyond the tarmac edge: on the shoulder. 1.7 m past the kerb
+                             // put him behind the verge fence, invisible (MEASURED in a screenshot)
   POWER: 1.75,               // machine power (top speed ~ sqrt(power) x the RAT's): he is faster
   ACCEL: 7.5,                // m/s^2 he can gain; the pull-out is a launch, not a teleport
   CHASE_FOR: 45,             // s of pursuit before he gives up and pulls off
   CLOSE_RATE: 11,            // m/s faster than the player while closing
   SIDE: 1.45,                // m: rides this far to the side of you once alongside
+  STATION_GAP: 1.3,          // m he sits behind your centre, so you are in his swing
   REACH_S: 2.4,              // m along the road he swings from
-  SWING_EVERY: [1.1, 2.0],   // s between swings once alongside
-  HP: 110,
+  // s between swings once alongside. [1.1, 2.0] with the nightstick every time
+  // won a straight fist-fight against the player in 4 s (MEASURED): a rider who
+  // fights back must be able to win it.
+  SWING_EVERY: [1.8, 3.0],
+  HP: 80,
   BUST_RADIUS: 28,           // m: wreck inside this and you are nicked
   LOSE_DIST: 320,            // m: out-run him by this much and he is gone
   // Of the event purse, by level. 0.35 flat was MEASURED to end a fresh career
@@ -80,7 +85,7 @@ export class Cop {
     // A REAL FIGHTER: his swings resolve through combat.js like anyone's, and
     // the player's resolve against him. Joined to world.fighters only while he
     // is chasing (see main.js), so nobody punches a parked cop.
-    this.fighter = new Fighter(this.phys, { hp: COPS.HP });
+    this.fighter = new Fighter(this.phys, { hp: COPS.HP, hasWeapon: true });
 
     if (assets.bike) {
       this.bike = cloneWithJoints(assets.bike);
@@ -165,6 +170,7 @@ export class Cop {
     const f = this.fighter;
     f.down = false; f.downTimer = 0; f.hp = f.maxHp; f.active = null; f.invuln = 0;
     f.stamina = CFG.STAMINA_MAX;
+    f.hasWeapon = true;           // a nightstick; the player can take it off him, like a chain
   }
 
   get pos() { return this.phys.pos; }
@@ -180,8 +186,10 @@ export class Cop {
     // Not past (or just before) the finish: there is no chase left to have.
     if (Number.isFinite(finishS) && s > finishS - 300) { this.nextAt = Infinity; return; }
     const side = Math.random() < 0.5 ? -1 : 1;
-    const lat = side * (CFG.ROAD_W / 2 + CFG.KERB_W + COPS.PARK_OFF);
-    this.phys.reset({ s, lateral: lat, speed: 0, yawOffset: 0 });
+    const lat = side * (CFG.ROAD_W / 2 + COPS.PARK_OFF);
+    // Angled in toward the road, the way a speed trap waits (yawOffset is +
+    // toward +lateral, so a cop on the + verge turns toward -).
+    this.phys.reset({ s, lateral: lat, speed: 0, yawOffset: -side * 0.35 });
     this.phys.sync();
     this.parkSide = side;
     this.state = 'parked';
@@ -268,11 +276,16 @@ export class Cop {
     if (this.chaseT > COPS.CHASE_FOR || gap > COPS.LOSE_DIST) { this._leave(); return 'gone'; }
 
     // Pace: close fast, then hold station ALONGSIDE (gap ~0), where he can reach.
-    const want = gap > 10 ? pp.speed + COPS.CLOSE_RATE
-      : gap < -4 ? pp.speed - 5
-      : pp.speed + gap * 1.2;
+    // The closing speed is proportional to the gap, so he arrives MATCHING your
+    // speed instead of flying past: at 58 m/s with a fixed closing rate he
+    // overshot by 12 m and took 8 s to drop back (MEASURED).
+    // He holds station a little BEHIND your centre (STATION_GAP): a swing only
+    // lands inside the attacker's forward arc, and sitting level he drifted 0.7 m
+    // ahead of you and missed 15 swings out of 17 (MEASURED).
+    const want = pp.speed + THREE.MathUtils.clamp((gap - COPS.STATION_GAP) * 0.7, -8, COPS.CLOSE_RATE);
     const dv = THREE.MathUtils.clamp(Math.max(0, want) - p.speed, -9 * dt, COPS.ACCEL * dt);
     p.speed = Math.min(p.topSpeed * 1.02, Math.max(0, p.speed + dv));
+    const needPower = want > p.speed + 0.3;
 
     // Line: off the verge onto the road, into your slipstream while closing, then
     // beside you on the side with more room.
@@ -300,14 +313,16 @@ export class Cop {
     }
     // Firmer steering than the pack: a pursuit rider.
     const steer = Math.max(-1, Math.min(1, (tLat - p.lateral) * 0.6 - (p.lateralV || 0) * 0.2));
-    p.advance(dt, { throttle: true, brake: false, steer, tuck: false });
+    p.advance(dt, { throttle: needPower, brake: false, steer, tuck: false });
 
     // THE TAKEDOWN. Alongside and in reach: he swings, on a rhythm with a little
     // randomness so it cannot be timed. The fighter decides whether it lands.
     this.swingT -= dt;
     const alongside = Math.abs(gap) < COPS.REACH_S && Math.abs(pp.lateral - p.lateral) < 2.4;
     if (alongside && this.swingT <= 0 && !f.busy && !player.fighter.down) {
-      const kind = Math.random() < 0.55 ? 'punch' : 'kick';
+      // The nightstick when it is ready (the weapon swing: wider arc, hits hard),
+      // fists and boots in between.
+      const kind = (f.can('chain') && Math.random() < 0.35) ? 'chain' : (Math.random() < 0.55 ? 'punch' : 'kick');
       if (f.commit(kind)) {
         const [a, b] = COPS.SWING_EVERY;
         this.swingT = a + Math.random() * (b - a);
@@ -331,11 +346,19 @@ export class Cop {
         if (j.rearWheel) j.rearWheel.rotation.x = p.wheelSpin;
       }
     }
-    // Parked: lamps dark -- an ambush, not a beacon. Chasing: alternate at ~3 Hz,
-    // and the radar dot with them.
+    // Parked: a slow blink, so you see him waiting from down the road (a dark
+    // bike on the verge was invisible at 60 m in the screenshots). Chasing: the
+    // full ~3 Hz strobe, and the radar dot with it.
     const chasing = this.state === 'chase';
     const on = Math.floor(this.t * 6) % 2 === 0;
-    if (this.lampR) { this.lampR.visible = chasing && on; this.lampB.visible = chasing && !on; }
+    const idle = this.state === 'parked' && (this.t % 1.6) < 0.25;
+    if (this.lampR) {
+      this.lampR.visible = (chasing && on) || idle; this.lampB.visible = (chasing && !on) || idle;
+      // Bigger while parked: at race distance a motorcycle is a few pixels, and
+      // the light bar (unlit, un-tonemapped, so it blooms) is what you spot.
+      const k = this.state === 'parked' ? 2.6 : 1;
+      this.lampR.scale.setScalar(k); this.lampB.scale.setScalar(k);
+    }
     this.color = on ? 0xff2a2a : 0x2a6bff;
     const j = this.rider && this.rider.userData.joints;
     if (j) {

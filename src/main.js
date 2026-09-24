@@ -1420,7 +1420,11 @@ function stepGame(dt) {
   // wanders 76 m sideways -- see updateTraffic in world.js.
   // The riders are passed so a car slows behind a bike in its lane and every
   // car stops short of a rider lying in the road (traffic.js updateTraffic).
-  updateTraffic(world.traffic, player.phys.s, dt, state.time || 0, world.parts);
+  if (window.__TRAFFIC_OFF__ && world.traffic) {
+    // HARNESS: an empty road, to test the pack or the cop without the traffic.
+    world.traffic.visible = false;
+    for (const c of (world.traffic.userData.cars || [])) { const u = c.userData; u.s = u.prevS = -1e5; u.at = u.prevAt = 0; u.speed = 0; }
+  } else updateTraffic(world.traffic, player.phys.s, dt, state.time || 0, world.parts);
 
   // RIDING-VERB FEEDBACK. A verb the player cannot see or hear is a number in
   // a file: the landing needs a thump, the boost needs a note, and both need a
@@ -1480,7 +1484,7 @@ function stepGame(dt) {
     for (const rd of world.parts) {
       const f = rd.fighter;
       if (!rd.phys || !f || f.down) continue;
-      const hit = trafficContact(world.traffic, rd.phys);
+      const hit = window.__TRAFFIC_OFF__ ? null : trafficContact(world.traffic, rd.phys);
       if (!hit) continue;
       const res = applyTrafficHit(rd.phys, hit, f.invuln > 0);
       if (res.quiet) continue;              // still solid, but the hit was already scored
@@ -1539,7 +1543,9 @@ function stepGame(dt) {
 
   // HUD
   try {
-    radar.update(dt, player, cop && cop.active ? [...rivals, cop] : rivals,
+    // The cop is on the radar from the moment he takes up his spot, not only
+    // once he is chasing: the ambush is something you should see coming.
+    radar.update(dt, player, cop && cop.present ? [...rivals, cop] : rivals,
       world.traffic && world.traffic.userData ? world.traffic.userData.cars : null);
   } catch (e) { /* the radar must never take the frame down */ }
 

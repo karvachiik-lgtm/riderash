@@ -40,14 +40,23 @@ export default function (THREE) {
     helmet: 'full', helmetSize: 1, headSize: 1, bust: 1.4, seat: 1.3, visor: 'smoke', stripe: 'racing', finish: 'gloss', hair: 'short',
     hairColor: 0x2a1d14, beard: 'none', top: 'leather', bottom: 'jeans', pattern: 'plain', figure: 'm',
     hat: 'none', shoes: 'boots', tattoo: 'none', inkColor: 0x1c2433,
-    glasses: 'none', chain: 'none', scarf: 'none', scarfColor: 0x8a1f1f, earring: false,
+    glasses: 'none', chain: 'none', suit: 'none', scarf: 'none', scarfColor: 0x8a1f1f, earring: false,
     spikes: false, backpack: false, gloves: 'full', gloveColor: 0x232020, bootColor: 0x1f1c1a,
   }, S.look || {});
+  if (L.suit === 'bat') {
+    // the suit replaces everything it covers (cowl instead of lid and hair)
+    Object.assign(L, { helmet: 'none', hair: 'bald', top: 'suit', bottom: 'jeans', hat: 'none', glasses: 'none',
+      scarf: 'none', beard: 'none', gloves: 'full', shoes: 'boots', backpack: false, tattoo: 'none', chain: 'none',
+      spikes: false, pattern: 'plain' });
+  }
   const TOP = L.top;
   const leatherTop = TOP === 'leather';
   // a denim jacket is cut like the leathers (zip, collar, full sleeves) in cloth
   const jacketLike = leatherTop || TOP === 'denimjacket';
-  const longCloth = TOP === 'hoodie' || TOP === 'flannel';
+  // THE NIGHT WATCH suit (an easter egg): a tight bodysuit, a cowl with ears,
+  // a cape, a chest emblem and a utility belt. It overrides the top and lid.
+  const BAT = L.suit === 'bat';
+  const longCloth = TOP === 'hoodie' || TOP === 'flannel' || BAT;
   const swim = TOP === 'bikini' || TOP === 'onepiece';
   const strapped = TOP === 'dress' || swim;
   const bareArms = TOP === 'tank' || TOP === 'vest' || strapped;
@@ -92,7 +101,8 @@ export default function (THREE) {
   // Cloth tops (tee, tank, hoodie) are matte cotton in the jacket colour.
   const cotton  = M(C.jacket, 0.92, 0.0, true); cotton.name = 'fabric';
   if (L.pattern !== 'plain') { cotton.map = patternTex(L.pattern, C.jacket); cotton.color.setHex(0xffffff); }
-  if (swim) { cotton.roughness = 0.45; }                // swimwear: a lycra sheen
+  if (swim) { cotton.roughness = 0.45; }
+  if (BAT) { cotton.roughness = 0.5; cotton.metalness = 0.1; }   // the suit's armoured weave                // swimwear: a lycra sheen
   const skirtMat = BOTTOM === 'dress' || BOTTOM === 'swim' ? cotton : M(C.pants, 0.85, 0.0, true); skirtMat.name = 'fabric';
   const cottonDk = M(shade(C.jacket, 0.72), 0.94, 0.0, true); cottonDk.name = 'fabric';
   const hairMat = M(L.hairColor, L.hair === 'slick' ? 0.32 : 0.86, 0.0, true); hairMat.name = 'fabric';
@@ -552,11 +562,72 @@ export default function (THREE) {
   if (TOP === 'hoodie') {
     // the hood lies folded behind the neck, the pouch pocket on the belly,
     // two drawstrings hanging from the neckline
-    const hood = add(torso, mk(new THREE.SphereGeometry(S.headR * 1.05, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.55), cotton, 0, T * 1.02, -TD * 0.34, -1.25));
-    hood.scale.set(1.05, 0.62, 0.9);
-    hood.material = cotton.clone(); hood.material.side = THREE.DoubleSide;
-    add(torso, mk(cbox(TW * 0.52, T * 0.2, 0.03, 0.01), cottonDk, 0, T * 0.22, surf(T * 0.22) + 0.006));
-    for (const s of [-1, 1]) add(torso, mk(new THREE.CylinderGeometry(0.005, 0.005, T * 0.22, 4), white, s * S.headR * 0.28, T * 0.96, surf(T * 0.96) + 0.008, -0.1));
+    const soft = cotton.clone(); soft.flatShading = false; soft.side = THREE.DoubleSide;
+    // THE HOOD, folded down: a thick roll of cloth round the neck, open in a V
+    // at the front, and the hood's bag lying flat between the shoulder blades
+    const roll = add(torso, mk(new THREE.TorusGeometry(S.headR * 0.78, S.headR * 0.2, 8, 20, Math.PI * 1.7), soft, 0, T * 1.08, -TD * 0.02, Math.PI / 2, 0, Math.PI * 0.5 + Math.PI * 0.15));
+    roll.scale.set(1.15, 1.05, 1);
+    const bag = add(torso, mk(new THREE.SphereGeometry(S.headR * 1.15, 16, 12), soft, 0, T * 0.9, -surf(T * 0.9) - S.headR * 0.18));
+    bag.scale.set(1.0, 0.95, 0.32);
+    // the kangaroo pouch: a panel with slanted hand openings either side
+    add(torso, mk(cbox(TW * 0.5, T * 0.2, 0.022, 0.008), soft, 0, T * 0.2, surf(T * 0.2) + 0.008));
+    for (const s of [-1, 1]) add(torso, mk(cbox(0.012, T * 0.2, 0.026, 0.004), cottonDk, s * TW * 0.23, T * 0.2, surf(T * 0.2) + 0.01, 0, 0, s * 0.35));
+    // drawstrings with aglets, hanging from the neckline
+    for (const s of [-1, 1]) {
+      add(torso, mk(new THREE.CylinderGeometry(0.004, 0.004, T * 0.26, 4), white, s * S.headR * 0.26, T * 0.94, surf(T * 0.94) + 0.012, -0.08));
+      add(torso, mk(new THREE.CylinderGeometry(0.006, 0.006, 0.02, 6), steel, s * S.headR * 0.26, T * 0.8, surf(T * 0.8) + 0.018, -0.08));
+    }
+    // a deep ribbed waistband: the hoodie's hem sits low over the hips
+    const band = add(torso, mk(new THREE.CylinderGeometry(1, 1, T * 0.1, 16), cottonDk, 0, -T * 0.02, 0));
+    band.scale.set((FEM ? TW * 1.28 : TW) * 0.49, 1, TD * 0.49);
+  }
+  if (BAT) {
+    // THE EMBLEM: an original bat, spread wings with three scallops each side
+    // (this game's own mark -- not any comic's)
+    const sh = new THREE.Shape();
+    const W = TW * 0.36, Hh = T * 0.1;
+    sh.moveTo(0, Hh * 0.55);
+    sh.lineTo(W * 0.08, Hh * 0.95); sh.lineTo(W * 0.12, Hh * 0.45);               // ear
+    sh.quadraticCurveTo(W * 0.5, Hh * 0.9, W, Hh * 0.35);                       // leading edge
+    for (let k = 0; k < 3; k++) {                                              // scalloped trailing edge
+      const x0 = W * (1 - k * 0.3), x1 = W * (0.7 - k * 0.3);
+      sh.quadraticCurveTo((x0 + x1) / 2, Hh * (0.05 - k * 0.12), x1, Hh * (-0.25 - k * 0.12));
+    }
+    sh.lineTo(W * 0.05, -Hh * 0.95);
+    sh.lineTo(-W * 0.05, -Hh * 0.95);
+    for (let k = 2; k >= 0; k--) {
+      const x1 = -W * (1 - k * 0.3), x0 = -W * (0.7 - k * 0.3);
+      sh.quadraticCurveTo((x0 + x1) / 2, Hh * (0.05 - k * 0.12), x1, Hh * (-0.25 - k * 0.12) + (k === 0 ? Hh * 0.6 : 0));
+    }
+    sh.quadraticCurveTo(-W * 0.5, Hh * 0.9, -W * 0.12, Hh * 0.45);
+    sh.lineTo(-W * 0.08, Hh * 0.95); sh.lineTo(0, Hh * 0.55);
+    const ey = T * 0.74;
+    const em = add(torso, mk(new THREE.ShapeGeometry(sh, 6), M(0x0c0c0e, 0.4, 0.2), 0, ey, surf(ey) + (FEM ? 0.045 : 0.012), -0.1));
+    em.material.side = THREE.DoubleSide;
+    // UTILITY BELT: a gold band with pouches
+    const belt = add(torso, mk(new THREE.CylinderGeometry(1, 1, T * 0.07, 16), accent, 0, T * 0.02, 0));
+    belt.scale.set((FEM ? TW * 1.28 : TW) * 0.5, 1, TD * 0.5);
+    for (let k = -2; k <= 2; k++) {
+      const a = k * 0.42;
+      add(torso, mk(cbox(0.035, T * 0.07, 0.022, 0.006), accent, Math.sin(a) * (FEM ? TW * 1.28 : TW) * 0.5, T * 0.02, Math.cos(a) * TD * 0.52, 0, a, 0));
+    }
+    // THE CAPE: an open cone from the shoulders, falling behind to the calves,
+    // its hem scalloped
+    const capeLen = S.hipY * 0.95, top = S.shoulderW * 0.42, bot = S.shoulderW * 0.95;
+    const cg = new THREE.CylinderGeometry(top, bot, capeLen, 24, 6, true, Math.PI * 0.62, Math.PI * 0.76);
+    {
+      const p = cg.attributes.position;
+      for (let i = 0; i < p.count; i++) {
+        const y = p.getY(i);
+        if (y < -capeLen / 2 + 1e-4) {
+          const a = Math.atan2(p.getX(i), p.getZ(i));
+          p.setY(i, y + Math.abs(Math.sin(a * 5)) * capeLen * 0.05);
+        }
+      }
+      cg.computeVertexNormals();
+    }
+    const capeMat = M(C.jacket, 0.7, 0.05); capeMat.side = THREE.DoubleSide; capeMat.name = 'fabric';
+    add(torso, mk(cg, capeMat, 0, T * 1.02 - capeLen / 2, -TD * 0.2));
   }
   if (TOP === 'tank') {
     // armholes cut deep: a darker rib round each one
@@ -740,7 +811,21 @@ export default function (THREE) {
   // Bare head: the whole style. Under a lid: only what a lid cannot hold in (a
   // ponytail, long hair, dreads) -- and a mohawk becomes a crest ON the lid,
   // which is what riders actually do with one.
-  if (L.helmet === 'none') buildHair(true);
+  if (BAT) {
+    // THE COWL: a hood over the skull down to the cheekbones, two tall ears,
+    // white eye lenses; the mouth and jaw stay bare
+    const cowlMat = cotton.clone(); cowlMat.flatShading = false; cowlMat.side = THREE.DoubleSide;
+    const cw = add(head, mk(new THREE.SphereGeometry(hR * 1.06, 18, 14, 0, Math.PI * 2, 0, Math.PI * 0.6), cowlMat, 0, hy, 0, -0.18));
+    cw.scale.set(0.95, 1.1, 1.05);
+    // sides and back of the cowl carry on down to the neck
+    const sides = add(head, mk(new THREE.CylinderGeometry(hR * 0.92, hR * 0.72, hR * 1.3, 16, 1, true, Math.PI * 0.35, Math.PI * 1.3), cowlMat, 0, hy - hR * 0.7, -hR * 0.05));
+    sides.scale.set(1, 1, 1.05);
+    for (const s of [-1, 1]) {
+      const ear = add(head, mk(new THREE.ConeGeometry(hR * 0.2, hR * 0.75, 6), cowlMat, s * hR * 0.5, hy + hR * 1.15, -hR * 0.05, 0, 0, -s * 0.12));
+      ear.scale.set(1, 1, 0.55);
+      add(head, mk(cbox(hR * 0.3, hR * 0.1, hR * 0.06, 0.01), white, s * hR * 0.33, hy + hR * 0.12, hR * 0.98, 0.1, 0, s * 0.25));
+    }
+  } else if (L.helmet === 'none') buildHair(true);
   else buildHair(false);
   // ---- hats (bare head only) ----
   if (L.helmet === 'none' && L.hat === 'sunhat') {
@@ -956,7 +1041,7 @@ export default function (THREE) {
     const th = FEM ? [1.62, 1.55, 1.18, 0.92] : [1.36, 1.42, 1.18, 1.02];
     thigh.add(mk(seg(S.thigh, [[0.0, R0 * th[0] * lk2], [0.28, R0 * th[1] * lk2], [0.7, R0 * th[2] * lk2], [1.0, R0 * th[3] * lk2]]), legMat, 0, 0, 0));
     // outseam: a darker welt down the outside of the jeans
-    if (legMat === denim) thigh.add(mk(cbox(0.01, S.thigh * 0.84, 0.012, 0.003), seam, s * R0 * 1.30, -S.thigh * 0.5, 0));
+    if (legMat === denim && !BAT) thigh.add(mk(cbox(0.01, S.thigh * 0.84, 0.012, 0.003), seam, s * R0 * 1.30, -S.thigh * 0.5, 0));
     if (shortsOn) {
       add(thigh, mk(seg(S.thigh * 0.34, [[0.0, R0 * 1.46], [1.0, R0 * 1.44]]), denim, 0, R0 * 0.1, 0));
       add(thigh, mk(new THREE.CylinderGeometry(R0 * 1.47, R0 * 1.47, S.thigh * 0.04, 8), cuffMat, 0, -S.thigh * 0.33, 0));
@@ -968,7 +1053,7 @@ export default function (THREE) {
     knee.add(mk(new THREE.SphereGeometry(R0 * 1.08 * lk2, 8, 6), legMat, 0, 0, 0));
     // KNEE PAD on the kneecap. The knee folds the shin toward -Z, so the cap is
     // on +Z. A hard shell with a strap: the biker detail that reads at speed.
-    if (legMat === denim) {
+    if (legMat === denim && !BAT) {
       knee.add(mk(cbox(R0 * 1.55, R0 * 1.85, R0 * 0.62, 0.016), pad, 0, -R0 * 0.35, R0 * 0.92));
       knee.add(mk(cbox(R0 * 2.30, R0 * 0.22, R0 * 2.10, 0.006), seam, 0, -R0 * 1.05, 0));
     }

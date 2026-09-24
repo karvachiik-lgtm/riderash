@@ -153,6 +153,15 @@
   #showtitle { background:linear-gradient(90deg, rgba(8,9,11,.55), rgba(8,9,11,0)); padding:6px 14px 6px 10px; margin-left:-10px; border-radius:3px; }
   #showfoot { background:linear-gradient(90deg, rgba(8,9,11,.6), rgba(8,9,11,0)); padding:6px 10px; border-radius:3px; }
   #showbar .emotes button { border-color:#6a5a3a; }
+  #showbar .emotes .bategg { min-width:0; padding:4px 6px; border-color:transparent; background:transparent;
+                             color:#3a3e44; line-height:0; opacity:.55; }
+  #showbar .emotes .bategg:hover { color:#c9a23a; opacity:1; }
+  /* THE PANEL SCROLLS, NOT THE PAGE. The grid's one row was sized to its
+     content, so a long tab (Outfit) grew the row past the viewport and the
+     whole screen scrolled -- the stage's title and pose bar went off the top.
+     Pin the row to the viewport and let the panel scroll inside it. */
+  #showroom.on { grid-template-rows:minmax(0, 1fr); height:100vh; height:100dvh; overflow:hidden; }
+  #panel { min-height:0; }
   .stabs { display:flex; gap:0; position:sticky; top:-22px; z-index:3; margin:-22px -18px 0; padding:10px 8px 0;
            background:rgba(12,13,15,.97); border-bottom:1px solid #2a2e33; overflow-x:auto; scrollbar-width:none; }
   .stabs::-webkit-scrollbar { display:none; }
@@ -463,7 +472,10 @@
     /* Character designer: the stage gets most of the height and its bands
        slim down -- showroom.js frames the figure in the space BETWEEN the pose
        bar and the stats, so every row the bar wraps onto shrank the rider. */
-    body #showroom.on { grid-template-columns:1fr; grid-template-rows:62vh auto; overflow-y:auto; }
+    body #showroom.on { grid-template-columns:1fr; grid-template-rows:56vh auto; overflow-y:auto; }
+    /* the stage stays put while the panel scrolls up under it */
+    body #showroom.on #showstage { position:sticky; top:0; z-index:3; }
+    body #showroom.on #panel { position:relative; z-index:2; background:rgba(12,13,15,.98); }
     #showtitle { top:calc(10px + env(safe-area-inset-top)); left:14px; right:14px; }
     #showtitle h2 { font-size:16px; letter-spacing:.22em; }
     #showtitle .sub { font-size:8px; letter-spacing:.14em; }

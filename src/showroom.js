@@ -25,6 +25,7 @@ import { makeSpec, BUILDS, makeLook, LOOK_OPTIONS } from './bodyspec.js';
 import { SCENES, buildScene, disposeScene } from './showscenes.js';
 import { FLAG_OUTFITS, flagOutfitSpec, buildKeys } from './flagger.js';
 import { cloneWithJoints } from './rigclone.js';
+import { ensureRest, restoreRest } from './ragdoll.js';
 import { RIDING } from './reach.js';
 import { CFG } from './config.js';
 import { ATTACKS } from './combat.js';
@@ -336,7 +337,9 @@ export class Showroom {
     const sub = (host, text) => { const d = document.createElement('div'); d.className = 'sub'; d.textContent = text; host.appendChild(d); };
     const chips = (host, key, list = LOOK_OPTIONS[key]) => {
       const row = document.createElement('div'); row.className = 'chips'; host.appendChild(row);
-      for (const v of list) btn(row, 'bd', lbl(key, v), () => this.set({ look: { [key]: v } }), { v });
+      // picking any top, lid or hair takes the suit off
+      const off = ['top', 'helmet', 'hair', 'bottom'].includes(key) ? { suit: 'none' } : {};
+      for (const v of list) btn(row, 'bd', lbl(key, v), () => this.set({ look: { ...off, [key]: v } }), { v });
       this._syncers.push(() => { for (const b of row.children) b.classList.toggle('sel', b.dataset.v === String(this.spec.look[key])); });
     };
     const toggles = (host, keys) => {
@@ -500,7 +503,18 @@ export class Showroom {
     }
     if (e.emotes) {
       e.emotes.innerHTML = '';
-      for (const a of ANIMS) if (a.emote) btn(e.emotes, '', a.label, () => this.setAnim(a.key), { anim: a.key });
+      const list = ANIMS.filter((a) => a.emote);
+      list.forEach((a, i) => {
+        btn(e.emotes, '', a.label, () => this.setAnim(a.key), { anim: a.key });
+        // EASTER EGG: a little bat tucked in among the emotes. It suits up
+        // whoever is on the stand -- man or woman -- as the Night Watch.
+        if (i === 4) {
+          const bat = btn(e.emotes, 'bategg', '', () => this.nightWatch());
+          bat.title = '?';
+          bat.setAttribute('aria-label', 'Secret');
+          bat.innerHTML = '<svg viewBox="0 0 40 20" width="22" height="11" aria-hidden="true"><path fill="currentColor" d="M20 6 L21.5 2 L22.5 7 Q30 3 39 9 Q34 10 33 14 Q29 11 27 15 Q24 12 21 19 L19 19 Q16 12 13 15 Q11 11 7 14 Q6 10 1 9 Q10 3 17.5 7 L18.5 2 Z"/></svg>';
+        }
+      });
     }
     // Sliders: `input` fires continuously while dragging. The rebuild is
     // deferred to the next frame (`_dirty`), so a fast drag costs one body per
@@ -513,6 +527,18 @@ export class Showroom {
     e.done.onclick = () => this.close();
     this._buildChainPanel();
     this.showTab(this.tab);
+  }
+
+  /** The easter egg: the Night Watch suit, for the current figure. */
+  nightWatch() {
+    const fem = this.spec.look && this.spec.look.figure === 'f';
+    this.set({
+      colors: { jacket: 0x2e3136, pants: 0x2e3136, accent: 0xc9a23a, helmet: 0x121314 },
+      look: { suit: 'bat', gloveColor: 0x121314, bootColor: 0x121314, figure: fem ? 'f' : 'm' },
+    });
+    this._preset = null;
+    this._flash('NIGHT WATCH');
+    this.setAnim('flex');
   }
 
   setFocus(k) { this.focus = k; this._focus = null; this._frameDirty = true; this._syncUI(); }
@@ -868,6 +894,9 @@ export class Showroom {
     // The grab reaches with the arm facing the camera at the start of a turn.
     // (`left` is +X since the rig's sides became anatomical -- same physical arm)
     b.userData.joints.__plusArm = 'left';
+    // THE REST SNAPSHOT, taken before anything poses the body. Every frame
+    // starts from it (see _animate), so no animation can leave a joint behind.
+    ensureRest(b, true);
     this.body = b;
     this._placeBody();
   }
@@ -923,6 +952,17 @@ export class Showroom {
     const t = this.animT;
     const seated = this.stance === 'ride';
 
+    // START EVERY FRAME FROM THE REST POSE. The pose functions each write only
+    // the axes they care about (clearAxes zeroes y and z; x is left to
+    // whoever sets it), so any joint one animation bent and the next did not
+    // touch stayed bent: Tuck left the head pitched down in Stand, an emote's
+    // hip tilt survived onto the bike, and so on. Restoring every joint's full
+    // local transform first makes each animation independent of the last.
+    restoreRest(b);
+    // props that belong to one animation only
+    if (this.anim !== 'keys' && this._keys && this._keys.parent) this._keys.removeFromParent();
+    if (j.chain && this.anim !== 'chain' && !seated && this.stance !== 'stand') j.chain.visible = false;
+
     // ---- the rest pose for the stance ----
     if (seated) {
       clearAxes(j);
@@ -948,7 +988,7 @@ export class Showroom {
           this._keys.position.set(0, -this.spec.forearm - this.spec.hand * 0.6, this.spec.hand * 0.35);
         }
         this._keys.userData.arm.rotation.x = -this._clock * 13;
-      } else if (this._keys && this._keys.parent) this._keys.removeFromParent();
+      }
       const emote = EMOTES[this.anim];
       if (emote) { j.__chainAlwaysOut = false; if (j.chain) j.chain.visible = false; emote(j, t, b, this.spec); return; }
     } else {

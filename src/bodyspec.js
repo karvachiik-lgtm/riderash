@@ -233,13 +233,14 @@ export const LOOK_OPTIONS = {
   glasses: ['none', 'shades', 'aviator', 'goggles'],
   chain:   ['none', 'gold', 'silver'],
   scarf:   ['none', 'bandana'],
+  suit:    ['none', 'bat'],
   gloves:  ['full', 'fingerless', 'none'],
 };
 export const LOOK_DEFAULTS = {
   helmet: 'full', helmetSize: 1.0, headSize: 1.0, bust: 1.4, seat: 1.3, visor: 'smoke', stripe: 'racing', finish: 'gloss',
   hair: 'short', hairColor: 0x2a1d14, beard: 'none',
   top: 'leather', bottom: 'jeans', pattern: 'plain', figure: 'm', hat: 'none', shoes: 'boots', tattoo: 'none', inkColor: 0x1c2433,
-  glasses: 'none', chain: 'none', scarf: 'none', scarfColor: 0x8a1f1f,
+  glasses: 'none', chain: 'none', suit: 'none', scarf: 'none', scarfColor: 0x8a1f1f,
   earring: false, spikes: false, backpack: false,
   gloves: 'full', gloveColor: 0x232020, bootColor: 0x1f1c1a,
 };

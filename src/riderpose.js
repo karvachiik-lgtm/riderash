@@ -717,11 +717,13 @@ export function poseCombat(joints, f, phys, time, attacksTable) {
       }
       if (joints.neck) joints.neck.rotation.y += sx * S.body.head * env;
       strike = { S, limb, cross }; strikeU = ph;
-    } else if (!applyAction(joints, k, ph)) {
-      const ra = armOf(joints, 'right');
-      const sw = Math.sin(ph * Math.PI);
-      if (ra && ra.upper) { ra.upper.rotation.x += sw * 1.6; ra.elbow.rotation.x += sw * 0.9; }
-    }
+    } else if (STAND_STRIKES[k]) {
+      // ON FOOT (no bike to solve against): keyframed aims, the limb on the
+      // target's side. This used to fall through to a fallback that added +1.6
+      // to the right upper arm -- and +x swings an arm BACKWARD on this rig, so
+      // every standing punch, kick and chain threw the arm behind the body.
+      poseStandStrike(joints, k, ph, armForSide(joints, phys, a.side || f.aimSide || 1));
+    } else applyAction(joints, k, ph);
     if (k === 'chain') chainPh = ph;
   }
   if (f.hold) {
@@ -773,7 +775,7 @@ export function poseCombat(joints, f, phys, time, attacksTable) {
 // point the upper arm along `dir` in the torso's frame (+x the body's left, +y
 // up, +z forward) and bend the elbow toward `hint` by `flex` radians.
 const _aX = new THREE.Vector3(), _aY = new THREE.Vector3(), _aZ = new THREE.Vector3(), _aB = new THREE.Matrix4();
-export function armAim(j, side, dir, hint, flex) {
+export function armAim(j, side, dir, hint, flex, twist) {
   const A = j[side + 'Arm'] || (j.arms && j.arms[side]);
   if (!A || !A.upper) return;
   _aY.set(-dir[0], -dir[1], -dir[2]).normalize();          // the segment hangs down its local -Y
@@ -784,6 +786,9 @@ export function armAim(j, side, dir, hint, flex) {
   _aX.crossVectors(_aY, _aZ);
   A.upper.quaternion.setFromRotationMatrix(_aB.makeBasis(_aX, _aY, _aZ));
   if (A.elbow) A.elbow.rotation.set(-flex, 0, 0);          // - flexes toward local +Z
+  // TWIST the forearm about its own length: turns the palm without moving the
+  // arm (a wave wants the palm to the front, not to the side)
+  if (twist !== undefined && A.fore) A.fore.rotation.set(0, twist, 0);
 }
 
 /**
@@ -826,4 +831,73 @@ export function confident(j, amt = 1) {
     const A = j[side + 'Arm'] || (j.arms && j.arms[side]);
     if (A && A.upper) A.upper.rotation.x += 0.1 * amt;   // arms back with the shoulders
   }
+}
+
+// ---------------------------------------------------------------------------
+// STANDING STRIKES -- keyframes of [u, upper-arm direction, bend hint, elbow
+// flex] in the torso frame (+x the body's left, +y up, +z forward), `x` given
+// for the LEFT arm and mirrored for the right. A kick drives the leg instead.
+// The off arm holds a guard; the body turns the striking shoulder in.
+const STAND_STRIKES = {
+  punch: {
+    keys: [
+      [0.00, [0.25, -0.85, 0.35], [0, 1, 0.3], 1.9],   // guard: fist up by the chin
+      [0.22, [0.38, -0.55, 0.45], [0, 1, 0.2], 2.3],   // load: elbow back, fist cocked
+      [0.46, [0.08, 0.06, 1.0], [0, 1, 0], 0.08],      // contact: arm long, straight out front
+      [0.62, [0.1, 0.02, 1.0], [0, 1, 0], 0.2],
+      [1.00, [0.25, -0.85, 0.35], [0, 1, 0.3], 1.9],
+    ],
+    body: { twist: 0.45, lean: 0.12, peak: 0.46 },
+  },
+  chain: {
+    keys: [
+      [0.00, [0.3, -0.9, 0.2], [0, 0.3, 1], 0.5],
+      [0.26, [0.3, 0.75, 0.05], [0, 0, 1], 0.6],       // lift over the shoulder
+      [0.40, [0.25, 0.8, -0.45], [0, 0.2, -1], 0.9],   // wound back behind the head
+      [0.53, [0.3, 0.12, 1.0], [0, 1, 0], 0.06],       // crack: whipped forward
+      [0.72, [-0.3, -0.6, 0.65], [0, 1, 0], 0.35],     // follow-through, low and across
+      [1.00, [0.3, -0.9, 0.2], [0, 0.3, 1], 0.5],
+    ],
+    body: { twist: 0.55, lean: 0.18, peak: 0.53 },
+  },
+  kick: { leg: true, body: { twist: 0.1, lean: -0.22, peak: 0.48 } },
+};
+const GUARD = [[0.25, -0.85, 0.35], [0, 1, 0.3], 1.9];
+function sampleKeys(keys, u) {
+  let i = 0;
+  while (i < keys.length - 2 && u > keys[i + 1][0]) i++;
+  const [u0, d0, h0, f0] = keys[i], [u1, d1, h1, f1] = keys[i + 1];
+  const e = smooth((u - u0) / Math.max(1e-4, u1 - u0));
+  const L3 = (a, b) => [a[0] + (b[0] - a[0]) * e, a[1] + (b[1] - a[1]) * e, a[2] + (b[2] - a[2]) * e];
+  return [L3(d0, d1), L3(h0, h1), f0 + (f1 - f0) * e];
+}
+const mir = (v, s) => [v[0] * s, v[1], v[2]];
+export function poseStandStrike(j, kind, u, side = 'right') {
+  const S = STAND_STRIKES[kind];
+  if (!S || !j) return false;
+  const s = side === 'left' ? 1 : -1, other = side === 'left' ? 'right' : 'left';
+  const env = bump(u, S.body.peak);
+  // turn the striking shoulder toward the target (in front)
+  if (j.torso) {
+    j.torso.rotation.y += -s * S.body.twist * env;
+    j.torso.rotation.x += S.body.lean * env;
+  }
+  if (j.neck) j.neck.rotation.y += s * S.body.twist * 0.6 * env;   // eyes stay on the target
+  // the off hand keeps its guard
+  armAim(j, other, mir(GUARD[0], -s), mir(GUARD[1], -s), GUARD[2]);
+  if (S.leg) {
+    // front kick on the target's side: chamber (knee up), snap out, recoil
+    armAim(j, side, mir(GUARD[0], s), mir(GUARD[1], s), GUARD[2]);
+    const L = j[side + 'Leg'] || (j.legs && j.legs[side]);
+    if (L) {
+      const chamber = u < 0.26 ? smooth(u / 0.26) : u < 0.62 ? 1 : 1 - smooth((u - 0.62) / 0.38);
+      const snap = u < 0.3 ? 0 : u < 0.48 ? smooth((u - 0.3) / 0.18) : u < 0.62 ? 1 : 1 - smooth((u - 0.62) / 0.2);
+      if (L.thigh) L.thigh.rotation.x = -1.45 * chamber;              // thigh up in front
+      if (L.knee) L.knee.rotation.x = 2.0 * chamber * (1 - snap) + 0.08 * snap;   // folded, then straight
+    }
+    return true;
+  }
+  const [d, h, fl] = sampleKeys(S.keys, u);
+  armAim(j, side, mir(d, s), mir(h, s), fl);
+  return true;
 }

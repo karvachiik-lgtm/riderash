@@ -22,6 +22,7 @@ function specOf(f, kind) {
 // one number. It is the same value the AI commits from, and the comment on
 // CFG's combat block is where the reasoning lives.
 const ALONGSIDE_LONG = 2.2;
+const FLANK_S = 1.4;            // m along the road: 'level with you' for the flank rule in resolve()
 
 export const ATTACKS = {
   // Every attack is now a DIRECTIONAL impulse, not a scalar shove. `along` is the
@@ -354,7 +355,15 @@ export class Fighter {
       const ang = Math.acos(THREE.MathUtils.clamp(dot, -1, 1));
       // the chain sweeps a wider arc, and even reaches slightly behind
       const arc = a.arc + (this.combo * 0.06);
-      if (ang > arc) continue;
+      // BESIDE YOU IS ALWAYS IN REACH. A rider level with you (within FLANK_S
+      // along the road) and off to one side is where a punch or a boot goes,
+      // whatever the bearing. The pure bearing test missed a rider sitting half
+      // a bike behind your hip: the cop holds station 0.5 m back and 1.5 m
+      // across (~110 deg off your nose), outside the punch's 106 and the kick's
+      // 97, and the player's blows passed through him 23 times in 24 while his
+      // own swing -- you are in HIS forward arc -- landed (MEASURED).
+      const flank = Math.abs(o.s - me.s) <= FLANK_S && Math.abs(o.lateral - me.lateral) >= 0.4;
+      if (ang > arc && !flank) continue;
       // MUST BE ALONGSIDE, not twenty metres up the road. This is the same
       // condition the AI uses to commit (`NPC.ALONGSIDE_LONG`), and it is what
       // stops a swing connecting with a rider far ahead simply because the road

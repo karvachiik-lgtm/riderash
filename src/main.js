@@ -479,6 +479,7 @@ async function init() {
   scene.add(finishGantry);
   trackDress = new TrackDress(scene);
   try { flagger = new Flagger(scene); } catch (e) { console.warn('[riderash] flagger:', e); flagger = null; }
+  window.__FLAGGER__ = flagger;   // harness: pose checks
   try { hazardView = new HazardView(scene); } catch (e) { console.warn('[riderash] hazards:', e); }
   try { crestShadows = new CrestShadows(scene); window.__CREST__ = crestShadows; } catch (e) { console.warn('[riderash] crest shadows:', e); }
   try { parked = new Parked(scene); window.__PARKED__ = parked; } catch (e) { console.warn('[riderash] parked:', e); }

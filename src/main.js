@@ -1310,7 +1310,7 @@ function stepGame(dt) {
     onGrab(attacker, target) {
       audio.impact(0.8, 'punch');
       if (attacker === player.fighter) { state.warn = 'GRABBED HIM — G TO THROW'; state.shake = Math.min(1.2, state.shake + 0.25); }
-      else if (target === player.fighter) { state.warn = 'GRABBED! MASH J K L'; state.shake = Math.min(1.2, state.shake + 0.4); }
+      else if (target === player.fighter) { state.warn = attacker.collar ? 'COLLARED! MASH J K L' : 'GRABBED! MASH J K L'; state.shake = Math.min(1.2, state.shake + 0.4); }
     },
     onThrow(attacker, target) {
       state.score += attacker === player.fighter ? 60 : 0;
@@ -1322,6 +1322,9 @@ function stepGame(dt) {
     onSteal(thief, victim) {
       if (thief === player.fighter) { state.warn = 'GOT HIS CHAIN'; state.score += 50; }
       else if (victim === player.fighter) state.warn = 'LOST YOUR CHAIN';
+    },
+    onRelease(holder, target) {
+      if (target === player.fighter && holder.collar) state.warn = 'HE LOST HIS GRIP';
     },
     onBreak(holder, target) {
       if (target === player.fighter) { state.warn = 'BROKE FREE'; state.score += 25; }
@@ -1444,6 +1447,8 @@ function stepGame(dt) {
     const inList = world.fighters.includes(cop.fighter);
     if (cop.active && !inList) world.fighters.push(cop.fighter);
     else if (!cop.active && inList) world.fighters.splice(world.fighters.indexOf(cop.fighter), 1);
+    // held by the law: say so every frame, it is the one thing that matters now
+    if (cop.fighter.hold && cop.fighter.hold.target === player.fighter && !ev) state.warn = 'PULLING YOU OVER — MASH J K L!';
     if (ev === 'arrived') state.warn = 'COPS!';
     else if (ev === 'down') state.warn = 'COP DOWN!';
     else if (ev === 'gone') state.warn = cop.fighter.down ? '' : 'LOST THE COP';
@@ -1463,7 +1468,9 @@ function stepGame(dt) {
   // never left interpenetrating because one of them stepped first. This is the
   // difference between five riders being five independent objects and five
   // riders sharing one road.
-  const bodies = [player, ...rivals];
+  // A CHASING cop is a solid body too: his barge is a real shove, and you can
+  // shove him back into the kerb.
+  const bodies = cop && cop.state === 'chase' ? [player, ...rivals, cop] : [player, ...rivals];
   for (let i = 0; i < bodies.length; i++) {
     for (let j = i + 1; j < bodies.length; j++) {
       const a = bodies[i].phys, b = bodies[j].phys;

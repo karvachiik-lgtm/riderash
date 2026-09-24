@@ -89,6 +89,12 @@ export class Fighter {
     this.combo = 0;
     this.comboTimer = 0;
     this.hasWeapon = opts.hasWeapon ?? false;
+    // THE COLLAR (the police grab): instead of a throw at the end of the hold,
+    // the holder hangs on for COLLAR_HOLD and lets go -- he is braking to pull
+    // you over, and cops.js decides the bust. `grip` divides every struggle
+    // press, so a firmer grip takes more mashing to slip.
+    this.collar = !!opts.collar;
+    this.grip = opts.grip ?? 1;
     this.down = false;
     this.downTimer = 0;
     this.invuln = 0;
@@ -283,6 +289,7 @@ export class Fighter {
     this.stamina = Math.max(0, this.stamina - 4 * dt);
     tgt.hitFlash = Math.max(tgt.hitFlash, 0.06);
     if (tgt.hp <= 0) { this._endHold('throw', hooks); return; }
+    if (this.collar) { if (h.t >= CFG.COLLAR_HOLD) this._endHold('release', hooks); return; }
     if (h.throwNow && h.t > 0.25) { this._endHold('throw', hooks); return; }
     if (h.t >= CFG.GRAPPLE_HOLD) this._endHold('throw', hooks);
   }
@@ -323,14 +330,15 @@ export class Fighter {
       tgt.owner.lateralV += side * 0.9;
       holder.owner.lateralV -= side * 0.4;
       tgt.invuln = Math.max(tgt.invuln, 0.35);
-      hooks.onBreak?.(holder, tgt);
+      if (kind === 'release') hooks.onRelease?.(holder, tgt);
+      else hooks.onBreak?.(holder, tgt);
     }
   }
 
   /** One struggle press while held. Five presses in the hold window break it. */
   struggle(amount = CFG.GRAPPLE_BREAK) {
     if (!this.heldBy) return;
-    this.breakMeter += amount;
+    this.breakMeter += amount / (this.heldBy.grip || 1);
     this.stamina = Math.max(0, this.stamina - 2);
   }
 

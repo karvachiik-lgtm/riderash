@@ -62,6 +62,24 @@ export const COPS = {
   // won a straight fist-fight against the player in 4 s (MEASURED): a rider who
   // fights back must be able to win it.
   SWING_EVERY: [1.8, 3.0],
+  // ...and that was level 1. A cop on the later circuits means it: the rhythm
+  // tightens with the level, and again once a chase has dragged on (he is
+  // losing patience), so the fight you could win early has to be won faster.
+  SWING_BY_LEVEL: [[1.6, 2.6], [1.4, 2.3], [1.2, 2.0], [1.05, 1.8], [0.9, 1.6]],
+  IMPATIENT_AFTER: 15,       // s of chase after which he swings 25% more often
+  // THE COLLAR. Road Rash's police did not want a fist-fight, they wanted you
+  // stopped. He reaches over, gets a hand on you, and brakes: the hold tows you
+  // down with him. Held until you are crawling, you are pulled over (a bust).
+  // Every attack key struggles; his grip hardens with the level.
+  GRAB_CHANCE: [0.22, 0.28, 0.34, 0.4, 0.46],   // of his swings that are a grab, by level
+  GRIP_BY_LEVEL: [1.0, 1.15, 1.3, 1.45, 1.6],   // presses needed x this (5 at level 1)
+  COLLAR_DECEL: 9.5,         // m/s^2 he brakes while he has you
+  COLLAR_BUST_V: 12,         // m/s: dragged below this and you are pulled over
+  // THE BARGE. Between swings he leans his bike into yours: the contact solver
+  // does the rest, and near the kerb or a car that is the whole point.
+  BARGE_EVERY: [3.5, 7.0],   // s between barges once alongside
+  BARGE_T: 0.7,              // s he holds the inside line
+  BARGE_SIDE: 0.7,           // m: the gap he steers for (contact is ~0.9)
   HP: 80,
   BUST_RADIUS: 28,           // m: wreck inside this and you are nicked
   LOSE_DIST: 320,            // m: out-run him by this much and he is gone
@@ -86,7 +104,7 @@ export class Cop {
     // A REAL FIGHTER: his swings resolve through combat.js like anyone's, and
     // the player's resolve against him. Joined to world.fighters only while he
     // is chasing (see main.js), so nobody punches a parked cop.
-    this.fighter = new Fighter(this.phys, { hp: COPS.HP, hasWeapon: true });
+    this.fighter = new Fighter(this.phys, { hp: COPS.HP, hasWeapon: true, collar: true });
 
     if (assets.bike) {
       this.bike = cloneWithJoints(assets.bike);
@@ -157,6 +175,8 @@ export class Cop {
   reset(level = 1, enabled = true) {
     this.level = Math.max(1, Math.min(5, level | 0));
     this.enabled = !!enabled;
+    this.fighter.grip = COPS.GRIP_BY_LEVEL[this.level - 1];
+    this.bargeT = 0; this.bargeCool = COPS.BARGE_EVERY[0];
     if (this.dismount) this.dismount.reset();
     this.state = 'off';
     this.active = false;              // chasing (siren, flag, radar): main.js reads this
@@ -278,6 +298,22 @@ export class Cop {
     }
     if (this.chaseT > COPS.CHASE_FOR || gap > COPS.LOSE_DIST) { this._leave(); return 'gone'; }
 
+    // THE COLLAR: he has you. Brake, and the hold tows you down with him.
+    if (f.hold && f.hold.target === player.fighter) {
+      p.speed = Math.max(0, p.speed - COPS.COLLAR_DECEL * dt);
+      const steer = Math.max(-1, Math.min(1, ((pp.lateral + f.hold.side * -CFG.GRAPPLE_GAP) - p.lateral) * 0.6 - (p.lateralV || 0) * 0.2));
+      p.advance(dt, { throttle: false, brake: false, steer, tuck: false });
+      f.update(dt, [player.fighter], hooks);
+      if (f.hold && pp.speed < COPS.COLLAR_BUST_V && !this.busted) {
+        f._endHold('release', hooks);
+        this.busted = true;
+        this._visual(dt);
+        return 'busted';
+      }
+      this._visual(dt);
+      return null;
+    }
+
     // Pace: close fast, then hold station ALONGSIDE (gap ~0), where he can reach.
     // The closing speed is proportional to the gap, so he arrives MATCHING your
     // speed instead of flying past: at 58 m/s with a fixed closing rate he
@@ -295,7 +331,16 @@ export class Cop {
     const lim = halfAt(p.s) - 1.0;
     if (Math.abs(gap) < 18 && !this.sideLock) this.sideLock = pp.lateral > 0 ? -1 : 1;
     if (Math.abs(gap) > 30) this.sideLock = 0;
-    let tLat = Math.abs(gap) < 18 ? pp.lateral + (this.sideLock || 1) * COPS.SIDE : pp.lateral;
+    const near = Math.abs(gap) < COPS.REACH_S && Math.abs(pp.lateral - p.lateral) < 2.4;
+    this.bargeCool -= dt;
+    if (this.bargeT > 0) this.bargeT -= dt;
+    else if (near && this.bargeCool <= 0 && !player.fighter.down) {
+      this.bargeT = COPS.BARGE_T;
+      const [ba, bb] = COPS.BARGE_EVERY;
+      this.bargeCool = (ba + Math.random() * (bb - ba)) * (1.2 - this.level * 0.08);
+    }
+    const sideGap = this.bargeT > 0 ? COPS.BARGE_SIDE : COPS.SIDE;
+    let tLat = Math.abs(gap) < 18 ? pp.lateral + (this.sideLock || 1) * sideGap : pp.lateral;
     tLat = Math.max(-lim, Math.min(lim, tLat));
     // TRAFFIC. A trained rider's 2.8 s look: swerve to the nearer clear flank,
     // and if boxed in, drop to the vehicle's speed.
@@ -321,14 +366,18 @@ export class Cop {
     // THE TAKEDOWN. Alongside and in reach: he swings, on a rhythm with a little
     // randomness so it cannot be timed. The fighter decides whether it lands.
     this.swingT -= dt;
-    const alongside = Math.abs(gap) < COPS.REACH_S && Math.abs(pp.lateral - p.lateral) < 2.4;
+    const alongside = near;
     if (alongside && this.swingT <= 0 && !f.busy && !player.fighter.down) {
       // The nightstick when it is ready (the weapon swing: wider arc, hits hard),
       // fists and boots in between.
-      const kind = (f.can('chain') && Math.random() < 0.35) ? 'chain' : (Math.random() < 0.55 ? 'punch' : 'kick');
+      // or the collar: a hand on you, and he starts braking
+      const pf = player.fighter;
+      const grab = f.can('grapple') && !pf.heldBy && !pf.hold && Math.random() < COPS.GRAB_CHANCE[this.level - 1];
+      const kind = grab ? 'grapple'
+        : (f.can('chain') && Math.random() < 0.35) ? 'chain' : (Math.random() < 0.55 ? 'punch' : 'kick');
       if (f.commit(kind)) {
-        const [a, b] = COPS.SWING_EVERY;
-        this.swingT = a + Math.random() * (b - a);
+        const [a, b] = COPS.SWING_BY_LEVEL[this.level - 1];
+        this.swingT = (a + Math.random() * (b - a)) * (this.chaseT > COPS.IMPATIENT_AFTER ? 0.75 : 1);
       }
     }
     f.update(dt, [player.fighter], hooks);

@@ -112,7 +112,8 @@ export const CFG = {
   GRAPPLE_WIND: 0.16,
   GRAPPLE_HOLD: 1.25,     // s the hold lasts before the automatic throw
   GRAPPLE_GAP: 1.05,      // m of lateral gap the hold pulls the two bikes to (bars + knees)
-  GRAPPLE_BREAK: 0.2,     // break meter per struggle press (1.0 breaks free)
+  GRAPPLE_BREAK: 0.2,
+  COLLAR_HOLD: 3.2,       // s a cop hangs on to pull you over (see cops.js COLLAR_*)     // break meter per struggle press (1.0 breaks free)
   STAMINA_COST: { punch: 5, kick: 9, chain: 17, grapple: 14 },
   STAMINA_REGEN: 13.5,
   STAMINA_REGEN_SPEED: 0.045, // extra regen per m/s, so speed feeds stamina

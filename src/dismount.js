@@ -36,7 +36,7 @@
 // nothing here is a hand-picked subset.
 import * as THREE from 'three';
 import { centreAt, headAt } from './level.js';
-import { clearAxes, poseSeated, solveLimbs, restTarget } from './riderpose.js';
+import { clearAxes, poseSeated, solveLimbs, restTarget, armAim, contrapposto } from './riderpose.js';
 import { GAIT } from './motions.js';
 import { RIDING } from './reach.js';
 import { CFG } from './config.js';
@@ -70,7 +70,7 @@ export const ST = {
 export const DIS = {
   FALL_TIME: 1.10,        // s of tumbling before the body is considered landed
   DOWN_TIME: 0.80,        // s lying still, reading the situation
-  STAND_TIME: 0.95,       // s rising to the feet
+  STAND_TIME: 1.45,       // s rising to the feet: push up, kneel, drive up (was a 0.95 s tip-up about the feet)
   // s for the whole remount: step in, heave the bike up, leg over, settle. It
   // was 0.9 s of the body gliding onto the saddle in one blend; a real remount
   // is four beats and reads as one only at ~2 s.
@@ -179,6 +179,47 @@ function roadToWorld(s, lateral, out) {
   out.x += nx * lateral;
   out.z += nz * lateral;
   return out;
+}
+
+
+// THE GET-UP KEYS. Channels, per key:
+//   [u, pitch, torso, neck, thighL, kneeL, thighR, kneeR,
+//    armL dir (x, y, z), flexL, armR dir (x, y, z), flexR]
+// pitch is the ROOT (+ tips him forward: +1.5 lies face down, -1.45 on his
+// back); the joint signs are the rig's, MEASURED: torso + leans forward, THIGH
+// + SWINGS THE LEG BACK (so a knee brought forward is negative), knee + folds
+// the shin back, neck - lifts the chin; arm directions are in the torso frame (+x her left, +y up
+// the spine, +z out of the chest).
+const RISE_PRONE = [
+  [0.00, 1.50, 0.00, -0.35, 0.00, 0.15, 0.00, 0.15, 0.55, -0.35, 0.55, 1.90, -0.55, -0.35, 0.55, 1.90],   // flat, hands by the shoulders
+  [0.24, 1.36, -0.06, -0.30, -0.05, 0.20, -0.05, 0.20, 0.30, -0.10, 1.00, 0.25, -0.30, -0.10, 1.00, 0.25],   // push-up
+  [0.44, 1.22, 0.12, -0.25, -1.35, 1.50, -1.35, 1.50, 0.25, 0.15, 1.00, 0.10, -0.25, 0.15, 1.00, 0.10],     // all fours
+  [0.66, 0.45, 0.50, -0.15, -1.45, 1.45, -0.15, 1.60, 0.25, -0.45, 0.85, 0.50, -0.15, -0.80, 0.55, 0.30],   // kneel, hand on the front knee
+  [0.85, 0.12, 0.35, -0.02, -0.75, 0.80, 0.05, 0.60, 0.20, -0.85, 0.45, 0.35, -0.20, -0.95, 0.20, 0.30],   // driving up off the thigh
+  [1.00, 0.00, 0.06, 0.04, 0.00, 0.12, 0.00, 0.12, 0.14, -1.00, 0.05, 0.25, -0.14, -1.00, 0.05, 0.25],   // up
+];
+const RISE_SUPINE = [
+  // the hips and legs stay DOWN while the torso curls up (a sit-up, not a
+  // backward roll); only then do the feet come under and the root rights itself
+  [0.00, -1.45, 0.00, 0.30, -0.10, 0.30, -0.10, 0.30,  0.35, -0.90, -0.20, 0.20, -0.35, -0.90, -0.20, 0.20],   // on his back
+  [0.28, -1.45, 1.15, 0.10, -0.25, 0.90, -0.25, 0.90,  0.35, -0.80, -0.50, 0.15, -0.35, -0.80, -0.50, 0.15],   // sat up, propped on his hands
+  [0.52, -0.10, 0.80, 0.00, -1.90, 2.30, -1.90, 2.30,  0.25, -0.30, 0.90, 0.30, -0.25, -0.30, 0.90, 0.30],     // feet under: a crouch
+  [0.78, 0.00, 0.35, 0.00, -0.80, 1.00, -0.80, 1.00,   0.20, -0.80, 0.55, 0.40, -0.20, -0.80, 0.55, 0.40],     // hands on the knees
+  [1.00, 0.00, 0.06, 0.04, 0.00, 0.12, 0.00, 0.12,     0.14, -1.00, 0.05, 0.25, -0.14, -1.00, 0.05, 0.25],
+];
+const _spl = new Array(15).fill(0);
+/** Catmull-Rom through the keys at u (clamped at the ends): no dead stops between beats. */
+function splineKeys(K, u) {
+  u = clamp(u, 0, 1);
+  let i = 0;
+  while (i < K.length - 2 && u > K[i + 1][0]) i++;
+  const k0 = K[Math.max(0, i - 1)], k1 = K[i], k2 = K[i + 1], k3 = K[Math.min(K.length - 1, i + 2)];
+  const t = clamp((u - k1[0]) / Math.max(1e-6, k2[0] - k1[0]), 0, 1), t2 = t * t, t3 = t2 * t;
+  for (let c = 1; c < k1.length; c++) {
+    const p0 = k0[c], p1 = k1[c], p2 = k2[c], p3 = k3[c];
+    _spl[c - 1] = 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+  }
+  return _spl;
 }
 
 export class Dismount {
@@ -384,15 +425,24 @@ export class Dismount {
       this._followBody();
       _c.subVectors(this.rag.head, this.rag.pelvis); _c.y = 0;
       // the prone pose lies head toward the walker's -forward (bodyX < 0)
-      if (_c.lengthSq() > 1e-4) w.facing = Math.atan2(-_c.x, -_c.z);
       const j = rider.userData.joints;
       rider.updateMatrixWorld(true);
+      // ON HIS FRONT OR HIS BACK? The chest's facing decides which get-up he
+      // does. The procedural pose then lies with the head the way the ragdoll's
+      // lies.
+      const tq = new THREE.Quaternion();
+      (j.torso || j.pelvis).getWorldQuaternion(tq);
+      const up = _t.set(0, 0, 1).applyQuaternion(tq).y;
+      w.supine = up > 0.25;
+      // (root pitch + tips forward, so face down the head lies toward +facing)
+      if (_c.lengthSq() > 1e-4) w.facing = w.supine ? Math.atan2(-_c.x, -_c.z) : Math.atan2(_c.x, _c.z);
       const pw = new THREE.Vector3(), pq = new THREE.Quaternion();
       j.pelvis.matrixWorld.decompose(pw, pq, _c);
       this.getUp = { pose: captureLocal(rider), pelvisPos: pw, pelvisQ: pq };
     }
     this.rag = null;
     w.rise = 0;
+    w.hipAnchor = null; w.rootOff = null; w.onFootT = 0;
     // HE STANDS UP STILL. `speed` still held the crash speed the fall began
     // with, so the first walking frame set off at 30 m/s -- MEASURED in the crash
     // lab, the walker shot 50 m back up the road in a second and a half.
@@ -407,6 +457,15 @@ export class Dismount {
     const w = this.walk;
     w.roll *= (1 - Math.min(1, d * 6.0));
     if (this.t >= DIS.STAND_TIME) {
+      // the rise pivoted about his hips: the walker is where his feet ended up
+      if (w.rootOff) {
+        roadToWorld(w.s, w.lateral, _p);
+        _p.x += w.rootOff.x; _p.z += w.rootOff.z;
+        worldToRoad(_p, _c);
+        w.s = _c.x; w.lateral = _c.z;
+        this._clampToWorld(w);
+      }
+      w.hipAnchor = null; w.rootOff = null; w.onFootT = 0;
       w.roll = 0;
       w.rise = 1;
       this.getUp = null;
@@ -738,20 +797,37 @@ export class Dismount {
 
     // STANDING / WALKING: procedural, in WORLD space at the walker.
     restoreRest(rider);
-    const rise = this.state === ST.STANDING ? easeInOut(this.walk.rise) : 1;
-    const proneness = 1 - rise;
-    const spec = rider.userData && rider.userData.spec;
-    const sc = rider.scale.y;
-    const pivotY = (spec ? spec.pronePivotY : CFG.SEAT_Y) * sc;
     roadToWorld(w.s, w.lateral, _p);
-    rider.position.set(_p.x, _p.y + pivotY * proneness, _p.z);
-    rider.rotation.set(DIS.DOWN_ROLL * proneness, w.facing, w.roll * proneness, 'YXZ');
-    if (j) this.poseOnFoot(j, dt);
-    if (proneness > 0) {
+    rider.position.set(_p.x, _p.y, _p.z);
+    rider.rotation.set(0, w.facing, 0, 'YXZ');
+    const pitch = j ? this.poseOnFoot(j, dt) : 0;
+    const rise = this.state === ST.STANDING ? (w.rise || 0) : 1;
+    rider.rotation.set(pitch, w.facing, w.roll * (1 - rise), 'YXZ');
+    rider.updateMatrixWorld(true);
+    // ON THE GROUND, whatever the pose: during the rise the lowest point of the
+    // whole body (hands, a knee, the feet); walking, the lower foot -- which is
+    // also what makes the body bob, lowest in double support, highest over the
+    // standing leg. Measured from the mesh (precise), not a guessed pivot.
+    const L = j && j.leftLeg, R = j && j.rightLeg;
+    if (rise < 1 || !L || !R) this._proneBox.setFromObject(rider, true);
+    else {
+      this._proneBox.setFromObject(L.knee, true);
+      this._footBox = this._footBox || new THREE.Box3();
+      this._proneBox.union(this._footBox.setFromObject(R.knee, true));
+    }
+    const gap = this._proneBox.min.y - _p.y;
+    if (Number.isFinite(gap)) rider.position.y -= gap;
+    // THE RISE PIVOTS ABOUT THE HIPS, not the feet: he gets up where he lay,
+    // instead of tipping up like a plank. The pelvis is held where it was on
+    // the first frame of the rise; the walker is moved to match when he is up.
+    if (this.state === ST.STANDING && j && j.pelvis) {
       rider.updateMatrixWorld(true);
-      this._proneBox.setFromObject(rider);
-      const gap = this._proneBox.min.y - _p.y;
-      if (Number.isFinite(gap)) rider.position.y -= gap * proneness;
+      j.pelvis.getWorldPosition(_t);
+      if (!w.hipAnchor) w.hipAnchor = _t.clone();
+      rider.position.x += w.hipAnchor.x - _t.x;
+      rider.position.z += w.hipAnchor.z - _t.z;
+      w.rootOff = w.rootOff || new THREE.Vector3();
+      w.rootOff.set(rider.position.x - _p.x, 0, rider.position.z - _p.z);
     }
 
     // THE GET-UP BLEND. Engines never cut from a ragdoll to an animation: they
@@ -845,93 +921,125 @@ export class Dismount {
     clearAxes(j);
     const w = this.walk;
     const standing = this.state === ST.STANDING || this.state === ST.WALKING;
-
-    // ---- THE RISE IS LATCHED, NOT READ FROM `this.t` ----
-    //
-    // This was `easeInOut(this.t / STAND_TIME)`, and `this.t` RESETS TO ZERO the
-    // instant the state machine enters WALKING. So the blend computed 0 for the
-    // entire walk: the torso stayed at its -1.05 prone fold, the arms stayed
-    // splayed, and the legs stayed in the trailing prone pose. The rider walked
-    // the whole way home FACE-DOWN, floating, feet off the ground -- measured in
-    // the filmstrip as frame 16 (WALKING t=0.25) already horizontal. The rise
-    // only ever animated during the 0.95 s STANDING beat and was then thrown away.
-    //
-    // The rise belongs to the BODY, not to the state's clock, so it is stored on
-    // the walk record and RATCHETS: it ramps to 1 over STAND_TIME while standing
-    // and stays at 1 for the rest of the sequence. Any later transition that
-    // wants the body down again sets it explicitly.
-    if (standing) {
-      w.rise = Math.min(1, (w.rise || 0) + (dt || 0.016) / DIS.STAND_TIME);
-    }
-    const rise = standing ? (w.rise || 0) : 0;
-
-    const rot = (n, x, y, z) => {
-      if (!n || !n.rotation) return;
-      if (x !== undefined) n.rotation.x = x;
-      if (y !== undefined) n.rotation.y = y;
-      if (z !== undefined) n.rotation.z = z;
-    };
-
-    // torso: folded on the ground, straightening to a slight lean as he stands
-    const g = GAIT;
-    const torsoPitch = -1.05 * (1 - rise) + g.torsoLean * rise;
-    rot(j.torso, torsoPitch);
-    rot(j.neck, 0.45 * (1 - rise) + 0.06);
-
-    // arms: down and out while prone, swinging with the gait while walking
-    const la = j.leftArm, ra = j.rightArm;
-    if (la) {
-      rot(la.upper, g.armDown + (1 - rise) * 0.9, undefined, g.armOut + (1 - rise) * 0.35);
-      rot(la.elbow, g.elbowBend + (1 - rise) * 0.5);
-    }
-    if (ra) {
-      rot(ra.upper, g.armDown + (1 - rise) * 0.9, undefined, -g.armOut - (1 - rise) * 0.35);
-      rot(ra.elbow, g.elbowBend + (1 - rise) * 0.5);
-    }
     if (j.chain) j.chain.visible = false;
 
-    // ---- legs: straightened under the body, plus the sine gait ----
-    // THE COUNTERS GO ON THE JOINTS THE RIG BAKED THEM INTO.
-    //
-    // assets/rider.js bakes the seated fold into `hip` (+1.48, from RIDING.hip)
-    // and `knee` (-2.34, from RIDING.knee). `thigh` is a CHILD of `hip` and
-    // carries none of it. This code used to write the standing counters to
-    // `thigh` and to `knee`, so the hip kept its full seated fold and the rider
-    // WALKED SITTING -- hips folded, legs up on phantom pegs. MEASURED: the hip
-    // was still at +1.48 rad through the whole walk. `clearAxes` does not help:
-    // it zeroes only y and z, and the seated fold is on x.
-    //
-    // So the counter is applied where the fold is (hip, knee), and the gait swing
-    // is applied on top of the straightened hip via `thigh` -- a child, so the
-    // swing composes with the now-neutral hip instead of fighting the fold.
+    // ---- THE RISE IS LATCHED, NOT READ FROM `this.t` ----
+    // `this.t` resets on every state change, and a rise read from it was thrown
+    // away the instant WALKING began (the rider walked home face-down). It
+    // belongs to the body: it ramps over STAND_TIME and stays at 1.
+    if (standing) w.rise = Math.min(1, (w.rise || 0) + (dt || 0.016) / DIS.STAND_TIME);
+    const rise = standing ? (w.rise || 0) : 0;
+
+    // Every leg starts straight: the seated fold the rig bakes into `hip` is
+    // undone by ASSIGNING hipStand (0), see GAIT.
     for (const side of ['left', 'right']) {
-      const L = j[side + 'Leg'] || (j.legs && j.legs[side]);
-      if (!L) continue;
-      const sgn = side === 'left' ? 1 : -1;
-      if (standing) {
-        const phase = w.gaitPhase + (sgn > 0 ? 0 : Math.PI);
-        const swing = Math.sin(phase) * g.stride;
-        const lift = Math.max(0, Math.cos(phase)) * g.lift;
-        // the hip is STRAIGHTENED (undo the seated fold), then the stride swings
-        // on `thigh`; the knee undoes its own seated bend and folds for the lift.
-        rot(L.hip, g.hipStand);
-        rot(L.thigh, swing * g.thighSwing);
-        rot(L.knee, g.kneeStand - lift * g.kneeBend - Math.max(0, -swing) * g.kneeBend * 0.4);
-      } else {
-        // prone: legs not folded up -- the hip straightens and the leg trails
-        rot(L.hip, g.hipStand + 0.18);
-        rot(L.thigh, 0);
-        rot(L.knee, g.kneeStand - 0.22);
+      const L = j[side + 'Leg'];
+      if (L && L.hip) L.hip.rotation.x = GAIT.hipStand;
+    }
+    if (rise < 1) return this._poseRise(j, rise);
+    this._poseGait(j, dt);
+    return 0;
+  }
+
+  /**
+   * THE GET-UP: a real one, from the way he actually landed, keyframed and
+   * splined (Catmull-Rom, so the body never stops dead between beats).
+   *
+   * FACE DOWN  push up on the arms, knees under to all fours, one foot forward
+   *            into a kneel, drive up off the front thigh with a hand on it
+   * ON HIS BACK  sit up propped on the hands, tuck the feet into a crouch,
+   *            hands on the knees, push up
+   *
+   * Returns the ROOT pitch for the frame (render applies it); the ground clamp
+   * in render puts whatever is lowest -- hands, a knee, the feet -- on the road.
+   */
+  _poseRise(j, u) {
+    const K = this.walk.supine ? RISE_SUPINE : RISE_PRONE;
+    const v = splineKeys(K, u);
+    // [pitch, torso, neck, thighL, kneeL, thighR, kneeR, aLx, aLy, aLz, flexL, aRx, aRy, aRz, flexR]
+    if (j.torso) j.torso.rotation.x = v[1];
+    if (j.neck) j.neck.rotation.x = v[2];
+    const L = j.leftLeg, R = j.rightLeg;
+    if (L) { L.thigh.rotation.x = v[3]; L.knee.rotation.x = v[4]; }
+    if (R) { R.thigh.rotation.x = v[5]; R.knee.rotation.x = v[6]; }
+    armAim(j, 'left', [v[7], v[8], v[9]], [0, 1, 0.35], v[10]);
+    armAim(j, 'right', [v[11], v[12], v[13]], [0, 1, 0.35], v[14]);
+    return v[0];
+  }
+
+  /**
+   * THE WALK / JOG. A gait, not a sine on the thighs:
+   *   - stride from leg length and speed, so the feet do not skate
+   *   - the knee is straight at heel strike and folds most just after toe-off
+   *     (pre-swing into early swing); a jog also flexes the stance knee
+   *   - the pelvis turns with the swinging leg and drops on the swing side; the
+   *     shoulders turn against it; the arms swing opposite their legs and bend
+   *     more as the pace rises
+   *   - the vertical bob is not scripted: the ground clamp in render puts the
+   *     lower foot on the road, so the body is lowest in double support
+   *   - standing still, the phase stops and the stride settles to a stance
+   */
+  _poseGait(j, dt) {
+    const w = this.walk;
+    // TURNING ON THE SPOT IS STEPPING: a body does not swivel on planted feet,
+    // so the turn rate counts as a little walking pace for the legs.
+    const turn = w._lastFacing === undefined ? 0 : Math.abs(wrapPi(w.facing - w._lastFacing)) / Math.max(1e-3, dt || 0.016);
+    w._lastFacing = w.facing;
+    const spd = Math.max(Math.abs(w.speed || 0), Math.min(1.1, turn * 0.45));
+    const move = Math.min(1, spd / 0.8);
+    const jog = Math.max(0, Math.min(1, (spd - 2.0) / 1.6));
+    const A = (0.38 + 0.2 * jog) * move;                        // thigh swing, rad
+    const spec = this.player.rider && this.player.rider.userData.spec;
+    const sc = (this.player.rider && this.player.rider.scale.y) || 1;
+    const leg = spec ? (spec.thigh + spec.shin) * sc : 0.9;
+    const cycle = 4 * leg * Math.sin(Math.max(0.12, A));        // m per full gait cycle
+    if (spd > 0.05) w.gaitPhase = (w.gaitPhase || 0) + (Math.sign(w.speed) || 1) * (2 * Math.PI * spd / cycle) * Math.min(0.05, dt || 0.016);
+    const ph = w.gaitPhase || 0;
+    w.onFootT = (w.onFootT || 0) + (dt || 0.016);
+
+    let pelvisYaw = 0, pelvisRoll = 0;
+    for (const side of ['left', 'right']) {
+      const Lg = j[side + 'Leg'];
+      if (!Lg) continue;
+      const phi = ph + (side === 'left' ? 0 : Math.PI);
+      // peak fold just before mid-swing, so the foot TUCKS UNDER as the thigh
+      // comes through rather than flicking up behind (a sprinter's heel kick)
+      const swingKnee = (0.85 + 0.35 * jog) * move * Math.pow(Math.max(0, Math.cos(phi + Math.PI / 6)), 1.6);
+      const stanceKnee = (0.08 + 0.3 * jog) * move * Math.max(0, -Math.cos(phi));
+      Lg.thigh.rotation.x = -A * Math.sin(phi);                  // (thigh + is BACK in this rig: measured)
+      Lg.knee.rotation.x = GAIT.kneeStand * (1 - move) + 0.06 + swingKnee + stanceKnee;
+      if (side === 'left') {
+        pelvisYaw = -0.11 * (A / 0.36) * Math.sin(phi);          // the left hip comes forward with the left leg
+        pelvisRoll = -0.05 * move * Math.cos(phi);               // and drops while that leg swings
       }
     }
-
-    // ---- the gait clock ----
-    // Advanced HERE, off the walker's actual ground speed, so the feet do not
-    // slide when the walker is moving slowly and do not march on the spot when
-    // the player is idle.
-    const cadence = g.cadence * Math.max(0.35, Math.abs(w.speed) / DIS.WALK_SPEED);
-    if (standing) w.gaitPhase = (w.gaitPhase || 0) + cadence * Math.min(0.05, dt || 0.016);
+    if (j.pelvis) { j.pelvis.rotation.y += pelvisYaw; j.pelvis.rotation.z += pelvisRoll; }
+    for (const side of ['left', 'right']) {
+      const Lg = j[side + 'Leg'];
+      if (Lg && Lg.hip) Lg.hip.rotation.z -= pelvisRoll;          // legs stay plumb under the drop
+    }
+    // standing still: weight on one leg, not two locked knees
+    if (move < 0.5) contrapposto(j, (1 - move * 2) * 0.6, 'right');
+    // THE STAGGER: the first second on his feet after a wreck is not steady
+    const dazed = Math.exp(-(w.onFootT || 0) * 2.2);
+    if (j.torso) {
+      j.torso.rotation.x = 0.05 + 0.1 * jog + 0.05 * move + 0.02 * Math.sin(w.onFootT * 1.7);
+      j.torso.rotation.y -= pelvisYaw * 1.25;
+      j.torso.rotation.z -= pelvisRoll * 0.6 - 0.1 * dazed * Math.sin(w.onFootT * 7);
+    }
+    if (j.neck) {
+      j.neck.rotation.x = 0.04 + 0.12 * dazed;
+      j.neck.rotation.y -= -pelvisYaw * 1.0 + 0.25 * dazed * Math.sin(w.onFootT * 9);   // shaking it off
+    }
+    // arms opposite their legs; bent more as the pace rises, forward swing bends most
+    const armSw = (0.32 + 0.3 * jog) * move;
+    for (const [side, s, off] of [['left', 1, 0], ['right', -1, Math.PI]]) {
+      const sw = Math.sin(ph + off);
+      const flex = 0.25 + 1.15 * jog + 0.3 * move * Math.max(0, -sw);
+      armAim(j, side, [s * (0.12 + 0.08 * jog), -1, -armSw * sw], [0, 0.3, 1], flex);
+    }
   }
+
 
   poseMount(j, m) {
     const { kStep, kLift, kOver, kSettle, side } = m;

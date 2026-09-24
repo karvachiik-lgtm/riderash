@@ -70,6 +70,7 @@ export function setLanePlan(mapId, lenMul = 1) {
     stretches: P.stretches.map(([s, r, l]) => [s * lenMul, r, l]),
     crossings: P.crossings.map((s) => s * lenMul),
   };
+  plan.medians = buildMedians(plan);
   return true;
 }
 export function lanePlanKey() { return planKey; }
@@ -138,6 +139,38 @@ export function laneEvents() {
   }
   return out;
 }
+
+// ---- MEDIANS ----------------------------------------------------------------
+// Road Rash's roads had BRIEF divided sections. A raised concrete divider
+// runs down the middle of each four-lane stretch -- its middle 60%, at least
+// 300 m of it -- with a gap either side of any crossroads. Where the divider
+// stands, nobody (rider, traffic, AI) crosses the centreline.
+export const MEDIAN_HALF = 0.45;          // half-width of the barrier itself
+function buildMedians(P) {
+  const out = [];
+  const S = P.stretches;
+  for (let i = 0; i < S.length; i++) {
+    if (S[i][1] < 2 || S[i][2] < 2) continue;
+    const a = S[i][0] + TAPER, b = (i + 1 < S.length ? S[i + 1][0] : a + 3000) - TAPER;
+    const len = b - a;
+    if (len < 300) continue;
+    const pad = len * 0.2;
+    let segs = [[a + pad, b - pad]];
+    for (const c of P.crossings) {
+      segs = segs.flatMap(([x, y]) => (c + 40 < x || c - 40 > y ? [[x, y]] : [[x, c - 40], [c + 40, y]].filter(([u, v]) => v - u > 60)));
+    }
+    out.push(...segs);
+  }
+  return out;
+}
+/** Is there a median at s? */
+export function medianAt(s) {
+  const M = plan.medians || [];
+  for (const [a, b] of M) if (s >= a && s <= b) return true;
+  return false;
+}
+/** The median runs (for building the barrier and its end markers). */
+export function medians() { return plan.medians || []; }
 
 /** Crossroads along the course (distances). */
 export function crossings() { return plan.crossings; }

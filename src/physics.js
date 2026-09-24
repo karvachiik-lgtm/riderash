@@ -30,7 +30,7 @@ import { centreAt, centreTangent, headAt } from './level.js';
 const CFG_ROAD_W_HALF = CFG.ROAD_W / 2;
 // THE EDGE MOVES (lanes.js): the tarmac edge on the side a body is on, at its
 // distance. Open at a crossroads, where the cross road's deck is tarmac too.
-import { edgeAt, crossingNear } from './lanes.js';
+import { edgeAt, crossingNear, medianAt, MEDIAN_HALF } from './lanes.js';
 function edgeFor(s, lateral) {
   const e = edgeAt(Math.max(0, s || 0), lateral >= 0 ? 1 : -1);
   // a little extra room at a crossroads (no kerb or rail there), not so much
@@ -1713,7 +1713,24 @@ export class BikePhys {
     // which is why scraping a wall at a shallow angle is survivable and hitting
     // it square is not.
     const wall = halfRoad + CFG_KERB_W + 0.9;
-    const railHit = this.hitRail(wall);
+    let railHit = this.hitRail(wall);
+    // THE MEDIAN (lanes.js): a divided section's barrier is a wall on the
+    // centreline. The side a body is kept on is the one it was last on, so it
+    // meets the barrier from its own carriageway rather than teleporting.
+    const medLim = MEDIAN_HALF + 0.35;
+    if (medianAt(this.s) && Math.abs(this.lateral) < medLim) {
+      const side = this._medSide || Math.sign(this.lateral) || 1;
+      this.lateral = side * medLim;
+      const vn = -this.lateralV * side;
+      if (vn > 0) {
+        this.lateralV += side * vn * (1 + PHYS.WALL_RESTITUTION);
+        this.speed *= (1 - Math.min(0.35, vn * 0.02));
+        this.yawRate -= side * vn * 0.05;
+        this.contactImpulse = vn;
+        railHit = Math.max(railHit, vn);
+      }
+    }
+    if (Math.abs(this.lateral) >= medLim) this._medSide = Math.sign(this.lateral);
     this.hitWall = railHit > 0.4;
 
     // ---- 4b. AIRBORNE ------------------------------------------------------

@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { CFG, PAL } from './config.js';
 import { texMaterial, getTexture } from './textures.js';
-import { edgeAt, lanesAt, LANE, crossings, CROSS_HALF } from './lanes.js';
+import { edgeAt, lanesAt, LANE, crossings, CROSS_HALF, medians, MEDIAN_HALF } from './lanes.js';
 
 // ---------------------------------------------------------------------------
 // ASPHALT IN DAYLIGHT, NOT A WET MIRROR.
@@ -386,6 +386,54 @@ export function buildRoad() {
   laneInst.count = li;
   laneInst.instanceMatrix.needsUpdate = true;
   g.add(laneInst);
+
+  // --- MEDIANS: a concrete jersey barrier down the centreline of the divided
+  // sections (lanes.js), one instanced segment per SEG, with a striped
+  // end block at each end where the road stops being divided.
+  {
+    const w = MEDIAN_HALF, sh = new THREE.Shape();
+    // the jersey profile: a wide foot, a sloped face, a narrow cap
+    sh.moveTo(-w, 0); sh.lineTo(-w, 0.08); sh.lineTo(-w * 0.62, 0.3); sh.lineTo(-w * 0.34, 0.82);
+    sh.lineTo(w * 0.34, 0.82); sh.lineTo(w * 0.62, 0.3); sh.lineTo(w, 0.08); sh.lineTo(w, 0); sh.lineTo(-w, 0);
+    const geo = new THREE.ExtrudeGeometry(sh, { depth: SEG + 0.04, bevelEnabled: false });
+    geo.translate(0, 0, -(SEG + 0.04) / 2);
+    const conc = mat(0xb9b4aa, 0.9, 0.02); conc.name = 'stone';
+    const runs = medians();
+    const count = runs.reduce((a, [x, y]) => a + Math.ceil((y - x) / SEG) + 1, 0);
+    if (count > 0) {
+      const inst = new THREE.InstancedMesh(geo, conc, count);
+      inst.castShadow = true; inst.receiveShadow = true;
+      let k = 0;
+      for (const [a, b] of runs) {
+        for (let sM = a + SEG / 2; sM < b; sM += SEG) {
+          const c = centreAt(-sM), t = centreTangent(-sM);
+          dp.set(c.x, c.y, c.z);
+          dq.setFromEuler(new THREE.Euler(0, Math.atan2(t.x, t.z), 0));
+          dm.compose(dp, dq, ds.set(1, 1, 1));
+          inst.setMatrixAt(k++, dm);
+        }
+      }
+      inst.count = k;
+      inst.instanceMatrix.needsUpdate = true;
+      g.add(inst);
+      // end blocks: yellow and black, facing the traffic that meets them
+      const endM = mat(0xf2c313, 0.6, 0.05); endM.name = 'stone';
+      const stripeM = mat(0x151515, 0.6, 0.05); stripeM.name = 'stone';
+      for (const [a, b] of runs) for (const sE of [a, b]) {
+        const c = centreAt(-sE), t = centreTangent(-sE);
+        const blk = new THREE.Mesh(new THREE.BoxGeometry(w * 2.1, 0.95, 0.5), endM);
+        blk.position.set(c.x, c.y + 0.475, c.z);
+        blk.rotation.y = Math.atan2(t.x, t.z);
+        blk.castShadow = true;
+        for (let q = -1; q <= 1; q++) {
+          const st = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.8, 0.52), stripeM);
+          st.position.set(q * w * 0.6, 0, 0); st.rotation.z = 0.6;
+          blk.add(st);
+        }
+        g.add(blk);
+      }
+    }
+  }
 
   // --- CROSSROADS: the cross road's deck running out both sides, a stop line
   // across our road either side of it, and zebra stripes (lanes.js crossings).

@@ -33,7 +33,7 @@ import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { CFG } from './config.js';
 import { centreAt, centreTangent } from './level.js';
-import { edgeAt, openLanes, LANE } from './lanes.js';
+import { edgeAt, openLanes, LANE, medianAt, MEDIAN_HALF } from './lanes.js';
 import genSedan from '../assets/sedan.js';
 import genPickup from '../assets/pickup_truck.js';
 import genVan from '../assets/panel_van.js';
@@ -388,7 +388,14 @@ export function updateTraffic(traffic, playerS, dt, t = 0, riders = null) {
     u.lane = laneFor(u);                          // lanes open and close along the road
     const eR = edgeAt(Math.max(0, u.s), 1), eL = edgeAt(Math.max(0, u.s), -1);
     const lane = u.lane + u.swerve + Math.sin(t * 0.55 + u.weave) * amp;
-    const want = Math.max(-eL + u.halfW + 0.1, Math.min(eR - u.halfW - 0.1, lane));
+    let want = Math.max(-eL + u.halfW + 0.1, Math.min(eR - u.halfW - 0.1, lane));
+    // a divided section: stay on your own side of the barrier (look ahead so
+    // a car over the line is back before the barrier starts)
+    const side = u.dir > 0 ? -1 : 1, look = u.s + (u.dir > 0 ? -1 : 1) * 60;
+    if (medianAt(u.s) || medianAt(look)) {
+      const inner = MEDIAN_HALF + 0.35 + u.halfW;
+      if (want * side < inner) want = side * inner;
+    }
     // LATERAL INERTIA. The lane position used to be written straight from the
     // target, so a swerve or a pass began and ended with no build-up -- a car
     // slid sideways like a cursor. A car is a mass on four tyres: a damped

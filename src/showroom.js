@@ -23,12 +23,12 @@
 import * as THREE from 'three';
 import { makeSpec, BUILDS, makeLook, LOOK_OPTIONS } from './bodyspec.js';
 import { SCENES, buildScene, disposeScene } from './showscenes.js';
-import { FLAG_OUTFITS, flagOutfitSpec } from './flagger.js';
+import { FLAG_OUTFITS, flagOutfitSpec, buildKeys } from './flagger.js';
 import { cloneWithJoints } from './rigclone.js';
 import { RIDING } from './reach.js';
 import { CFG } from './config.js';
 import { ATTACKS } from './combat.js';
-import { clearAxes, applyAction, poseSeated, poseStanding, poseCombat, solveSeat, actionDuration, armAim, contrapposto } from './riderpose.js';
+import { clearAxes, applyAction, poseSeated, poseStanding, poseCombat, solveSeat, actionDuration, armAim, contrapposto, confident } from './riderpose.js';
 // The race's own rider builder. assets/rider.js may not import anything, but it
 // may be imported: building the body here, from the live spec, is what makes a
 // slider change the figure rather than just the numbers under it.
@@ -108,12 +108,13 @@ const ANIMS = [
   { key: 'headbang', label: 'Headbang', stance: 'stand', emote: true },
   { key: 'flex', label: 'Flex', stance: 'stand', emote: true },
   { key: 'spin', label: 'Spin', stance: 'stand', emote: true },
+  { key: 'keys', label: 'Twirl keys', stance: 'stand', emote: true },
 ];
 // Loop lengths (s), each ending in a short rest so the motion reads as a move.
 // The chain's loop is long enough to watch it settle and sway after the crack
 // (a 1.6 m chain takes ~1.5 s to stop swinging).
 const LOOP = { idle: 4, walk: 1.2, punch: 1.1, kick: 1.3, chain: 2.4, grab: 2.6, hit: 1.6, tuck: 3.2,
-  wave: 2.4, victory: 2.0, groove: 2.0, robot: 3.2, guitar: 2.4, headbang: 1.6, flex: 3.0, spin: 2.6 };
+  wave: 2.4, victory: 2.0, groove: 2.0, robot: 3.2, guitar: 2.4, headbang: 1.6, flex: 3.0, spin: 2.6, keys: 4 };
 
 // One-click starting points, so a player can land on a character and tweak it
 // instead of assembling one from four sliders and a palette.
@@ -937,7 +938,17 @@ export class Showroom {
       b.rotation.y = 0;
       if (j.pelvis) j.pelvis.rotation.z = 0;
       // a feminine figure at rest stands in contrapposto
-      if (this.anim === 'idle' && this.spec.look && this.spec.look.figure === 'f') { contrapposto(j, 1, 'right'); b.position.y -= 0.008; }
+      if (this.anim === 'idle' && this.spec.look && this.spec.look.figure === 'f') { contrapposto(j, 1, 'right'); confident(j); b.position.y -= 0.008; }
+      // the key chain lives on the right hand only while it is being twirled
+      if (this.anim === 'keys') {
+        if (!this._keys) this._keys = buildKeys();
+        const fore = j.rightArm && j.rightArm.fore;
+        if (fore && this._keys.parent !== fore) {
+          fore.add(this._keys);
+          this._keys.position.set(0, -this.spec.forearm - this.spec.hand * 0.6, this.spec.hand * 0.35);
+        }
+        this._keys.userData.arm.rotation.x = -this._clock * 13;
+      } else if (this._keys && this._keys.parent) this._keys.removeFromParent();
       const emote = EMOTES[this.anim];
       if (emote) { j.__chainAlwaysOut = false; if (j.chain) j.chain.visible = false; emote(j, t, b, this.spec); return; }
     } else {
@@ -1226,6 +1237,16 @@ const EMOTES = {
       squat(j, 0.22, b, S);
       if (j.torso) j.torso.rotation.x += 0.15 + 0.03 * Math.sin(t * 30);
     }
+  },
+  keys(j, t, b, S) {
+    // the rowdy stance: weight on one leg, chest up, hand on the hip, keys
+    // whirling round a finger held out in front
+    contrapposto(j, 1, 'right');
+    confident(j);
+    b.position.y -= 0.008;
+    armAim(j, 'right', [-0.3, -0.9, 0.3], [0, 0.2, 1], 1.35);
+    armAim(j, 'left', [0.7, -0.62, -0.2], [-0.8, 0.2, 0.3], 1.9);
+    if (j.neck) j.neck.rotation.z = 0.12;
   },
   spin(j, t, b, S) {
     const k = sm(t / 1.1);

@@ -812,3 +812,18 @@ export function contrapposto(j, amt = 1, relaxed = 'right') {
   if (j.torso) j.torso.rotation.z -= a * 1.3;          // shoulders tilt the other way
   if (j.neck) j.neck.rotation.z += a * 0.7;            // head levels against them
 }
+
+/**
+ * A CONFIDENT STANCE: chest up, shoulders back, chin lifted, arms a touch
+ * behind the body line -- the opposite of a slouch. Layer after poseStanding
+ * (and contrapposto).
+ */
+export function confident(j, amt = 1) {
+  if (!j || amt <= 0) return;
+  if (j.torso) j.torso.rotation.x -= 0.11 * amt;      // (+x leans forward)
+  if (j.neck) j.neck.rotation.x -= 0.1 * amt;         // chin up
+  for (const side of ['left', 'right']) {
+    const A = j[side + 'Arm'] || (j.arms && j.arms[side]);
+    if (A && A.upper) A.upper.rotation.x += 0.1 * amt;   // arms back with the shoulders
+  }
+}

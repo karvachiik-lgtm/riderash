@@ -276,18 +276,21 @@ export default function (THREE) {
     const hr = S.pelvisW * (sw ? 0.5 : 0.54);
     const hg = new THREE.SphereGeometry(hr, 36, 28);
     {
-      const p = hg.attributes.position, B = 0.42 * L.seat;
+      const p = hg.attributes.position, B = 0.34 * L.seat;
       for (let i = 0; i < p.count; i++) {
         const x = p.getX(i) / hr, y = p.getY(i) / hr, z = p.getZ(i) / hr;
         if (z > 0.2) continue;                      // the front is left alone
         const phi = Math.atan2(x, -z);              // 0 = straight back
-        let w = 0;
+        // two BROAD lobes joined by a soft union (1 - (1-a)(1-b)): one round
+        // mass with a gentle centre line, not two bulbs meeting at points
+        let u = 1;
         for (const sd of [-1, 1]) {
-          const dp = (phi - sd * 0.5) / 0.95, dy = y + 0.3, sg = dy > 0 ? 1.1 : 0.8;
-          w = Math.max(w, dome(dp * dp + (dy / sg) * (dy / sg)));
+          const dp = (phi - sd * 0.42) / 1.25, dy = y + 0.28, sg = dy > 0 ? 1.25 : 0.95;
+          u *= 1 - dome(dp * dp + (dy / sg) * (dy / sg));
         }
+        const w = 1 - u;
         const k = 1 + B * w;
-        p.setXYZ(i, p.getX(i) * (1 + B * w * 0.35), p.getY(i) + w * B * 0.08 * hr, p.getZ(i) * k);
+        p.setXYZ(i, p.getX(i) * (1 + B * w * 0.2), p.getY(i) + w * B * 0.05 * hr, p.getZ(i) * k);
       }
       hg.computeVertexNormals();
     }
@@ -492,8 +495,11 @@ export default function (THREE) {
     const geo = new THREE.LatheGeometry(pts, 8);
     geo.rotateZ(Math.PI / 2);
     // a dress is cut on straps: the shoulders are bare skin, the straps cross them
-    const yoke = mk(geo, TOP === 'crop' ? cotton : strapped ? skin : torsoMat, 0, T * 0.94, TD * 0.03);
-    yoke.scale.set(1, T * (FEM ? 0.11 : 0.15), TD * (FEM ? 0.4 : 0.46));
+    // sleeveless tops leave the shoulders bare (on a feminine figure the
+    // slimmer trunk otherwise showed the bar as a slab of cloth)
+    const bareShoulders = strapped || (FEM && bareArms);
+    const yoke = mk(geo, TOP === 'crop' ? cotton : bareShoulders ? skin : torsoMat, 0, T * 0.94, TD * 0.03);
+    yoke.scale.set(1, T * (FEM ? 0.08 : 0.15), TD * (FEM ? 0.22 : 0.46));
     torso.add(yoke);
     if (strapped) {
       for (const s of [-1, 1]) {

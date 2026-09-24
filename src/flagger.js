@@ -16,7 +16,7 @@ import * as THREE from 'three';
 import { CFG } from './config.js';
 import { centreAt, headAt } from './level.js';
 import { makeSpec } from './bodyspec.js';
-import { poseStanding, armAim, contrapposto } from './riderpose.js';
+import { poseStanding, armAim, contrapposto, confident } from './riderpose.js';
 import { mergeJoints } from '../assetlib.js';
 import buildRider from '../assets/rider.js';
 
@@ -83,10 +83,50 @@ export const FLAG_OUTFITS = {
     colors: { jacket: 0x4a6a9a, pants: 0xf0efe8, accent: 0xd46a9a },
     look: { top: 'denimjacket', bottom: 'skirt', hair: 'ponytail', hairColor: 0x1a1512, glasses: 'shades', chain: 'gold',
             shoes: 'sneakers', bootColor: 0xf0efe8, earring: true } },
+  // ROWDY: no flag. Hand on her hip, a key chain spinning round one finger,
+  // and at GO a fist in the air.
+  Rowdy: { height: 1.72, skin: 0xe0ac87, pose: 'rowdy', seat: 1.5,
+    colors: { jacket: 0x121314, pants: 0x3b4a63, accent: 0xb3261e },
+    look: { top: 'vest', bottom: 'shorts', hair: 'long', hairColor: 0x6a1a1a, tattoo: 'sleeve', inkColor: 0x121212,
+            glasses: 'shades', scarf: 'bandana', scarfColor: 0xb3261e, chain: 'silver', earring: true,
+            gloves: 'fingerless', gloveColor: 0x121314, shoes: 'boots', bootColor: 0x121314 } },
 };
 // Race to race, alternate the looks so two races in a row never feel alike.
-export const FLAG_OUTFIT_ORDER = ['Sundress', 'Stars & Stripes', 'Grid Queen', 'Cowgirl', 'Summer Denim', 'Beach Day',
-  'Polka Dot', 'Tropical', 'Rock Chick', 'Denim Days', 'Riviera'];
+export const FLAG_OUTFIT_ORDER = ['Sundress', 'Rowdy', 'Stars & Stripes', 'Grid Queen', 'Cowgirl', 'Summer Denim',
+  'Beach Day', 'Polka Dot', 'Tropical', 'Rock Chick', 'Denim Days', 'Riviera'];
+
+/**
+ * A key chain for twirling: a ring on the finger, a short chain, a bottle
+ * opener fob and two keys. Returns the pivot group; spin it about its local X.
+ */
+export function buildKeys() {
+  const pivot = new THREE.Group();
+  const steel = new THREE.MeshStandardMaterial({ color: 0xc9ced4, roughness: 0.25, metalness: 0.95 });
+  const brass = new THREE.MeshStandardMaterial({ color: 0xc9a04a, roughness: 0.3, metalness: 0.9 });
+  const red = new THREE.MeshStandardMaterial({ color: 0xb3261e, roughness: 0.5 });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.018, 0.0035, 6, 16), steel);
+  ring.rotation.y = Math.PI / 2;
+  pivot.add(ring);
+  const arm = new THREE.Group();       // the part that swings round
+  pivot.add(arm);
+  for (let k = 0; k < 5; k++) {
+    const l = new THREE.Mesh(new THREE.TorusGeometry(0.007, 0.0022, 4, 8), steel);
+    l.position.set(0, -0.022 - k * 0.012, 0);
+    l.rotation.y = (k % 2) * Math.PI / 2;
+    arm.add(l);
+  }
+  const fob = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.045, 0.022), red);
+  fob.position.set(0, -0.1, 0.006); arm.add(fob);
+  for (const [dz, m] of [[-0.01, brass], [0.012, steel]]) {
+    const key = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.05, 0.012), m);
+    key.position.set(0, -0.105, dz); key.rotation.x = dz * 12; arm.add(key);
+    const bow = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.004, 10), m);
+    bow.rotation.z = Math.PI / 2; bow.position.set(0, -0.078, dz); arm.add(bow);
+  }
+  pivot.userData.arm = arm;
+  pivot.scale.setScalar(1.7);   // readable from the chase camera
+  return pivot;
+}
 
 /** A full spec input for an outfit (the showroom uses this too). */
 export function flagOutfitSpec(name) {
@@ -168,6 +208,15 @@ export class Flagger {
     hand.add(cloth);
     this.flagHand = hand;
     this.flagCloth = cloth;
+    // the rowdy starter swaps the flag for keys on her finger
+    this.rowdy = (FLAG_OUTFITS[this.outfit] || {}).pose === 'rowdy';
+    pole.visible = cloth.visible = !this.rowdy;
+    this.keys = null;
+    if (this.rowdy) {
+      this.keys = buildKeys();
+      this.keys.position.set(0, -S.hand * 0.1, S.hand * 0.35);   // at the index finger
+      hand.add(this.keys);
+    }
   }
 
   /** New race: a new outfit, back to her spot in front of the grid, flag up. */
@@ -212,7 +261,7 @@ export class Flagger {
     poseStanding(j, clearing ? since * 14 : 0, clearing ? 1 : 0);
     b.position.y = clearing ? Math.abs(Math.sin(since * 14)) * 0.04 : 0;
     // standing still, she stands on one leg: contrapposto
-    if (!clearing) { contrapposto(j, 1, 'left'); b.position.y -= 0.008; }
+    if (!clearing) { contrapposto(j, 1, 'left'); confident(j); b.position.y -= 0.008; }
     if (clearing) {
       // run side-on, toward the verge (+lateral is her left as she faces the grid)
       this.body.rotation.y = Math.PI / 2 * Math.min(1, (since - FLAGGER.DROP_T * 0.6) / 0.15);
@@ -225,6 +274,21 @@ export class Flagger {
     if (!clearing) this.body.rotation.y = 0;
     // the flag arm
     let wave = 0;
+    if (this.rowdy) {
+      // forearm up in front, the chain whirling round her finger; at GO a
+      // fist punched up at the pack, then back to twirling on the verge
+      if (since >= 0 && since < 0.9) {
+        armAim(j, 'right', [-0.25, 0.9, 0.3], [0, 0, 1], 0.35);
+        if (j.torso) j.torso.rotation.x -= 0.05;
+      } else {
+        armAim(j, 'right', [-0.3, -0.9, 0.3], [0, 0.2, 1], 1.35);
+        if (j.torso) j.torso.rotation.z += 0.04;
+      }
+      if (this.keys) this.keys.userData.arm.rotation.x = -this.t * 13;
+      armAim(j, 'left', [0.7, -0.62, -0.2], [-0.8, 0.2, 0.3], 1.9);
+      if (j.neck) { j.neck.rotation.x -= 0.02; j.neck.rotation.z = 0.12; }
+      return;
+    }
     if (since < 0) {
       // the hold: flag high, swung side to side, faster as the count runs out
       const rate = 5 + (CFG.COUNTDOWN - Math.max(0, countdown)) * 1.2;

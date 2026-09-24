@@ -12,6 +12,7 @@ import { TrackDress } from './trackdress.js';
 import { setLanePlan } from './lanes.js';
 import { CrossTraffic } from './crosstraffic.js';
 import { placeHazards, HazardView } from './hazards.js';
+import { Animals, ANIMALS } from './animals.js';
 import { Flagger } from './flagger.js';
 import { trafficContact, applyTrafficHit } from './traffic.js';
 import { buildLighting, followSun } from './lighting.js';
@@ -167,6 +168,7 @@ let trackDress = null;     // chevrons, rails, warnings, countdown boards, start
 let flagger = null;        // the starter in the road with the chequered flag
 let crossTraffic = null;   // cars coming across at the crossroads
 let hazardView = null;     // oil slicks and gravel on the deck
+let animals = null;        // cows and deer on the rural roads
 let roadGroup = null, roadsideGroup = null;   // rebuilt when a course's lane layout differs (lanes.js)
 let raceCounter = 0;       // races started this session, so a replayed event gets a new outfit
 
@@ -474,6 +476,7 @@ async function init() {
   trackDress = new TrackDress(scene);
   try { flagger = new Flagger(scene); } catch (e) { console.warn('[riderash] flagger:', e); flagger = null; }
   try { hazardView = new HazardView(scene); } catch (e) { console.warn('[riderash] hazards:', e); }
+  try { animals = new Animals(scene); window.__ANIMALS__ = animals; } catch (e) { console.warn('[riderash] animals:', e); }
   try { crossTraffic = new CrossTraffic(scene); window.__CROSS__ = crossTraffic; } catch (e) { console.warn('[riderash] cross traffic:', e); crossTraffic = null; }
   world.traffic = traffic;
 
@@ -1669,6 +1672,33 @@ function stepGame(dt) {
     state.lastHazard = hz;
   }
 
+  // COWS AND DEER: in the road on the rural courses
+  if (animals && !window.__TRAFFIC_OFF__) {
+    animals.update(dt, spine, player.phys.s, state.finishS, state.countdown <= 0);
+    const k = animals.ahead(player.phys);
+    if (k && k !== state.lastAnimal) state.warn = k === 'cow' ? 'COW!' : 'DEER!';
+    state.lastAnimal = k;
+    for (const rd of world.parts) {
+      const f = rd.fighter;
+      if (!rd.phys || !f || f.down || f.invuln > 0) continue;
+      const hit = animals.contact(rd.phys);
+      if (!hit) continue;
+      const isP = rd === player;
+      const dist = Math.hypot(rd.phys.s - player.phys.s, rd.phys.lateral - player.phys.lateral);
+      const vol = isP ? 1 : Math.max(0, 1 - dist / 140);
+      if (vol > 0.03) audio.oneShot('impact', vol, 0.8);
+      rd.phys.speed *= 0.4;
+      if (hit.closing < ANIMALS.HIT_WIPE) { if (isP) state.warn = 'BUMPED A ' + hit.animal.userData.kind.toUpperCase(); continue; }
+      const who = isP ? 'player' : (rd.name || 'rival');
+      (state.wrecksBy = state.wrecksBy || {})[who] = (state.wrecksBy[who] || 0) + 1;
+      if ((f.hold || f.heldBy) && f._endHold) f._endHold('break', hooks);
+      f.down = true; f.downTimer = CFG.WRECK_TIME; f.active = null; f.invuln = CFG.INVULN_AFTER;
+      rd.phys.yawOffset += (Math.random() - 0.5) * 1.6;
+      state.trafficWrecks = (state.trafficWrecks || 0) + 1;
+      if (isP) { state.warn = 'HIT A ' + hit.animal.userData.kind.toUpperCase(); state.shake = Math.min(1.4, state.shake + 0.8); hooks.onImpact?.(1.0); }
+    }
+  }
+
   // CROSS TRAFFIC at the crossroads: T-bones are wipeouts above a walking pace
   if (crossTraffic && !window.__TRAFFIC_OFF__) {
     crossTraffic.update(dt, world.parts.filter((r) => r.phys).map((r) => r.phys.s));
@@ -1883,6 +1913,7 @@ window.__START__ = () => {
   try { if (trackDress) window.__TRACKDRESS__ = trackDress.build(state.finishS); } catch (e) { console.warn('[riderash] trackdress:', e); }
   // a different starter outfit every race (window.__FLAGGER_OUTFIT__ pins one)
   if (crossTraffic) crossTraffic.reset();
+  if (animals) animals.reset();
   try { window.__HAZARDS__ = placeHazards(spine, state.finishS); if (hazardView) hazardView.build(); } catch (e) { console.warn('[riderash] hazards:', e); }
   if (flagger) {
     flagger.reset(window.__FLAGGER_OUTFIT__ != null ? window.__FLAGGER_OUTFIT__ : (career.state.race || 0) + (career.state.wins || 0) * 3 + raceCounter++);

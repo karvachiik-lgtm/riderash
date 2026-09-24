@@ -253,7 +253,7 @@ function clearSpot(cars, u, s, step) {
     let blocked = false;
     for (const o of cars) {
       const v = o.userData;
-      if (v === u || v.dir !== u.dir) continue;
+      if (v === u || v.off || v.dir !== u.dir) continue;
       if (Math.abs(v.s - s) < v.halfL + u.halfL + 30) { blocked = true; break; }
     }
     if (!blocked) return s;
@@ -271,6 +271,7 @@ export function updateTraffic(traffic, playerS, dt, t = 0, riders = null) {
 
   for (const car of cars) {
     const u = car.userData;
+    if (u.off) continue;                          // parked for this race's traffic level
     u.prevS = u.s;
     u.prevAt = u.at;
     // ---- target speed: cruise, then the vehicle (or rider) ahead ---------
@@ -328,10 +329,17 @@ export function updateTraffic(traffic, playerS, dt, t = 0, riders = null) {
 
     // ---- recycle around the player, clear of other vehicles --------------
     let moved = false;
-    if (u.dir > 0 && u.s < playerS - 120) { u.s = clearSpot(cars, u, playerS + 700 + Math.random() * 500, 45); moved = true; }
-    else if (u.dir > 0 && u.s > playerS + 1400) { u.s = clearSpot(cars, u, playerS + 200 + Math.random() * 400, 45); moved = true; }
-    else if (u.dir < 0 && u.s < playerS - 300) { u.s = clearSpot(cars, u, playerS + 260 + Math.random() * 500, 45); moved = true; }
-    else if (u.dir < 0 && u.s > playerS + 1000) { u.s = clearSpot(cars, u, playerS - 100 + Math.random() * 200, -45); moved = true; }
+    // RECYCLED OUT OF SIGHT. Cars used to be re-placed 200-760 m ahead, and a
+    // same-direction car that got too far ahead was dropped within 100 m of the
+    // player -- right beside him, out of nowhere. The fog is thin (exp2 density
+    // ~0.0004 leaves ~85% visible at 1 km), so it cannot hide a pop; distance
+    // does: past ~1 km a car is a pixel or two. Ahead: 1.0-1.6 km. Behind: well
+    // behind the camera, which looks forward.
+    const far = CFG.TRAFFIC_SPAWN_AHEAD;
+    if (u.dir > 0 && u.s < playerS - 120) { u.s = clearSpot(cars, u, playerS + far + Math.random() * 600, 45); moved = true; }
+    else if (u.dir > 0 && u.s > playerS + far + 900) { u.s = clearSpot(cars, u, playerS + far + Math.random() * 300, 45); moved = true; }
+    else if (u.dir < 0 && u.s < playerS - 300) { u.s = clearSpot(cars, u, playerS + far + Math.random() * 600, 45); moved = true; }
+    else if (u.dir < 0 && u.s > playerS + far + 900) { u.s = clearSpot(cars, u, playerS - 380 - Math.random() * 250, -45); moved = true; }
     u.s = Math.max(10, Math.min(LEN - 10, u.s));
     if (moved) { u.prevS = u.s; u.speed = u.cruise; u.stun = 0; u.at = undefined; }
 
@@ -366,11 +374,44 @@ export function updateTraffic(traffic, playerS, dt, t = 0, riders = null) {
       : u.swerveT > 0 ? -Math.sign(u.lane || 1) * 2.3 : 0;
     u.swerve = (u.swerve || 0) + (swTarget - (u.swerve || 0)) * Math.min(1, dt * 1.2);
     const lane = u.lane + u.swerve + Math.sin(t * 0.55 + u.weave) * amp;
-    const off = Math.max(-half + u.halfW + 0.1, Math.min(half - u.halfW - 0.1, lane));
+    const want = Math.max(-half + u.halfW + 0.1, Math.min(half - u.halfW - 0.1, lane));
+    // LATERAL INERTIA. The lane position used to be written straight from the
+    // target, so a swerve or a pass began and ended with no build-up -- a car
+    // slid sideways like a cursor. A car is a mass on four tyres: a damped
+    // spring toward the lane it wants, with its sideways acceleration capped by
+    // grip (softer for the big, heavy bodies).
+    const heavy = (u.mass || 1500) > 6000;
+    const aMax = heavy ? 1.6 : 2.8;
+    if (moved || u.lp === undefined || !Number.isFinite(u.lp)) { u.lp = want; u.lv = 0; }
+    const aLat = THREE.MathUtils.clamp((want - u.lp) * 2.2 - u.lv * 2.4, -aMax, aMax);
+    u.lv += aLat * dt;
+    u.lp += u.lv * dt;
+    const off = Math.max(-half + u.halfW + 0.05, Math.min(half - u.halfW - 0.05, u.lp));
     car.position.set(c.x + nx * off, c.y, c.z + nz * off);
     // Oncoming cars face the road's geometric tangent (+z, the way they drive);
-    // same-direction ones are flipped. The asset's front is +Z.
-    car.rotation.y = Math.atan2(tg.x, tg.z) + (u.dir > 0 ? 0 : Math.PI);
+    // same-direction ones are flipped. The asset's front is +Z. A car moving
+    // sideways POINTS where it is going: yaw by the angle of its lateral
+    // velocity against its forward speed (sign flips with the direction).
+    const dirSign = u.dir > 0 ? 1 : -1;
+    const dyaw = THREE.MathUtils.clamp(-dirSign * Math.atan2(u.lv, Math.max(3, u.speed)), -0.35, 0.35);
+    car.rotation.y = Math.atan2(tg.x, tg.z) + (u.dir > 0 ? 0 : Math.PI) + dyaw;
+    // BODY MOTION on the springs, on the mesh (the group stays on the road):
+    // roll away from the turn, dive under braking / squat under power, and a
+    // little road jitter that grows with speed. Heavier bodies roll more.
+    const body = car.children[0];
+    if (body) {
+      const aLong = dt > 0 ? (u.speed - (u._lastSpeed ?? u.speed)) / dt : 0;
+      u._lastSpeed = u.speed;
+      u._aL = (u._aL || 0) + (aLong - (u._aL || 0)) * Math.min(1, dt * 6);
+      const rollK = heavy ? 0.022 : 0.012;
+      const j = Math.min(1, u.speed / 25) * (heavy ? 1.4 : 1);
+      const ph = _clock * 11 + (u.weave || 0) * 7;
+      body.rotation.z = THREE.MathUtils.clamp(-dirSign * rollK * aLat, -0.07, 0.07)
+        + Math.sin(ph * 1.3) * 0.004 * j;
+      body.rotation.x = THREE.MathUtils.clamp(-0.008 * u._aL, -0.05, 0.05)
+        + Math.sin(ph * 0.9 + 1.1) * 0.003 * j;
+      body.position.y = (Math.sin(ph) * 0.008 + Math.sin(ph * 2.3 + 0.7) * 0.005) * j;
+    }
     // Sit ON the grade: sample the road at both end axles and pitch to the line
     // between them (same as BikePhys.sampleAxles). Local +z is the front.
     const wh = u.wheelHalf;
@@ -378,7 +419,7 @@ export function updateTraffic(traffic, playerS, dt, t = 0, riders = null) {
     car.rotation.x = -Math.atan2(yF - yR, wh * 2);
     car.position.y = (yF + yR) / 2;
     if (u.prevAt === undefined) u.prevAt = off;
-    u.latV = dt > 0 ? (off - u.prevAt) / dt : 0;
+    u.latV = u.lv;                                // real lateral velocity, for hits
     u.at = off;                                   // lane actually used, for hits
   }
 }
@@ -389,14 +430,20 @@ export function updateTraffic(traffic, playerS, dt, t = 0, riders = null) {
  * re-derived FROM THE DIRECTION: this used to alternate lanes by index, which
  * put some oncoming cars in the player's lane after the first reset.
  */
-export function resetTraffic(traffic, playerS = 0) {
+export function resetTraffic(traffic, playerS = 0, density = 1) {
   if (!traffic || !traffic.userData || !traffic.userData.cars) return;
   const cars = traffic.userData.cars;
+  // TRAFFIC LEVEL. The fleet is built once; each race puts a share of it on
+  // the road (career level: quiet early, heavy late). Parked cars keep
+  // `at === undefined`, which every contact / avoidance query already skips.
+  const active = Math.max(1, Math.round(cars.length * Math.max(0, Math.min(1, density))));
   cars.forEach((car, i) => {
     const u = car.userData;
+    u.off = i >= active;
+    car.visible = !u.off;
     u.s = playerS + 260 + i * 165 + Math.random() * 90;
     u.lane = laneFor(u);
-    u.swerve = 0; u.swerveT = 0; u.passT = 0; u.blockedT = 0;
+    u.swerve = 0; u.swerveT = 0; u.passT = 0; u.blockedT = 0; u.lp = undefined; u.lv = 0;
     u.at = undefined; u.prevAt = undefined; u.prevS = u.s;
     u.speed = u.cruise; u.stun = 0;
     if (u.cd) u.cd.clear();

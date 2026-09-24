@@ -20,7 +20,13 @@
 import { centreAt } from './level.js';
 import { CFG } from './config.js';
 
-const RADAR_M = 130;        // metres of road shown ahead and behind
+const RADAR_M = 130;        // (legacy) metres of road shown ahead and behind
+// ZOOM LEVELS, metres from the centre to the rim. 130 m fixed drew the whole
+// carriageway as one thin stroke -- two lanes read as a single line. Zoomed in
+// (the default) the road is wide enough to show both edges and the centre
+// line; zoomed out it shows the pack. While the player is down or on foot the
+// radar zooms out on its own so he can see where the bike and the field are.
+export const RADAR_ZOOMS = [45, 90, 180, 420];
 const STEP_M = 6;           // sampling interval along the road
 
 export class Radar {
@@ -37,6 +43,24 @@ export class Radar {
     this.ctx.scale(dpr, dpr);
     this.r = this.size / 2;
     this._t = 0;
+    this.zoomIx = 0;              // the player's chosen level
+    this.range = RADAR_ZOOMS[0];  // what is drawn (eases toward the target)
+    this.auto = false;            // true while the game has zoomed it out
+    // + / - are drawn on the lower rim; a tap on the left half zooms out, the
+    // right half zooms in. The canvas takes pointer events for this alone.
+    this.cv.classList.add('pe');
+    this.cv.addEventListener('pointerdown', (e) => {
+      const r = this.cv.getBoundingClientRect();
+      const y = (e.clientY - r.top) / r.height, x = (e.clientX - r.left) / r.width;
+      if (y < 0.62) return;
+      e.preventDefault();
+      this.zoom(x < 0.5 ? +1 : -1);
+    });
+  }
+
+  /** +1 = zoom OUT (more road), -1 = zoom IN. */
+  zoom(dir) {
+    this.zoomIx = Math.max(0, Math.min(RADAR_ZOOMS.length - 1, this.zoomIx + dir));
   }
 
   // world XZ -> radar pixels, rotated so the rider's heading is up.
@@ -84,6 +108,12 @@ export class Radar {
   update(dt, player, rivals, traffic) {
     if (!this.cv || !player) return;
     const g = this.ctx, R = this.r, S = this.size;
+    // AUTO ZOOM-OUT while down or walking: the far level, back to the player's
+    // own level the moment he is riding again.
+    this.auto = !!(player.onFoot || (player.fighter && player.fighter.down));
+    const want = this.auto ? RADAR_ZOOMS[RADAR_ZOOMS.length - 1] : RADAR_ZOOMS[this.zoomIx];
+    this.range += (want - this.range) * Math.min(1, (dt || 0.016) * 4);
+    const RADAR_M = this.range;
     this.scale = R / RADAR_M;
     this._t += dt;
 
@@ -114,23 +144,33 @@ export class Radar {
     }
     if (pts.length >= 4) {
       g.lineJoin = 'round'; g.lineCap = 'round';
-      // the carriageway, at its real width in radar metres
-      g.strokeStyle = 'rgba(126,134,142,0.34)';
-      g.lineWidth = Math.max(3, CFG.ROAD_W * this.scale);
+      // the carriageway, at its real width in radar metres. Zoomed in it gets
+      // pale EDGES and a DASHED centre line -- two lanes, not one line.
+      const roadPx = CFG.ROAD_W * this.scale;
       g.beginPath();
       g.moveTo(pts[0], pts[1]);
       for (let i = 2; i < pts.length; i += 2) g.lineTo(pts[i], pts[i + 1]);
+      if (roadPx > 7) {
+        g.strokeStyle = 'rgba(228,222,210,0.45)';
+        g.lineWidth = roadPx + 2;
+        g.stroke();
+      }
+      g.strokeStyle = roadPx > 7 ? 'rgba(52,56,62,0.95)' : 'rgba(126,134,142,0.34)';
+      g.lineWidth = Math.max(3, roadPx);
       g.stroke();
       // centre line
-      g.strokeStyle = 'rgba(228,222,210,0.30)';
+      g.strokeStyle = roadPx > 7 ? 'rgba(228,222,210,0.6)' : 'rgba(228,222,210,0.30)';
       g.lineWidth = 1;
+      if (roadPx > 7) g.setLineDash([Math.max(2, 3 * this.scale), Math.max(2, 6 * this.scale)]);
       g.stroke();
+      g.setLineDash([]);
     }
 
     // ---- traffic: dull slabs, because they are obstacles and not opponents ----
     if (traffic && traffic.length) {
       g.fillStyle = 'rgba(150,150,156,0.75)';
       for (const car of traffic) {
+        if (!car.visible) continue;
         this._project(car.position.x, car.position.z, px, pz, fwdX, fwdZ, pt);
         if (Math.hypot(pt[0] - R, pt[1] - R) > R - 3) continue;
         g.fillRect(pt[0] - 1.5, pt[1] - 2.5, 3, 5);
@@ -144,7 +184,21 @@ export class Radar {
         if (!r || !r.phys) continue;
         this._project(r.phys.pos.x, r.phys.pos.z, px, pz, fwdX, fwdZ, pt);
         const d = Math.hypot(pt[0] - R, pt[1] - R);
-        if (d > R - 3) continue;
+        if (d > R - 3) {
+          // OFF THE RADAR: a marker on the rim pointing at him. A rider far up
+          // or down the road pins to the top / bottom of the rim.
+          const ds = r.phys.s - p.s;
+          const ang = Math.atan2(pt[0] - R, -(pt[1] - R));
+          const a = Math.abs(ds) > this.range * 1.5 ? (ds > 0 ? 0 : Math.PI) : ang;
+          const rx = R + Math.sin(a) * (R - 6), ry = R - Math.cos(a) * (R - 6);
+          g.fillStyle = '#' + (r.color != null ? r.color.toString(16).padStart(6, '0') : '999999');
+          g.globalAlpha = r.fighter && r.fighter.down ? 0.4 : 1;
+          g.save(); g.translate(rx, ry); g.rotate(a);
+          g.beginPath(); g.moveTo(0, -4); g.lineTo(3.2, 2); g.lineTo(-3.2, 2); g.closePath(); g.fill();
+          g.restore();
+          g.globalAlpha = 1;
+          continue;
+        }
         const hex = '#' + (r.color != null ? r.color.toString(16).padStart(6, '0') : '999999');
         g.fillStyle = hex;
         g.globalAlpha = r.fighter && r.fighter.down ? 0.35 : 1;
@@ -163,6 +217,18 @@ export class Radar {
     g.closePath();
     g.fill();
 
+    // the zoom controls on the lower rim: [-] zooms out (left), [+] in (right),
+    // the current range between them (amber while the game has zoomed out)
+    g.fillStyle = 'rgba(0,0,0,0.45)';
+    g.fillRect(0, S * 0.80, S, S * 0.2);
+    g.fillStyle = 'rgba(232,228,220,0.9)';
+    g.font = `${Math.round(S * 0.13)}px sans-serif`;
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText('\u2212', S * 0.30, S * 0.89);
+    g.fillText('+', S * 0.70, S * 0.89);
+    g.font = `${Math.round(S * 0.075)}px sans-serif`;
+    g.fillStyle = this.auto ? 'rgba(255,190,90,0.95)' : 'rgba(232,228,220,0.6)';
+    g.fillText(`${Math.round(this.range)}m`, S * 0.5, S * 0.89);
     g.restore();
 
     // ---- bezel, and a sweep tick so the thing reads as live even when the

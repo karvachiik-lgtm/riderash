@@ -641,12 +641,25 @@ export function poseCombat(joints, f, phys, time, attacksTable) {
       const sxWant = lateralToBikeX(ik, phys, a.side || f.aimSide || 1);
       const keys = S.limb === 'leg' ? ['leftLeg', 'rightLeg'] : ['left', 'right'];
       let limb = ik.sx[keys[0]] === sxWant ? keys[0] : keys[1];
-      // THE CHAIN STAYS IN THE HAND THAT HOLDS IT (assets/rider.js hangs it
-      // from the right fist). A target on the other side gets a BACKHAND across
-      // the tank: the same keys mirrored, at 0.6 of the reach.
+      // THE CHAIN IS DRAWN WITH THE HAND ON THE TARGET'S SIDE. It is stowed
+      // between swings, so at the start of a swing it comes out in whichever
+      // fist faces the target -- a rider (or cop) on your left gets a forehand
+      // from the left hand, not a weak backhand across the tank. Only once the
+      // swing is under way does it stay in the hand that holds it (a backhand
+      // at 0.6 reach, as before, if the target switches sides mid-swing).
       let cross = 1;
       if (k === 'chain' && joints.chain) {
-        const holder = ['left', 'right'].find((kk) => ik.limbs[kk] && isAncestor(ik.limbs[kk].end, joints.chain));
+        let holder = ['left', 'right'].find((kk) => ik.limbs[kk] && isAncestor(ik.limbs[kk].end, joints.chain));
+        const want = ['left', 'right'].find((kk) => ik.limbs[kk] && ik.sx[kk] === sxWant);
+        if (holder && want && holder !== want && ph < 0.12) {
+          const to = ik.limbs[want].end;
+          const pos = joints.chain.position.clone();
+          pos.x = -pos.x;                                  // the same grip, mirrored
+          to.add(joints.chain);
+          joints.chain.position.copy(pos);
+          if (joints.__chainSim) joints.__chainSim.ready = false;   // re-hang from the new fist
+          holder = want;
+        }
         if (holder) { limb = holder; cross = ik.sx[holder] === sxWant ? 1 : -0.6; }
       }
       // body layer first: it moves the shoulder the arm is solved from

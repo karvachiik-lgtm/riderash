@@ -69,7 +69,9 @@ function asphaltLook(m) {
 // backdrop's beach strips already reach z = +300. Scenery with a random layout
 // (bushes, poles, town, hills) is NOT extended here: shifting their loop starts
 // would re-roll every later random draw and move the whole roadside.
-export const ROAD_BEHIND_SEGS = 19;
+// 100 segments = 800 m of road BEHIND the grid (was 19 = 152 m: the world
+// visibly ended a few seconds behind the start line).
+export const ROAD_BEHIND_SEGS = 100;
 export const ROAD_BEHIND_M = ROAD_BEHIND_SEGS * CFG.SEG;
 
 // One deterministic RNG for the whole world, so the level is the same shape

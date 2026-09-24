@@ -79,7 +79,7 @@ export const SCENERY_TIERS = {
   medium: { visR: 950,   nearR: 220, density: 0.75 },
   low:    { visR: 700,   nearR: 150, density: 0.5 },
 };
-const PRE = 220;            // dress this far BEHIND the start line: the look-back camera sees it
+const PRE = 800;            // dress this far BEHIND the start line (matches the road's 800 m)
 const T0 = 34.5;            // terrain inner edge: the level's verge ends at 35.5 m (level.js)
 const KERB = CFG.ROAD_W / 2 + CFG.KERB_W;   // 6.3 m: nothing may stand inside this
 // Lateral columns of the terrain skirt. Dense near the road where the relief

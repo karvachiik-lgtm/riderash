@@ -33,7 +33,7 @@ export const CFG = {
   // the career schedule (SERIES x lenMul) + ROAD_PAST_FINISH. The maps outgrew a
   // hand-set 5600 m and the road ended before most finish lines.
   ROAD_SEGS: 700,
-  ROAD_PAST_FINISH: 500,  // m of road beyond the longest finish, for the look-ahead
+  ROAD_PAST_FINISH: 1200, // m of road (and scenery) beyond the finish: the world goes on past the line
 
   // --- bike physics ---
   // TOP SPEED IS THE MEASURED TERMINAL SPEED, not a wish.
@@ -157,7 +157,9 @@ export const CFG = {
   TRAFFIC_GAP_MIN: 380,
   TRAFFIC_GAP_SPAN: 620,
   TRAFFIC_SWERVE_RATE: 0.02,   // per s, per eligible car ahead: chance it drifts over the centre line
-  TRAFFIC_FLEET_LEN: 5600, // m of road the fleet is laid over (see buildTraffic)
+  TRAFFIC_BY_LEVEL: [0.55, 0.7, 0.8, 0.9, 1.0], // share of the fleet on the road, career level 1..5
+  TRAFFIC_SPAWN_AHEAD: 1000, // m ahead a recycled car reappears: past where it reads as more than a speck
+  TRAFFIC_FLEET_LEN: 7000, // m of road the fleet is laid over (see buildTraffic)
 
   // --- bike-to-bike contact -------------------------------------------------
   // Contact is scored in the road frame as a CLOSING SPEED along the contact

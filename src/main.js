@@ -1139,8 +1139,99 @@ function updateCameraIdle(dt) {
   camera.lookAt(p.x, p.y + 1.2, p.z - 20);
 }
 
+// ---- RACE STATS -------------------------------------------------------------
+// Everything the results screen reports beyond place and time. Accumulated per
+// frame from state that already exists; nothing here feeds back into the race.
+function freshStats() {
+  return { top: 0, dist: 0, rideT: 0, footT: 0, crashes: 0, nearMiss: 0,
+    trafficSamples: 0, trafficSum: 0, copChases: 0, copKOs: 0, copEscapes: 0 };
+}
+function trackStats(dt) {
+  const st = state.stats || (state.stats = freshStats());
+  const p = player.phys;
+  if (player.onFoot) st.footT += dt; else { st.rideT += dt; st.dist += p.speed * dt; }
+  if (p.speed > st.top) st.top = p.speed;
+  const down = !!player.fighter.down;
+  if (down && !st._wasDown) st.crashes++;
+  st._wasDown = down;
+  // traffic density: cars within 1 km either way, sampled every frame
+  const cars = world.traffic && world.traffic.userData ? world.traffic.userData.cars : null;
+  if (cars && !window.__TRAFFIC_OFF__) {
+    let n = 0;
+    for (const c of cars) {
+      const u = c.userData, ds = u.s - p.s;
+      if (u.off) continue;
+      if (Math.abs(ds) < 1000) n++;
+      // NEAR MISS: drawing level with a car at speed with daylight but under
+      // 1.2 m of it. Counted once per pass (latched until the car is behind).
+      const lat = Math.abs(p.lateral - (u.at ?? u.lane)) - (u.halfW || 1) - 0.45;
+      if (Math.abs(ds) < (u.halfL || 2.5) && lat > 0 && lat < 1.2 && p.speed > 18 && !player.onFoot) {
+        if (!u._nearLatch) { u._nearLatch = true; st.nearMiss++; state.warn = 'NEAR MISS'; }
+      } else if (Math.abs(ds) > 30) u._nearLatch = false;
+    }
+    st.trafficSamples++; st.trafficSum += n;
+  }
+  if (cop) {
+    if (cop.active && !st._copWas) st.copChases++;
+    if (cop.state === 'down' && st._copState !== 'down') st.copKOs++;
+    if (st._copWas && !cop.active && cop.state === 'off' && st._copState === 'chase') st.copEscapes++;
+    st._copWas = cop.active; st._copState = cop.state;
+  }
+}
+function trafficLevel(st) {
+  const avg = st && st.trafficSamples ? st.trafficSum / st.trafficSamples : 0;
+  const label = avg < 5 ? 'LIGHT' : avg < 8 ? 'MODERATE' : 'HEAVY';
+  return { avg, label };
+}
+function statsTable() {
+  const st = state.stats || freshStats();
+  const tl = trafficLevel(st);
+  const mph = (v) => Math.round(v * 2.23694);
+  const t = (x) => `${Math.floor(x / 60)}:${String(Math.floor(x % 60)).padStart(2, '0')}`;
+  const rows = [
+    ['Top speed', `${mph(st.top)} mph`],
+    ['Average speed', `${mph(st.rideT > 0 ? st.dist / st.rideT : 0)} mph`],
+    ['Traffic', `${tl.label} (${tl.avg.toFixed(1)} cars / 2 km)`],
+    ['Traffic hits / wrecks', `${state.trafficHits || 0} / ${(state.wrecksBy && state.wrecksBy.player) || 0}`],
+    ['Near misses', `${st.nearMiss}`],
+    ['Hits landed / riders out', `${state.hits} / ${state.knockDowns}`],
+    ['Times down', `${st.crashes}`],
+    ['On foot', t(st.footT)],
+    ['Cops: chases / KOs / lost', `${st.copChases} / ${st.copKOs} / ${st.copEscapes}`],
+  ];
+  return `<table class="board stats">${rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table>`;
+}
+
+// GAPS: who is just ahead and just behind, and how far -- the thing the radar
+// cannot show once the field has spread over kilometres. Two short lines, so it
+// fits beside the radar on a phone. 5 Hz: text does not need 60.
+let _gapsT = 0;
+function updateGaps(dt) {
+  _gapsT -= dt;
+  if (_gapsT > 0) return;
+  _gapsT = 0.2;
+  const el = document.getElementById('gaps');
+  if (!el || !player) return;
+  const ps = player.phys.s;
+  let ahead = null, behind = null;
+  for (const r of rivals) {
+    const d = r.phys.s - ps;
+    if (d >= 0 && (!ahead || d < ahead.d)) ahead = { r, d };
+    if (d < 0 && (!behind || d > behind.d)) behind = { r, d };
+  }
+  const row = (e, sym) => {
+    if (!e) return '';
+    const col = '#' + (e.r.color != null ? e.r.color.toString(16).padStart(6, '0') : '999999');
+    const dm = Math.abs(e.d);
+    const m = dm >= 1000 ? `${(dm / 1000).toFixed(1)}km` : `${Math.round(dm)}m`;
+    return `<div>${sym} <span class="d" style="background:${col}"></span>${e.r.name || 'RIDER'}<span class="m">${e.d >= 0 ? '+' : '-'}${m}</span></div>`;
+  };
+  el.innerHTML = row(ahead, '\u25B2') + row(behind, '\u25BC');
+}
+
 function stepGame(dt) {
   state.time += dt;
+  if (state.countdown <= 0) trackStats(dt);
   if (state.shake > 0) state.shake = Math.max(0, state.shake - dt * 2.6);
   if (state.swapped > 0) state.swapped -= dt;
 
@@ -1550,6 +1641,7 @@ function stepGame(dt) {
     radar.update(dt, player, cop && cop.present ? [...rivals, cop] : rivals,
       world.traffic && world.traffic.userData ? world.traffic.userData.cars : null);
   } catch (e) { /* the radar must never take the frame down */ }
+  updateGaps(dt);
 
   hud.update({
     position: world.positionOf(player.phys),
@@ -1606,7 +1698,7 @@ function bustRace() {
   lines.push(res.over ? "<b>CAN'T PAY THE FINE.</b> Career over." : 'No placing, no prize. Ride it again.');
   audio.siren(0);
   audio.oneShot('horn', 0.6, 0.8);
-  hud.ended(res.over ? "YOU'RE OUT OF THE GAME" : 'BUSTED!', lines.join('<br>'));
+  hud.ended(res.over ? "YOU'RE OUT OF THE GAME" : 'BUSTED!', lines.join('<br>') + statsTable());
   state.running = false;
   state.endedAt = performance.now();
   audio.idle();
@@ -1666,7 +1758,7 @@ function endRace(pos) {
     return `<tr class="${me ? 'me' : ''}"><td>${names[i] || i + 1}</td><td>${nm}${down}</td></tr>`;
   }).join('');
   const table = `<table class="board">${board}</table>`;
-  hud.ended(title, lines.join('<br>') + table);
+  hud.ended(title, lines.join('<br>') + table + statsTable());
   if (touchpad) touchpad.reset();
   phone.end();                   // menus may let the phone sleep
   state.running = false;
@@ -1679,6 +1771,8 @@ function endRace(pos) {
 // ---------- harness contract ----------
 window.__READY__ = false;
 window.__START__ = () => {
+  // Out of the game: the next ride is race 1 of a NEW career.
+  if (career.over) { career.reset(); refreshTitle(); }
   // DROP FOCUS FROM WHATEVER STARTED THE RACE. A focused <button> is activated
   // by Space and Enter, so with the RIDE button still focused the boost key
   // re-fired it and restarted the race mid-lap -- measured as a top speed of
@@ -1766,7 +1860,7 @@ function resetRace() {
     if (player && career.bike) player.setBike(bikeSource(assets, BIKE_FOR_TIER[career.bike.id] || 'sport'), career.bike.colour);
   } catch (e) { console.warn('[riderash] setBike:', e); }
   state.time = 0; state.score = 0; state.hits = 0; state.knockDowns = 0; state.contacts = 0; state.trafficHits = 0; state.trafficWrecks = 0;
-  state.raceOver = false; state.shake = 0; state.hitstop = 0; state.wrecksBy = {}; state.swapped = 0; state.lastPos = 6;
+  state.raceOver = false; state.shake = 0; state.hitstop = 0; state.wrecksBy = {}; state.stats = freshStats(); state.swapped = 0; state.lastPos = 6;
   camInitialised = false; camRoll = 0; crashHold = 0;
   // THE PACK FOR THIS RACE, built once from the roster and the career event.
   // Built here rather than at load because the event changes between races and
@@ -1863,7 +1957,7 @@ function resetRace() {
       slot: i });
   });
   // Traffic is per-race state too -- see resetTraffic for the leak this closes.
-  if (world && world.traffic) resetTraffic(world.traffic, 0);
+  if (world && world.traffic) resetTraffic(world.traffic, 0, CFG.TRAFFIC_BY_LEVEL[(career.event.level || 1) - 1] ?? 1);
   hud.show(true);
 }
 
@@ -2077,6 +2171,15 @@ function refreshTitle() {
   buildCareer();
   buildGarage();
   buildMapPicker();
+  // A CAREER THAT HAS ENDED IS NOT THE END OF THE GAME. Going broke used to
+  // leave "RIDE AGAIN" racing on a dead career; both buttons now offer a fresh
+  // one, and __START__ begins it.
+  const over = career.over;
+  const st = document.getElementById('start'), ag = document.getElementById('again');
+  if (st) st.textContent = over ? 'START NEW CAREER' : 'RIDE';
+  if (ag) ag.textContent = over ? 'START NEW CAREER' : 'RIDE AGAIN';
+  const note = document.getElementById('garagenote');
+  if (note && over) note.textContent = 'your last career ended - a new one starts from race 1';
 }
 
 buildMapPicker();
@@ -2148,6 +2251,12 @@ window.__OPENSHOWROOM__ = openShowroom;
 
 // the menu button and any key start the game
 document.getElementById('start').addEventListener('click', () => window.__START__());
+// Radar zoom from the keyboard: = / + in, - out (the rim buttons do the same).
+window.addEventListener('keydown', (e) => {
+  if (!state.running) return;
+  if (e.code === 'Equal' || e.code === 'NumpadAdd') radar.zoom(-1);
+  else if (e.code === 'Minus' || e.code === 'NumpadSubtract') radar.zoom(+1);
+});
 document.getElementById('again').addEventListener('click', () => window.__START__());
 // KEYBOARD START, GUARDED. Any of Enter / Space / W starts a race from the
 // title or results screen, but only when that screen is actually the one on

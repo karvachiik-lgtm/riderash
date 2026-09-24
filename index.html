@@ -107,6 +107,13 @@
   .bike { width:132px; padding:10px 8px 9px; cursor:pointer; }
   .bike.locked { opacity:.42; cursor:not-allowed; }
   .bike .pr { display:block; font-size:9px; letter-spacing:.10em; color:#6d737a; margin-top:5px; }
+  /* GAPS: the rider just ahead and just behind you, with metres. Beside the
+     radar on a desktop, under it on a phone. */
+  #gaps { position:absolute; left:calc(max(18px, env(safe-area-inset-left)) + 158px); bottom:20px;
+          font-size:11px; letter-spacing:.10em; line-height:1.55; color:#e8e4dc;
+          text-shadow:0 1px 2px rgba(0,0,0,.85); pointer-events:none; white-space:nowrap; }
+  #gaps .d { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:5px; }
+  #gaps .m { color:var(--amber); margin-left:6px; }
   #radar { width:148px; height:148px; display:block;
            filter: drop-shadow(0 2px 10px rgba(0,0,0,.55)); }
   .hud-br { position:absolute; right:var(--hr); bottom:calc(var(--spd) + 28px); text-align:right; }
@@ -298,6 +305,7 @@
               right:env(safe-area-inset-right, 0px); }
   @media (orientation: landscape) {
     body.touch #radar.hud-bl { bottom:auto; top:150px; width:110px; height:110px; }
+    body.touch #gaps { left:max(18px, env(safe-area-inset-left)); bottom:auto; top:266px; font-size:10px; }
     body.touch #touchpad { bottom:env(safe-area-inset-bottom, 0px); }
     /* Speedometer TOP CENTRE, between the two thumb zones and under nothing a
        finger rests on; it is also where the eye already is (the road ahead).
@@ -348,6 +356,8 @@
   .board td { padding:3px 12px; text-align:left; border-bottom:1px solid #1e2226; }
   .board td:first-child { color:#5f646a; width:48px; }
   .board tr.me td { color:var(--amber); }
+  .board.stats td:first-child { width:auto; color:#7d838a; }
+  .board.stats td:last-child { text-align:right; color:#e8e4dc; }
   /* ---- PORTRAIT (a phone held upright) ---------------------------------
      The landscape HUD spreads across four corners of a wide frame; upright,
      the corners collide and the bottom belongs to the thumbs. Everything
@@ -371,6 +381,7 @@
     #combobar { right:12px; top:calc(var(--spd) + 56px + env(safe-area-inset-top)); width:110px; }
     #stamlab { right:12px; top:calc(var(--spd) + 62px + env(safe-area-inset-top)); }
     #radar.hud-bl { left:12px; bottom:auto; top:calc(62px + env(safe-area-inset-top)); width:92px; height:92px; }
+    #gaps { left:12px; bottom:auto; top:calc(158px + env(safe-area-inset-top)); font-size:9px; }
     .hud-bl[style*="bottom:176px"] { display:none; }
     .hud-br { right:12px; bottom:auto; top:calc(var(--spd) + 80px + env(safe-area-inset-top)); }
     .hud-br .val { font-size:16px; }
@@ -680,6 +691,7 @@
     <button id="pausebtn" class="pe hb" aria-label="Pause"><i></i><i></i></button>
   </div>
   <canvas id="radar" class="hud-bl" width="148" height="148"></canvas>
+  <div id="gaps"></div>
   <div class="hud-bl" style="bottom:176px"><div class="lab">DISTANCE</div><div class="val" id="dist">0<small>M</small></div></div>
   <div class="hud-br"><div class="lab">SCORE</div><div class="val" id="score">0<small>PTS</small></div></div>
   <div class="hud-br" id="bikebox"><div class="lab">BIKE</div><div class="val" id="dmg">OK<small></small></div></div>

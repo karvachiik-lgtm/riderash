@@ -420,6 +420,8 @@ export class Player {
     // Boost is an input, not an attack: the charge and cooldown live in the
     // integrator, so holding the key does nothing once it is spent.
     if (input.attackPressed('boost')) p.tryBoost();
+    // THE AGILITY BURST: a sidestep the way the bars are turned
+    if (input.attackPressed('swerve') && p.trySwerve(input.steer || p.steer)) this.swervedAt = performance.now();
     if (input.attackPressed('punch')) f.commit('punch');
     if (input.attackPressed('kick')) f.commit('kick');
     if (input.attackPressed('chain')) f.commit('chain');

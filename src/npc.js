@@ -1041,7 +1041,7 @@ export class NpcBrain {
     let mul;
     if (r < 0.21)      mul = 0.80 + r * 0.33;          // 0.80 .. 0.87  backmarkers
     else if (r < 0.57) mul = 0.90 + (r - 0.21) * 0.16; // 0.90 .. 0.96  the pack
-    else if (r < 0.86) mul = 0.97 + (r - 0.57) * 0.14; // 0.97 .. 1.01  fast
+    else if (r < 0.86) mul = 0.98 + (r - 0.57) * 0.17; // 0.98 .. 1.03  fast
     // THE CONTENDERS OUT-RUN A THROTTLE-ONLY RIDER. At 1.00-1.01 x the expected
     // bike's top speed nobody in the field could pass a player who simply held
     // the throttle (MEASURED: first from the start, every race). At 1.02-1.045
@@ -1049,7 +1049,12 @@ export class NpcBrain {
     // bike flat out; you beat them by tucking, the boost, the tow, a punch, the
     // cleaner line -- or a better bike. Their machines are fitted to reach it
     // (see Rival.fitMachine).
-    else               mul = 1.02 + (r - 0.86) * 0.18; // 1.02 .. 1.045 contenders
+    // RAISED AGAIN once the boost was capped and given to the pack: at 1.02-1.045
+    // a rider who only held the throttle still won the opener by 10 m (and by
+    // 250 m with the boost). The contenders now sit 4-8% over the expected
+    // bike, so straight-line riding does not win -- the tuck, the tow, a cleaner
+    // line, a punch or a faster bike does.
+    else               mul = 1.04 + (r - 0.86) * 0.29; // 1.04 .. 1.08 contenders
     this.paceRank = r;
     // Capped at the machine: at levels 3-5 the career's `reference` (52-58 m/s)
     // is above CFG.MAX_SPEED (48.16), so without the cap the "preferred" pace

@@ -14,6 +14,7 @@ const B = { A: 0, B: 1, X: 2, Y: 3, LB: 4, RB: 5, LT: 6, RT: 7, VIEW: 8, START: 
 const RIDE = [
   [B.X, 'punch'], [B.Y, 'kick'], [B.B, 'chain'], [B.RB, 'grapple'], [B.A, 'boost'],
   [B.LB, 'tuck', true],
+  [B.LT, 'swerve'],
 ];
 
 function dz(v) { const a = Math.abs(v); return a < DZ ? 0 : Math.sign(v) * (a - DZ) / (1 - DZ); }

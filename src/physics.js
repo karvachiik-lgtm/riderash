@@ -269,6 +269,7 @@ CAMBER_SHARE: 0.45,         // stiffness-set point: realised share at CAMBER_REF
   BOOST_TIME: 1.6,            // s of boost per charge
   BOOST_COOL: 6.0,            // s before it is available again
   BOOST_MIN_SPEED: 9,         // m/s -- not a launch tool
+  BOOST_CAP: 1.12,            // x top speed: the boost pushes no further
 
   // Airborne. The road climbs and falls at up to 5.6%; take a crest fast enough
   // and the wheels stop following it, which is a jump rather than a bug.
@@ -350,6 +351,23 @@ CAMBER_SHARE: 0.45,         // stiffness-set point: realised share at CAMBER_REF
   BICYCLE_GAIN: 0.65,
   // Arcade assist. See the note in step() 2 -- adapted from
   // mini-driving-simulator-3d (MIT, Liane Heidemann).
+  // PLAYER HANDLING. The tyre model is physical, and a physical 1-g motorcycle
+  // takes ~1.9 s to cross one lane at any speed (MEASURED) -- honest, and far
+  // too slow for an arcade brawler, where 0.8-1.0 s is the feel. The player's
+  // camber thrust is scaled up and the lateral damper eased, so a lane change
+  // is quicker without touching the AI (whose controllers are tuned to the
+  // physical values -- see the ARCADE_MIX note on why the pack must not get
+  // an assist).
+  PLAYER_HANDLING: 2.6,       // x camber (lean) side force, player only
+  PLAYER_LAT_DAMP: 0.5,       // x the lateral damper while steering, player only
+  PLAYER_SETTLE: 1.8,         // x the lateral damper with the bars released: stop where you aimed
+  // THE AGILITY BURST (the 'swerve' verb): a short window of much sharper
+  // handling plus a sideways kick in the steered direction. Costs stamina, has
+  // a cooldown, so it is a dodge, not a new default.
+  SWERVE_TIME: 0.45,          // s
+  SWERVE_HANDLING: 1.9,       // further x on side force while it lasts
+  SWERVE_KICK: 4.2,           // m/s of lateral velocity added at once
+  SWERVE_COOL: 1.6,           // s before the next
   ARCADE_MIX: 0.55,           // 0 = pure lean physics, 1 = pure arcade response
   ARCADE_LAT_G: 1.15,         // g of cornering the assist is allowed to ask for
   // MEASURED with harness/_recover.mjs. A lateral-g budget is speed-correct at
@@ -766,7 +784,7 @@ export class BikePhys {
     this.wheelie = 0;
     this.airY = 0; this.airVY = 0; this.airborne = false; this.airTime = 0;
     this.lastRoadY = null;
-    this.boost = 0; this.boostCool = 0;
+    this.boost = 0; this.boostCool = 0; this.swerveT = 0; this.swerveCool = 0;
     this.slipstream = 0; this.landHit = 0;
     this.sync();
     this.prevPos.copy(this.pos);
@@ -1003,9 +1021,17 @@ export class BikePhys {
     // it has a cooldown, and it refuses below walking pace so it cannot be used
     // as a launch. Added as a force rather than a speed multiplier so the drag
     // curve still decides the top end and nothing can exceed it.
+    if (this.swerveT > 0) this.swerveT = Math.max(0, this.swerveT - h);
+    if (this.swerveCool > 0) this.swerveCool = Math.max(0, this.swerveCool - h);
     if (this.boost > 0) {
       this.boost -= h;
-      if (this.speed > PHYS.BOOST_MIN_SPEED) { F += PHYS.BOOST_FORCE; FxTyre += PHYS.BOOST_FORCE; }
+      // CAPPED ABOVE THE MACHINE'S TOP SPEED. Uncapped, chained charges carried
+      // a bike to 73 m/s against a 48 m/s top speed (MEASURED) and a rider who
+      // only held the throttle and the boost won by a kilometre. The push fades
+      // out over the last tenth up to 112% of top speed.
+      const cap = this.topSpeed * PHYS.BOOST_CAP;
+      const fade = Math.max(0, Math.min(1, (cap - this.speed) / (this.topSpeed * 0.1)));
+      if (this.speed > PHYS.BOOST_MIN_SPEED) { F += PHYS.BOOST_FORCE * fade; FxTyre += PHYS.BOOST_FORCE * fade; }
       if (this.boost <= 0) { this.boost = 0; this.boostCool = PHYS.BOOST_COOL; }
     } else if (this.boostCool > 0) {
       this.boostCool = Math.max(0, this.boostCool - h);
@@ -1443,7 +1469,18 @@ export class BikePhys {
     // (MEASURED: a whole race at lateral 0.0 holding only the throttle). The AI
     // keeps them -- it steers itself anyway -- and the player keeps a fraction,
     // enough to stop a slow creep on a straight but not enough to take a bend.
-    const autopilot = this.arcade ? PHYS.PLAYER_AUTOPILOT : 1;
+    // THE CATCH. Released bars after a real steering input: for a short window
+    // the heading straightens at full strength, so a lane change ENDS in the
+    // lane you aimed for instead of sliding on another four metres (MEASURED).
+    // Only after the rider has steered, so a hands-off rider still does not
+    // ride the bends for free.
+    if (this.arcade) {
+      const a = Math.abs(this.steer);
+      if (a > 0.4) this._steered = true;
+      else if (a < 0.2 && this._steered) { this._steered = false; this._catchT = 0.55; }
+      if (this._catchT > 0) this._catchT -= h;
+    }
+    const autopilot = this.arcade ? (this._catchT > 0 ? 1.6 : PHYS.PLAYER_AUTOPILOT) : 1;
     const yawCentreBase = (this.onRoad ? PHYS.SELF_CENTRE : PHYS.SELF_CENTRE_OFF) * autopilot;
     const yawCentre = yawCentreBase * (1 - PHYS.CENTRE_YIELD * Math.min(1, Math.abs(this.steer)));
     const holdHeading = leanTurn / Math.max(0.3, yawCentreBase);
@@ -1640,7 +1677,8 @@ export class BikePhys {
     // adding force right up to the point the bike is on its side.
     const leanFrac = Math.min(1, Math.abs(this.lean) / PHYS.CAMBER_MAX_LEAN);
     const camberFade = 1 - leanFrac * leanFrac * PHYS.CAMBER_FADE;
-    const Fcamber = Math.sign(this.lean) * camberStiff * Math.abs(this.lean) * camberFade * circle;
+    const handling = this.arcade ? PHYS.PLAYER_HANDLING * (this.swerveT > 0 ? PHYS.SWERVE_HANDLING : 1) : 1;
+    const Fcamber = Math.sign(this.lean) * camberStiff * Math.abs(this.lean) * camberFade * circle * handling;
     // The front tyre carries more camber than the rear when the bike is steered
     // into the lean (the front is what initiates the roll), which is why a bike
     // turns in at all; the rear follows. This split is a small refinement on top
@@ -1661,7 +1699,7 @@ export class BikePhys {
     // (slip rate = lateralV / relaxation length) times the tyre's slip
     // stiffness, which is the standard formulation and is why it scales with
     // load rather than being a bare chassis number.
-    const dampCoef = PHYS.TYRE_LATERAL_DAMP * loadN / PHYS.TYRE_RELAX;
+    const dampCoef = PHYS.TYRE_LATERAL_DAMP * loadN / PHYS.TYRE_RELAX * (this.arcade ? (Math.abs(this.steer) > 0.2 ? PHYS.PLAYER_LAT_DAMP : PHYS.PLAYER_SETTLE * (this._catchT > 0 ? 2.2 : 1)) : 1);
     const Fdamp = -this.lateralV * dampCoef * this.grip;
     const FdampFront = THREE.MathUtils.clamp(Fdamp * this.loadFracFront, -loadFront * PHYS.TYRE_LAT_PEAK, loadFront * PHYS.TYRE_LAT_PEAK);
     const FdampRear = THREE.MathUtils.clamp(Fdamp * this.loadFracRear, -loadRear * PHYS.TYRE_LAT_PEAK, loadRear * PHYS.TYRE_LAT_PEAK);
@@ -1892,6 +1930,21 @@ export class BikePhys {
   // they are turning unsettles the bike in yaw.
   //
   // `dir` is +1 if the target is ahead of the attacker, -1 if behind.
+  /**
+   * THE AGILITY BURST: a sharp sidestep toward `dir` (+1 right / -1 left, or
+   * the current steer). Returns true if it fired.
+   */
+  trySwerve(dir) {
+    if ((this.swerveCool || 0) > 0 || this.airborne || !this.onRoad || this.speed < 6) return false;
+    const d = Math.sign(dir || this.steer || 0);
+    if (!d) return false;
+    this.swerveT = PHYS.SWERVE_TIME;
+    this.swerveCool = PHYS.SWERVE_COOL;
+    this.lateralV += d * PHYS.SWERVE_KICK;
+    this.leanVel += d * 4;                      // the bike flicks into it
+    return true;
+  }
+
   /** Fire a boost charge. Returns true if it actually engaged. */
   tryBoost() {
     if (this.boost > 0 || this.boostCool > 0) return false;

@@ -30,6 +30,8 @@ const KEYMAP = {
 // edge-triggered verb with its own semantics, like the attacks.
 const EDGE_KEYS = {
   Space: 'boost',
+  // the agility burst: a sharp sidestep the way you are steering
+  KeyE: 'swerve',
 };
 
 export class Input {

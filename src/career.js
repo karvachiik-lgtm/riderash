@@ -74,20 +74,25 @@ const LEVELS = [
 /** Flattened 25-race schedule. Index is the career race number. */
 export const SERIES = [];
 for (const lv of LEVELS) {
-  for (const c of COURSES) {
+  COURSES.forEach((c, ci) => {
+    // WITHIN A LEVEL THE RACES GET HARDER TOO: each course a touch quicker and
+    // smarter than the last (+1.5% pace, +0.04 skill, +0.04 aggression), so a
+    // level ramps toward its last race instead of being five equal ones.
+    const k = ci / Math.max(1, COURSES.length - 1);
     SERIES.push({
       key: `L${lv.tier}-${c.map}`,
       name: c.name,
       level: lv.tier,
       map: c.map,
       lenMul: lv.lenMul,
-      reference: lv.reference,
+      reference: lv.reference * (1 + 0.015 * ci),
       purse: lv.purse,
-      skill: lv.skill,
-      aggro: lv.aggro,
+      skill: lv.skill + 0.04 * ci,
+      aggro: lv.aggro + 0.04 * ci,
+      ramp: k,
       field: 15,
     });
-  }
+  });
 }
 
 export const LEVEL_COUNT = LEVELS.length;

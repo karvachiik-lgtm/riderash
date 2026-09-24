@@ -588,6 +588,7 @@ export class Rival {
       steer,
       tuck: intent.tuck,
     };
+    this._aiBoost(dt, world, control);
     p.advance(dt, control);
     // ----------------------------------------------------------------------
 
@@ -680,9 +681,36 @@ export class Rival {
       }
     }
 
+    this._aiBoost(dt, world, control);
     p.advance(dt, control);
     f.update(dt, world.fightersExcept(this), hooks);
     this.applyVisual(dt);
+  }
+
+  /**
+   * THE PACK BOOSTS TOO: same charge, same cooldown, same cap as the player.
+   * A rider fires it to pass the player just ahead, to answer the player going
+   * by, to defend when the player closes from behind; the contenders race for
+   * the win and spend every charge they get. Skill decides the timing. While a
+   * charge burns the rider holds the throttle open (the pace law would
+   * otherwise brake it straight back to its cruising pace and waste it).
+   */
+  _aiBoost(dt, world, control) {
+    const p = this.phys, f = this.fighter;
+    if (f.down) return;
+    if (p.boost > 0) {
+      if (!control.brake) { control.throttle = true; control.tuck = true; }
+      return;
+    }
+    if (p.speed <= 15 || p.boostCool > 0 || control.brake) return;
+    const pl = world && world.player && world.player.phys;
+    const gap = pl ? pl.s - p.s : 999;                              // + = the player is ahead
+    const passing = pl && gap > 2 && gap < 70;
+    const answered = pl && gap > -8 && gap <= 2 && pl.boost > 0;
+    const defending = pl && gap <= 2 && gap > -60;
+    const contender = (this.paceRank ?? 0) >= 0.86;
+    const rate = (passing || answered || contender ? 1.4 : defending ? 0.9 : 0.12) * (0.5 + (this.skill ?? 0.7) * 0.5);
+    if (Math.random() < dt * rate) p.tryBoost();
   }
 
   applyVisual(dt) {

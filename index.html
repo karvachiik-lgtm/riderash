@@ -327,7 +327,8 @@
                    transition:transform .06s linear; pointer-events:none; }
   #tp-steer.on .nub { background:rgba(255,180,90,.5); border-color:var(--amber); transition:none; }
   #tp-gas { font-size:13px; }
-  #tp-boost, #tp-tuck { border-style:dashed; }
+  #tp-boost, #tp-tuck, #tp-swerve { border-style:dashed; }
+  #tp-swerve  { right:186px; bottom:84px; width:56px; height:56px; }
   /* Held by a rival: every attack button struggles, so all of them pulse. */
   .tp.mash { border-color:var(--red); animation:mash .3s infinite alternate; }
   @keyframes mash { from { background:rgba(150,20,10,.25); } to { background:rgba(150,20,10,.6); } }
@@ -442,6 +443,7 @@
     .tp { width:60px; height:60px; }
     #tp-steer   { left:14px;  bottom:calc(24px + env(safe-area-inset-bottom)); width:160px; height:76px; }
     #tp-boost   { left:14px;  bottom:calc(112px + env(safe-area-inset-bottom)); width:54px; height:54px; }
+    #tp-swerve  { left:74px;  bottom:calc(112px + env(safe-area-inset-bottom)); width:54px; height:54px; }
     #tp-tuck    { left:14px;  bottom:calc(174px + env(safe-area-inset-bottom)); width:54px; height:54px; }
     #tp-gas     { right:14px;  bottom:calc(24px + env(safe-area-inset-bottom)); width:84px; height:84px; }
     #tp-brake   { right:106px; bottom:calc(24px + env(safe-area-inset-bottom)); }
@@ -671,7 +673,7 @@
   <p style="font-size:11px;color:#5f646a">
     <kbd>W</kbd>/<kbd>↑</kbd> throttle &nbsp; <kbd>S</kbd>/<kbd>↓</kbd> brake &nbsp;
     <kbd>A</kbd><kbd>D</kbd> steer &nbsp; <kbd>J</kbd> punch &nbsp; <kbd>K</kbd> kick &nbsp;
-    <kbd>L</kbd> chain &nbsp; <kbd>G</kbd> grab/throw &nbsp; <kbd>Shift</kbd> tuck &nbsp; <kbd>Space</kbd> boost<br>
+    <kbd>L</kbd> chain &nbsp; <kbd>G</kbd> grab/throw &nbsp; <kbd>Shift</kbd> tuck &nbsp; <kbd>Space</kbd> boost &nbsp; <kbd>E</kbd> dodge<br>
      <kbd>C</kbd> camera &nbsp; <kbd>1</kbd>-<kbd>7</kbd> views &nbsp; <kbd>M</kbd> mute &nbsp; <kbd>Esc</kbd>/<kbd>P</kbd> pause
   </p>
   <p style="font-size:11px;color:#8b6a5a;letter-spacing:.06em">

@@ -18,6 +18,7 @@ const LAYOUT = [
   ['tp-chain', 'CHAIN', 'chain', true],
   ['tp-grapple', 'GRAB', 'grapple', true],
   ['tp-boost', 'BOOST', 'boost', true],
+  ['tp-swerve', 'DODGE', 'swerve', true],
   ['tp-tuck', 'TUCK', 'tuck', false],
 ];
 

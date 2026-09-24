@@ -615,6 +615,7 @@ export function animateChain(joints, speed, ph, time, seed = 0) {
  * striking one onto its trajectory and the rest back onto grips and pegs. So a
  * punch that twists the chest no longer drags the other hand off the bars.
  */
+const CHAIN_STOW = 0.45;   // s the chain stays out after a swing (see poseCombat)
 export function poseCombat(joints, f, phys, time, attacksTable) {
   if (!joints || !f) return;
   const speed = phys ? phys.speed : 0;
@@ -691,7 +692,15 @@ export function poseCombat(joints, f, phys, time, attacksTable) {
     solveLimbs(joints, over);
   }
   if (joints.chain) {
-    const show = !!f.hasWeapon || chainPh >= 0;
+    // STOWED UNTIL IT IS SWUNG. Carried in the fist at 40 m/s, the simulated
+    // chain streamed straight back and fluttered in the airflow for the whole
+    // race -- physically fair, but it read as noise, and no rider carries a
+    // loose chain flapping at a hundred miles an hour. It now comes out for the
+    // swing (driveChain re-hangs it from the fist after any hide longer than
+    // 0.5 s, so it starts at rest) and is put away CHAIN_STOW s after.
+    if (chainPh >= 0) joints.__chainOut = time;
+    const out = joints.__chainOut != null && time - joints.__chainOut >= 0 && time - joints.__chainOut < CHAIN_STOW;
+    const show = chainPh >= 0 || (!!f.hasWeapon && (out || joints.__chainAlwaysOut));
     joints.chain.visible = show;
     // [chain agent] simulated rope pinned to the fist; animateChain (the old
     // travelling-wave formula) is kept exported but no longer drives it

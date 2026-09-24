@@ -1677,8 +1677,7 @@ export class BikePhys {
     // adding force right up to the point the bike is on its side.
     const leanFrac = Math.min(1, Math.abs(this.lean) / PHYS.CAMBER_MAX_LEAN);
     const camberFade = 1 - leanFrac * leanFrac * PHYS.CAMBER_FADE;
-    const handling = this.arcade ? PHYS.PLAYER_HANDLING * (this.swerveT > 0 ? PHYS.SWERVE_HANDLING : 1) : 1;
-    const Fcamber = Math.sign(this.lean) * camberStiff * Math.abs(this.lean) * camberFade * circle * handling;
+    const Fcamber = Math.sign(this.lean) * camberStiff * Math.abs(this.lean) * camberFade * circle;
     // The front tyre carries more camber than the rear when the bike is steered
     // into the lean (the front is what initiates the roll), which is why a bike
     // turns in at all; the rear follows. This split is a small refinement on top
@@ -1710,7 +1709,26 @@ export class BikePhys {
     // a leaned bike turn without the bars, so leaving it out of the velocity
     // update would have been a silent no-op. Published for the harness.
     this.camberForce = Fcamber;
-    const sideForce = Ffront + Frear + camberFront + camberRear + FdampFront + FdampRear;
+    // ---- PLAYER HANDLING ASSIST. NOT part of the tyre model. ---------------
+    //
+    // The camber term above is the PROVED one (CamberThrust.lean: bounded by
+    // CAMBER_SHARE of the requirement, instantaneous, odd in lean) and is left
+    // exactly as proved. The arcade's quicker lane change is this separate,
+    // player-only term: (PLAYER_HANDLING - 1) x more of the same lean-driven
+    // force (x SWERVE_HANDLING during the dodge), which then only gets the grip
+    // the tyre has LEFT -- the magnitude of the tyre + camber + assist side force
+    // never exceeds the friction-circle budget TYRE_LAT_PEAK * load * grip *
+    // circle. If the tyre is already at its limit, the assist is zero.
+    let Fassist = 0;
+    if (this.arcade) {
+      const handling = PHYS.PLAYER_HANDLING * (this.swerveT > 0 ? PHYS.SWERVE_HANDLING : 1);
+      const raw = Fcamber * (handling - 1);
+      const budget = PHYS.TYRE_LAT_PEAK * loadN * this.grip * circle;
+      const room = Math.max(0, budget - Math.abs(Ffront + Frear + Fcamber));
+      Fassist = Math.sign(raw) * Math.min(Math.abs(raw), room);
+    }
+    this.handlingAssist = Fassist;
+    const sideForce = Ffront + Frear + camberFront + camberRear + Fassist + FdampFront + FdampRear;
     this.lateralV += (sideForce / PHYS.MASS) * h;
     this.lateral += this.lateralV * h;
     // Only a light damping now. The slip feedback above is what limits lateral

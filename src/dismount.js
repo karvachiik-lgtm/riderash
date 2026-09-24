@@ -36,7 +36,7 @@
 // nothing here is a hand-picked subset.
 import * as THREE from 'three';
 import { centreAt, headAt } from './level.js';
-import { clearAxes } from './riderpose.js';
+import { clearAxes, poseSeated, solveLimbs, restTarget } from './riderpose.js';
 import { GAIT } from './motions.js';
 import { RIDING } from './reach.js';
 import { CFG } from './config.js';
@@ -71,7 +71,10 @@ export const DIS = {
   FALL_TIME: 1.10,        // s of tumbling before the body is considered landed
   DOWN_TIME: 0.80,        // s lying still, reading the situation
   STAND_TIME: 0.95,       // s rising to the feet
-  MOUNT_TIME: 0.90,       // s swinging a leg back over
+  // s for the whole remount: step in, heave the bike up, leg over, settle. It
+  // was 0.9 s of the body gliding onto the saddle in one blend; a real remount
+  // is four beats and reads as one only at ~2 s.
+  MOUNT_TIME: 1.80,
   WALK_SPEED: 4.00,       // m/s under the player's own control: a jog back
   WALK_AUTO_SPEED: 3.40,  // m/s the homing assist walks at
   WALK_ACCEL: 9.0,        // m/s^2 toward the target walking speed
@@ -505,6 +508,9 @@ export class Dismount {
       this._mRiderP = rider.position.clone();
       this._mRiderQ = rider.quaternion.clone();
       this._mRiderS = rider.scale.x;
+      // MOUNT FROM THE SIDE HE WALKED UP ON. +x in the bike's frame is the
+      // rider's left; the FAR leg is the one that swings over.
+      this._mSide = rider.position.x >= 0 ? 1 : -1;
     }
     this._enter(ST.MOUNTING);
   }
@@ -771,35 +777,59 @@ export class Dismount {
     }
   }
 
+  // THE REMOUNT, IN FOUR BEATS (k = 0..1 over MOUNT_TIME):
+  //
+  //   0.00-0.25  STEP IN   -- walk to the bike's side by the saddle, turn to face
+  //                           along it; hands come up to the bars.
+  //   0.25-0.55  HEAVE     -- the machine comes up off its side; he bends into it,
+  //                           hands locked on the grips by IK as they rise.
+  //   0.55-0.85  LEG OVER  -- the pelvis rises over the saddle on an arc and the
+  //                           FAR leg swings high over the seat to its peg; the
+  //                           near foot stays planted.
+  //   0.85-1.00  SETTLE    -- down onto the seat, near foot to its peg, blending
+  //                           into the exact riding pose (poseSeated) so the
+  //                           hand-off to the riding rig is seamless.
+  //
+  // It used to be one 0.9 s blend: the body glided from wherever it stood onto
+  // the saddle while the bike righted itself with nobody holding it.
   _renderMounting() {
     const player = this.player;
-    const k = easeInOut(this.t / DIS.MOUNT_TIME);
+    const k = clamp(this.t / DIS.MOUNT_TIME, 0, 1);
     const bike = player.bike, rider = player.rider;
+    const seg = (a, b) => easeInOut((k - a) / (b - a));
+    const kStep = seg(0.0, 0.25), kLift = seg(0.25, 0.55), kOver = seg(0.55, 0.85), kSettle = seg(0.85, 1.0);
+    const side = this._mSide || 1;
+
     if (bike && this._mBikeQ) {
-      // heaved upright as he climbs on
-      bike.position.lerpVectors(this._mBikeP, _c.set(0, 0, 0), k);
-      bike.quaternion.slerpQuaternions(this._mBikeQ, _q.identity(), k);
-      if (k < 1) {
+      bike.position.lerpVectors(this._mBikeP, _c.set(0, 0, 0), kLift);
+      bike.quaternion.slerpQuaternions(this._mBikeQ, _q.identity(), kLift);
+      if (kLift < 1) {
         bike.updateMatrixWorld(true);
         this._bikeBox.setFromObject(bike);
         const gap = this._bikeBox.min.y - player.group.position.y;
         if (Number.isFinite(gap) && gap < 0) bike.position.y -= gap;
       }
+      const bj = bike.userData && bike.userData.joints;
+      if (bj && bj.frontSteer && bj.frontSteer.rotation) bj.frontSteer.rotation.y = 0.35 * (1 - kLift) * side;
     }
-    if (rider && this._mRiderQ) {
-      // The saddle in the GROUP's frame: the socket's local offset carried
-      // through the (upright, unscaled-position) bike. The rider's world scale
-      // is the bike's, which is what attach() gave it, so it is left alone.
-      const seat = _p.copy(player.socket ? player.socket.position : _c.set(0, CFG.SEAT_Y, 0))
-        .multiplyScalar(bike ? bike.scale.x : 1);
-      // a leg-over arc: up, across, down
-      rider.position.lerpVectors(this._mRiderP, seat, k);
-      rider.position.y += Math.sin(k * Math.PI) * 0.25;
-      rider.quaternion.slerpQuaternions(this._mRiderQ, _q.identity(), k);
-      restoreRest(rider);
-      const j = rider.userData && rider.userData.joints;
-      if (j) this.poseMount(j, k);
-    }
+    if (!rider || !this._mRiderQ) return;
+    const bs = bike ? bike.scale.x : 1;
+    // the saddle, in the group frame (bike upright at the origin)
+    const seat = _p.copy(player.socket ? player.socket.position : _c.set(0, CFG.SEAT_Y, 0)).multiplyScalar(bs);
+    // standing spot: beside the saddle on the mount side, a little forward
+    const standX = side * 0.62, standZ = seat.z + 0.10;
+    const rx = THREE.MathUtils.lerp(standX, seat.x, kOver);
+    const rz = THREE.MathUtils.lerp(standZ, seat.z, kOver);
+    const ry = THREE.MathUtils.lerp(0, seat.y, kOver) + Math.sin(kOver * Math.PI) * 0.28 - 0.08 * kLift * (1 - kOver);
+    // step in from wherever the walk ended
+    rider.position.set(
+      THREE.MathUtils.lerp(this._mRiderP.x, rx, kStep),
+      THREE.MathUtils.lerp(this._mRiderP.y, ry, kStep),
+      THREE.MathUtils.lerp(this._mRiderP.z, rz, kStep));
+    rider.quaternion.slerpQuaternions(this._mRiderQ, _q.identity(), kStep);
+    restoreRest(rider);
+    const j = rider.userData && rider.userData.joints;
+    if (j) this.poseMount(j, { kStep, kLift, kOver, kSettle, side });
   }
 
   // -------------------------------------------------------------------------
@@ -903,7 +933,10 @@ export class Dismount {
     if (standing) w.gaitPhase = (w.gaitPhase || 0) + cadence * Math.min(0.05, dt || 0.016);
   }
 
-  poseMount(j, k) {
+  poseMount(j, m) {
+    const { kStep, kLift, kOver, kSettle, side } = m;
+    const player = this.player;
+    const rider = player.rider, group = player.group;
     clearAxes(j);
     const g = GAIT;
     const rot = (n, x, y, z) => {
@@ -912,27 +945,87 @@ export class Dismount {
       if (y !== undefined) n.rotation.y = y;
       if (z !== undefined) n.rotation.z = z;
     };
-    // one leg swings over the saddle, the body drops onto it
-    rot(j.torso, -0.55 * k);
-    rot(j.neck, 0.32 * k);
-    const la = j.leftArm, ra = j.rightArm;
-    if (la) { rot(la.upper, -1.12 * k + (1 - k) * g.armDown, undefined, 0.28 * k + (1 - k) * g.armOut); rot(la.elbow, -0.52 * k + (1 - k) * g.elbowBend); }
-    if (ra) { rot(ra.upper, -1.12 * k + (1 - k) * g.armDown, undefined, -0.28 * k - (1 - k) * g.armOut); rot(ra.elbow, -0.52 * k + (1 - k) * g.elbowBend); }
-    // the swinging leg: right leg goes from standing to on the peg.
-    // THE HIP INTERPOLATES, because that is where the difference lives: standing
-    // it is `hipStand` (the seated fold undone) and riding it is the rig's own
-    // baked `RIDING.hip`. Writing the standing end to `thigh` -- as this did --
-    // left the hip folded for the whole mount, so the leg came over the saddle
-    // already bent up. `thigh` now carries only the swing-over flourish.
-    const ridingHip = RIDING.hip;
-    const Ll = j.leftLeg, Lr = j.rightLeg;
-    if (Ll) { rot(Ll.hip, g.hipStand * (1 - k) + ridingHip * k); rot(Ll.thigh, 0); rot(Ll.knee, g.kneeStand * (1 - k) + RIDING.knee * k); }
-    if (Lr) {
-      rot(Lr.hip, g.hipStand * (1 - k) + ridingHip * k);
-      rot(Lr.thigh, -Math.sin(k * Math.PI) * g.mountSwing);
-      rot(Lr.knee, g.kneeStand * (1 - k) + RIDING.knee * k + Math.sin(k * Math.PI) * 1.1);
+    // THE BASE: standing, bending into the heave, then the seated pose, all as
+    // one blend so the settle ends exactly on what the riding rig will draw.
+    const bend = kLift * (1 - kOver);                   // stoop over the bars while lifting
+    rot(j.torso, g.torsoLean + 0.55 * bend);
+    rot(j.neck, 0.1 + 0.2 * bend);
+    for (const s2 of ['left', 'right']) {
+      const L = j[s2 + 'Leg'] || (j.legs && j.legs[s2]);
+      if (!L) continue;
+      rot(L.hip, g.hipStand - 0.35 * bend);
+      rot(L.thigh, 0);
+      rot(L.knee, g.kneeStand + 0.5 * bend);
     }
     if (j.chain) j.chain.visible = false;
+
+    const ik = j.__ik;
+    if (!ik) return;
+    // Feet on the road beside the bike, in WORLD space, from the rider's own
+    // root (his origin is his feet). The far foot arcs over the saddle.
+    group.updateMatrixWorld(true);
+    rider.updateMatrixWorld(true);
+    const near = side > 0 ? 'leftLeg' : 'rightLeg';
+    const far = side > 0 ? 'rightLeg' : 'leftLeg';
+    const sc = rider.scale.x;
+    const foot = (dx) => _wt.set(dx * 0.11 * sc, 0.02, 0.06).applyMatrix4(rider.matrixWorld);
+    const ground = (key) => {
+      const v = foot(key === 'leftLeg' ? 1 : -1).clone();
+      v.y = group.position.y + 0.04;                     // on the road, whatever the pelvis does
+      return v;
+    };
+    const peg = (key) => restTarget(ik, key, new THREE.Vector3());
+    const over = {};
+    // near leg: planted until the settle, then onto its peg
+    over[near] = ground(near).lerp(peg(near), kSettle);
+    // far leg: planted, then up and over the saddle (a high arc behind the
+    // rider's hip, above the seat), then down onto its peg
+    const gf = ground(far), pf = peg(far);
+    if (kOver <= 0) over[far] = gf;
+    else {
+      const top = _wc.set(0, 0.62, -0.30);               // above and behind the saddle, bike frame
+      const topW = player.socket ? player.socket.localToWorld(top.clone()) : pf.clone().setY(pf.y + 0.6);
+      const u = kOver;
+      // quadratic Bezier ground -> over the seat -> peg
+      over[far] = gf.clone().multiplyScalar((1 - u) * (1 - u))
+        .add(topW.multiplyScalar(2 * u * (1 - u)))
+        .add(pf.clone().multiplyScalar(u * u));
+    }
+    // hands: hanging at his sides while he walks in, reaching for the grips
+    // only over the last part of the step (reaching from 1.5 m away stretched
+    // both arms out level like a mannequin -- seen in the lab filmstrip), then
+    // locked on them.
+    const reach = easeInOut((kStep - 0.55) / 0.45);
+    if (reach < 1) {
+      for (const key of ['left', 'right']) {
+        const L = ik.limbs[key];
+        if (!L) continue;
+        L.root.parent.updateWorldMatrix(true, false);
+        const sh = new THREE.Vector3().copy(L.root.position).applyMatrix4(L.root.parent.matrixWorld);
+        const hang = sh.clone().add(new THREE.Vector3(0, -0.55 * sc, 0));
+        over[key] = hang.lerp(restTarget(ik, key, new THREE.Vector3()), reach);
+      }
+    }
+    j.__ikOn = true;
+    solveLimbs(j, over);
+
+    // SETTLE: the last beat blends every joint into the riding pose itself, so
+    // the frame the riding rig takes over is the frame this one ended on.
+    if (kSettle > 0) {
+      const from = j.__mountSnap || (j.__mountSnap = new Map());
+      from.clear();
+      const nodes = [j.torso, j.neck];
+      for (const s2 of ['left', 'right']) {
+        const A = j[s2 + 'Arm'] || (j.arms && j.arms[s2]);
+        const L = j[s2 + 'Leg'] || (j.legs && j.legs[s2]);
+        if (A) nodes.push(A.upper, A.elbow);
+        if (L) nodes.push(L.hip, L.thigh, L.knee);
+      }
+      for (const n of nodes) if (n) from.set(n, n.quaternion.clone());
+      clearAxes(j);
+      poseSeated(j, 0);
+      for (const [n, q] of from) n.quaternion.slerpQuaternions(q, n.quaternion.clone(), kSettle);
+    }
   }
 
   _wrap(a) {

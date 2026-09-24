@@ -201,7 +201,7 @@ function offsetFrom(ik, base, v, sx, out) {
 }
 
 /** The rest target (grip / peg) of one limb, in world space. */
-function restTarget(ik, key, out) {
+export function restTarget(ik, key, out) {
   const r = ik.rest[key];
   out.set(r.x, r.y, r.z);
   return ik.bike.localToWorld(out);

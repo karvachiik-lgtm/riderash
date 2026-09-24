@@ -785,3 +785,30 @@ export function armAim(j, side, dir, hint, flex) {
   A.upper.quaternion.setFromRotationMatrix(_aB.makeBasis(_aX, _aY, _aZ));
   if (A.elbow) A.elbow.rotation.set(-flex, 0, 0);          // - flexes toward local +Z
 }
+
+/**
+ * CONTRAPPOSTO: weight on one leg. The pelvis drops on the relaxed side, that
+ * knee bends and the foot rests forward, the shoulders tilt the other way and
+ * the head levels against them. Rated more attractive than a square stance in
+ * perception studies of 3D figures (Archives of Sexual Behavior, 2019), and it
+ * is the classic figure-drawing pose for the same reason. Layer it on after
+ * poseStanding. `relaxed` is the side that does NOT carry the weight.
+ */
+export function contrapposto(j, amt = 1, relaxed = 'right') {
+  if (!j || amt <= 0) return;
+  const s = relaxed === 'right' ? 1 : -1;   // + tilts the rig's left (+x) hip UP
+  const a = 0.085 * amt * s;
+  if (j.pelvis) j.pelvis.rotation.z += a;
+  for (const side of ['left', 'right']) {
+    const L = j[side + 'Leg'] || (j.legs && j.legs[side]);
+    if (!L) continue;
+    if (L.hip) L.hip.rotation.z -= a;        // legs stay plumb under the tilt
+    if (side === relaxed) {
+      if (L.thigh) L.thigh.rotation.x -= 0.14 * amt;   // knee a little forward
+      if (L.knee) L.knee.rotation.x += 0.32 * amt;     // and bent
+      if (L.hip) L.hip.rotation.y += 0.12 * amt * (side === 'left' ? 1 : -1);   // toe turned out
+    }
+  }
+  if (j.torso) j.torso.rotation.z -= a * 1.3;          // shoulders tilt the other way
+  if (j.neck) j.neck.rotation.z += a * 0.7;            // head levels against them
+}

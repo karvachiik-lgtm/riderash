@@ -28,7 +28,7 @@ import { cloneWithJoints } from './rigclone.js';
 import { RIDING } from './reach.js';
 import { CFG } from './config.js';
 import { ATTACKS } from './combat.js';
-import { clearAxes, applyAction, poseSeated, poseStanding, poseCombat, solveSeat, actionDuration, armAim } from './riderpose.js';
+import { clearAxes, applyAction, poseSeated, poseStanding, poseCombat, solveSeat, actionDuration, armAim, contrapposto } from './riderpose.js';
 // The race's own rider builder. assets/rider.js may not import anything, but it
 // may be imported: building the body here, from the live spec, is what makes a
 // slider change the figure rather than just the numbers under it.
@@ -936,6 +936,8 @@ export class Showroom {
       b.position.y = walking ? Math.abs(Math.sin((t / L) * Math.PI * 2)) * 0.03 : 0;
       b.rotation.y = 0;
       if (j.pelvis) j.pelvis.rotation.z = 0;
+      // a feminine figure at rest stands in contrapposto
+      if (this.anim === 'idle' && this.spec.look && this.spec.look.figure === 'f') { contrapposto(j, 1, 'right'); b.position.y -= 0.008; }
       const emote = EMOTES[this.anim];
       if (emote) { j.__chainAlwaysOut = false; if (j.chain) j.chain.visible = false; emote(j, t, b, this.spec); return; }
     } else {

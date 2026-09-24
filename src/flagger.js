@@ -16,7 +16,7 @@ import * as THREE from 'three';
 import { CFG } from './config.js';
 import { centreAt, headAt } from './level.js';
 import { makeSpec } from './bodyspec.js';
-import { poseStanding, armAim } from './riderpose.js';
+import { poseStanding, armAim, contrapposto } from './riderpose.js';
 import { mergeJoints } from '../assetlib.js';
 import buildRider from '../assets/rider.js';
 
@@ -211,6 +211,8 @@ export class Flagger {
     const clearing = since >= FLAGGER.DROP_T * 0.6 && since < FLAGGER.DROP_T * 0.6 + FLAGGER.CLEAR_T;
     poseStanding(j, clearing ? since * 14 : 0, clearing ? 1 : 0);
     b.position.y = clearing ? Math.abs(Math.sin(since * 14)) * 0.04 : 0;
+    // standing still, she stands on one leg: contrapposto
+    if (!clearing) { contrapposto(j, 1, 'left'); b.position.y -= 0.008; }
     if (clearing) {
       // run side-on, toward the verge (+lateral is her left as she faces the grid)
       this.body.rotation.y = Math.PI / 2 * Math.min(1, (since - FLAGGER.DROP_T * 0.6) / 0.15);

@@ -144,6 +144,18 @@ export default function (THREE) {
     return new THREE.LatheGeometry(pts, sides, Math.PI / sides);
   };
   const R0 = S.limbR * (FEM ? 0.86 : 1);
+  // A ROUNDED DOME for sculpting: (1 - d^2)^2 inside the unit ellipse, zero
+  // outside. Zero slope at the rim (it blends into the body with no crease)
+  // and a broad, round crown (no peak) -- the smooth, low-curvature kind of
+  // deformation parametric body models use (SMPL-style blend shapes,
+  // biharmonic weights), where a narrow Gaussian on a coarse mesh came out
+  // pointed.
+  const dome = (d2) => (d2 >= 1 ? 0 : (1 - d2) * (1 - d2));
+  // curved flesh is smooth-shaded: faceting is what made the shapes read as
+  // cut stones rather than a body
+  const smoothOf = (m) => { const c = m.clone(); c.flatShading = false; c.needsUpdate = true; return c; };
+  // cloth laid on a sculpt wins the depth test against the skin under it
+  const clothOn = (m) => { const c = smoothOf(m); c.polygonOffset = true; c.polygonOffsetFactor = -2; c.polygonOffsetUnits = -2; return c; };
   // LOOK MESHES ARE NOT MEASURED. The rig is normalised by its bounding box
   // (see the bottom of this file) and a backpack or a ponytail must not slide
   // the body along the saddle; `lk` tags a mesh the normaliser skips.
@@ -262,7 +274,7 @@ export default function (THREE) {
     // rounded, lifted lobes with a soft centre crease, fullest a little below
     // the middle -- one surface, no balls. SEAT slider scales it.
     const hr = S.pelvisW * (sw ? 0.5 : 0.54);
-    const hg = new THREE.SphereGeometry(hr, 22, 16);
+    const hg = new THREE.SphereGeometry(hr, 36, 28);
     {
       const p = hg.attributes.position, B = 0.42 * L.seat;
       for (let i = 0; i < p.count; i++) {
@@ -271,16 +283,16 @@ export default function (THREE) {
         const phi = Math.atan2(x, -z);              // 0 = straight back
         let w = 0;
         for (const sd of [-1, 1]) {
-          const dp = (phi - sd * 0.5) / 0.55, dy = y + 0.38, sg = dy > 0 ? 0.5 : 0.34;
-          w = Math.max(w, Math.exp(-dp * dp - (dy / sg) * (dy / sg)));
+          const dp = (phi - sd * 0.5) / 0.95, dy = y + 0.3, sg = dy > 0 ? 1.1 : 0.8;
+          w = Math.max(w, dome(dp * dp + (dy / sg) * (dy / sg)));
         }
         const k = 1 + B * w;
         p.setXYZ(i, p.getX(i) * (1 + B * w * 0.35), p.getY(i) + w * B * 0.08 * hr, p.getZ(i) * k);
       }
       hg.computeVertexNormals();
     }
-    pelvis.add(mk(hg, bareLegs ? skirtMat : denim, 0, -S.pelvisH * (sw ? 0.1 : 0.05), 0));
-    pelvis.children[pelvis.children.length - 1].scale.set(sw ? 1.24 : 1.22, (S.pelvisH / S.pelvisW) * (sw ? 0.85 : 1.0), (S.pelvisD / S.pelvisW) * 0.95);
+    pelvis.add(lk(mk(hg, smoothOf(bareLegs ? skirtMat : denim), 0, -S.pelvisH * (sw ? 0.1 : 0.05), 0)));
+    pelvis.children[pelvis.children.length - 1].scale.set(sw ? 1.24 : 1.22, (S.pelvisH / S.pelvisW) * (sw ? 1.0 : 1.15), (S.pelvisD / S.pelvisW) * 0.95);
   }
   if (!bareLegs) {
     // belt, and a steel buckle at the front
@@ -355,7 +367,7 @@ export default function (THREE) {
     }
     return out;
   };
-  const trunkGeo = FEM ? seg(TRUNK_LEN, densify(TRUNK_PROF, 22), 20) : seg(TRUNK_LEN, TRUNK_PROF);
+  const trunkGeo = FEM ? seg(TRUNK_LEN, densify(TRUNK_PROF, 40), 36) : seg(TRUNK_LEN, TRUNK_PROF);
   trunkGeo.rotateX(Math.PI);                  // grow UP from the lumbar joint
   // THE BUST, SCULPTED INTO THE TORSO. Figure modellers bring the chest out of
   // the torso mesh rather than attach shapes to it (Polycount's body-topology
@@ -367,7 +379,7 @@ export default function (THREE) {
   const bustW = new Float32Array(trunkGeo.attributes.position.count);
   const trunkT = new Float32Array(trunkGeo.attributes.position.count);
   if (FEM) {
-    const p = trunkGeo.attributes.position, A = 0.4 * L.bust, TB = 0.73 - 0.015 * (L.bust - 1);
+    const p = trunkGeo.attributes.position, A = 0.4 * L.bust, TB = 0.7 - 0.015 * (L.bust - 1);
     for (let i = 0; i < p.count; i++) {
       const x = p.getX(i), y = p.getY(i), z = p.getZ(i), r = Math.hypot(x, z);
       const t = y / TRUNK_LEN;
@@ -376,8 +388,11 @@ export default function (THREE) {
       const phi = Math.atan2(x, z);             // 0 = straight ahead
       let w = 0;
       for (const sd of [-1, 1]) {
-        const dp = (phi - sd * 0.46) / 0.44, dt = t - TB, sg = dt > 0 ? 0.13 : 0.07;
-        w = Math.max(w, Math.exp(-dp * dp - (dt / sg) * (dt / sg)));
+        // an ellipse on the chest: wider than tall, taller above the fullest
+        // line than below it (the teardrop), the two lobes overlapping a
+        // little so the cleavage is a soft valley, not a gap
+        const dp = (phi - sd * 0.46) / 0.62, dt = t - TB, sg = dt > 0 ? 0.33 : 0.19;
+        w = Math.max(w, dome(dp * dp + (dt / sg) * (dt / sg)));
       }
       bustW[i] = w;
       // the small of the back curves in (the S of a standing profile)
@@ -391,15 +406,17 @@ export default function (THREE) {
   // Cut a CLOTH SHELL from the sculpted trunk: the triangles whose vertices all
   // pass `keep`, pushed out by `grow` -- so bikini cups, a crop top or a
   // bodice follow the exact same shape instead of fighting it.
+  // Offset along the SURFACE NORMAL (a radial push left the top and underside
+  // of a curve sitting on the skin, and the skin showed through).
   const shellOf = (src, keep, grow) => {
-    const pos = src.attributes.position, uv = src.attributes.uv, idx = src.index;
+    if (!src.attributes.normal) src.computeVertexNormals();
+    const pos = src.attributes.position, nrm = src.attributes.normal, uv = src.attributes.uv, idx = src.index;
     const P2 = [], U2 = [];
     for (let i = 0; i < idx.count; i += 3) {
       const tri = [idx.getX(i), idx.getX(i + 1), idx.getX(i + 2)];
       if (!tri.every(keep)) continue;
       for (const v of tri) {
-        const x = pos.getX(v), z = pos.getZ(v), r = Math.hypot(x, z) || 1, k = (r + grow) / r;
-        P2.push(x * k, pos.getY(v), z * k);
+        P2.push(pos.getX(v) + nrm.getX(v) * grow, pos.getY(v) + nrm.getY(v) * grow * 0.12, pos.getZ(v) + nrm.getZ(v) * grow);
         if (uv) U2.push(uv.getX(v), uv.getY(v));
       }
     }
@@ -410,7 +427,9 @@ export default function (THREE) {
     return g2;
   };
   const torsoMat = (jacketLike || TOP === 'vest') ? leather : TOP === 'crop' || TOP === 'bikini' ? skin : cotton;
-  const trunk = mk(trunkGeo, torsoMat, 0, 0.0, 0);
+  const trunk = mk(trunkGeo, FEM ? smoothOf(torsoMat) : torsoMat, 0, 0.0, 0);
+  // (a sculpt is look, not skeleton: it must not slide the rig on the saddle)
+  if (FEM) lk(trunk);
   // (the feminine torso is wider side to side at the same depth: the canon's
   // 1.3-head waist and 2-head hip on a trunk cut for a 0.9-head waist)
   const TWx = FEM ? TW * 1.28 : TW;
@@ -428,7 +447,7 @@ export default function (THREE) {
   torso.add(trunk);
   if (TOP === 'crop' && FEM) {
     // a cropped tee cut from the sculpted trunk: everything above the midriff
-    const band = add(torso, mk(shellOf(trunkGeo, (v) => trunkT[v] > 0.55, 0.035), cotton, 0, 0, 0));
+    const band = add(torso, mk(shellOf(trunkGeo, (v) => trunkT[v] > 0.55, 0.035), clothOn(cotton), 0, 0, 0));
     band.scale.set(TWx * 0.5, 1, TD * 0.5);
   } else if (TOP === 'crop') {
     // a cropped tee: the cloth from under the bust up, the midriff bare
@@ -444,13 +463,13 @@ export default function (THREE) {
   if (FEM) {
     // bikini cups: the bust lobes, cut from the trunk as a cloth shell
     if (TOP === 'bikini') {
-      const cups = add(torso, mk(shellOf(trunkGeo, (v) => bustW[v] > 0.3, 0.03), cotton, 0, 0, 0));
+      const cups = add(torso, mk(shellOf(trunkGeo, (v) => bustW[v] > 0.12, 0.03), clothOn(cotton), 0, 0, 0));
       cups.scale.set(TWx * 0.5, 1, TD * 0.5);
     }
     // a bodice (dress, swimsuit) ends above the bust: skin over the upper
     // chest, dipping between the lobes -- a sweetheart line
     if (TOP === 'dress' || TOP === 'onepiece') {
-      const neck = add(torso, mk(shellOf(trunkGeo, (v) => trunkT[v] > 0.83 + 0.09 * bustW[v] && bustW[v] < 0.5, 0.02), skin, 0, 0, 0));
+      const neck = add(torso, mk(shellOf(trunkGeo, (v) => trunkT[v] > 0.83 + 0.09 * bustW[v] && bustW[v] < 0.5, 0.02), clothOn(skin), 0, 0, 0));
       neck.scale.set(TWx * 0.5, 1, TD * 0.5);
     }
     if (TOP === 'bikini') {

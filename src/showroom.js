@@ -409,7 +409,11 @@ export class Showroom {
     const skinHost = document.getElementById('s-skin');
     if (skinHost) { skinHost.remove(); swatches(document.querySelector('#panel .tab[data-tab="body"] .grp:last-child'), 'colors', 'skin', PALETTE.skin); }
     const bodyTab = document.querySelector('#panel .tab[data-tab="body"]');
-    if (bodyTab && !bodyTab.querySelector('.figure')) { const g = grp(bodyTab, 'Figure'); g.classList.add('figure'); chips(g, 'figure'); }
+    if (bodyTab && !bodyTab.querySelector('.figure')) {
+      const g = grp(bodyTab, 'Figure'); g.classList.add('figure'); chips(g, 'figure');
+      slider(g, 'Bust', 0.7, 1.7, 0.01, () => this.spec.look.bust, (v) => this.set({ look: { bust: v } }), (v) => Math.round(v * 100) + '%');
+      sub(g, 'Bust applies to the feminine figure');
+    }
 
     // ---- HEAD ----
     const H = document.getElementById('t-head');

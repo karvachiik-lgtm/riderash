@@ -37,7 +37,7 @@ export default function (THREE) {
   // the original rider -- full-face lid, leathers, gloves -- so a spec without a
   // look (an old save, a rival) builds the same body as before, mesh for mesh.
   const L = Object.assign({
-    helmet: 'full', helmetSize: 1, headSize: 1, visor: 'smoke', stripe: 'racing', finish: 'gloss', hair: 'short',
+    helmet: 'full', helmetSize: 1, headSize: 1, bust: 1, visor: 'smoke', stripe: 'racing', finish: 'gloss', hair: 'short',
     hairColor: 0x2a1d14, beard: 'none', top: 'leather', bottom: 'jeans', pattern: 'plain', figure: 'm',
     hat: 'none', shoes: 'boots', tattoo: 'none', inkColor: 0x1c2433,
     glasses: 'none', chain: 'none', scarf: 'none', scarfColor: 0x8a1f1f, earring: false,
@@ -350,13 +350,27 @@ export default function (THREE) {
   if (FEM) {
     // THE BUST: two soft masses on the chest, in whatever covers it (a
     // bikini's cups are the cloth; everything else wears them in the top)
-    const by = T * 0.7, br = TW * 0.155;
+    // Sized by the BUST slider; shaped as a TEARDROP -- fuller below the
+    // centre, a gentle slope above -- set slightly apart and angled out, the
+    // way a figure reads in profile, instead of a round ball.
+    const k = L.bust, br = TW * 0.19 * k, by = T * (0.69 - 0.02 * (k - 1));
     const bustMat = TOP === 'bikini' || TOP === 'crop' ? cotton : torsoMat === skin ? cotton : torsoMat;
+    const geo = new THREE.SphereGeometry(br, 16, 12);
+    {
+      const p = geo.attributes.position;
+      for (let i = 0; i < p.count; i++) {
+        const y = p.getY(i) / br, z = p.getZ(i) / br;
+        // lower half fuller and further forward, upper half flatter
+        const lower = Math.max(0, -y), upper = Math.max(0, y);
+        p.setZ(i, p.getZ(i) * (1 + 0.28 * lower - 0.35 * upper) + (z > 0 ? br * 0.1 * lower : 0));
+        p.setY(i, p.getY(i) * (y < 0 ? 0.92 : 1.05));
+      }
+      geo.computeVertexNormals();
+    }
     for (const s of [-1, 1]) {
-      // set into the chest and flattened, so it reads as a shaped torso
-      const b = add(torso, mk(new THREE.SphereGeometry(br * 1.1, 12, 8), bustMat, s * TW * 0.14, by, surf(by) - br * 0.42));
-      b.scale.set(1.0, 0.85, 0.62);
-      b.rotation.set(-0.15, s * 0.18, 0);
+      const b = add(torso, mk(geo, bustMat, s * TW * 0.155 * (0.9 + 0.1 * k), by, surf(by) - br * 0.28));
+      b.scale.set(1.0, 0.95, 0.8);
+      b.rotation.set(0.12, s * 0.22, 0);
     }
     if (TOP === 'bikini') {
       // the underband, and a tie at the back

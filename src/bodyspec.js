@@ -236,7 +236,7 @@ export const LOOK_OPTIONS = {
   gloves:  ['full', 'fingerless', 'none'],
 };
 export const LOOK_DEFAULTS = {
-  helmet: 'full', helmetSize: 1.0, headSize: 1.0, visor: 'smoke', stripe: 'racing', finish: 'gloss',
+  helmet: 'full', helmetSize: 1.0, headSize: 1.0, bust: 1.0, visor: 'smoke', stripe: 'racing', finish: 'gloss',
   hair: 'short', hairColor: 0x2a1d14, beard: 'none',
   top: 'leather', bottom: 'jeans', pattern: 'plain', figure: 'm', hat: 'none', shoes: 'boots', tattoo: 'none', inkColor: 0x1c2433,
   glasses: 'none', chain: 'none', scarf: 'none', scarfColor: 0x8a1f1f,
@@ -253,6 +253,7 @@ export function makeLook(l) {
   }
   for (const k of ['earring', 'spikes', 'backpack']) if (typeof l[k] === 'boolean') o[k] = l[k];
   if (Number.isFinite(l.helmetSize)) o.helmetSize = Math.max(0.85, Math.min(1.3, l.helmetSize));
+  if (Number.isFinite(l.bust)) o.bust = Math.max(0.7, Math.min(1.7, l.bust));
   if (Number.isFinite(l.headSize)) o.headSize = Math.max(0.85, Math.min(1.35, l.headSize));
   return o;
 }

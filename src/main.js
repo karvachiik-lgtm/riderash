@@ -14,6 +14,7 @@ import { CrossTraffic } from './crosstraffic.js';
 import { placeHazards, HazardView } from './hazards.js';
 import { Animals, ANIMALS } from './animals.js';
 import { Parked } from './parked.js';
+import { CrestShadows } from './crestshadow.js';
 import { Flagger } from './flagger.js';
 import { trafficContact, applyTrafficHit } from './traffic.js';
 import { buildLighting, followSun } from './lighting.js';
@@ -171,6 +172,7 @@ let crossTraffic = null;   // cars coming across at the crossroads
 let hazardView = null;     // oil slicks and gravel on the deck
 let animals = null;        // cows and deer on the rural roads
 let parked = null;         // cars at the kerb in town
+let crestShadows = null;   // a car's shadow shows over a blind crest before the car does
 let roadGroup = null, roadsideGroup = null;   // rebuilt when a course's lane layout differs (lanes.js)
 let raceCounter = 0;       // races started this session, so a replayed event gets a new outfit
 
@@ -478,6 +480,7 @@ async function init() {
   trackDress = new TrackDress(scene);
   try { flagger = new Flagger(scene); } catch (e) { console.warn('[riderash] flagger:', e); flagger = null; }
   try { hazardView = new HazardView(scene); } catch (e) { console.warn('[riderash] hazards:', e); }
+  try { crestShadows = new CrestShadows(scene); window.__CREST__ = crestShadows; } catch (e) { console.warn('[riderash] crest shadows:', e); }
   try { parked = new Parked(scene); window.__PARKED__ = parked; } catch (e) { console.warn('[riderash] parked:', e); }
   try { animals = new Animals(scene); window.__ANIMALS__ = animals; } catch (e) { console.warn('[riderash] animals:', e); }
   try { crossTraffic = new CrossTraffic(scene); window.__CROSS__ = crossTraffic; } catch (e) { console.warn('[riderash] cross traffic:', e); crossTraffic = null; }
@@ -1586,6 +1589,41 @@ function stepGame(dt) {
     else if (p.slipstream > 0.55) state.warn = 'SLIPSTREAM';
   }
 
+  // ---- ONCOMING, IN YOUR LANE (Road Rash): an oncoming driver who sees a
+  // bike on their side of the road leans on the horn early -- 1.5 to 4 s out,
+  // a long blast, once per car -- and the HUD calls it. It is the warning to
+  // get back over, well before the last-second horn below.
+  state.oncomingCd = Math.max(0, (state.oncomingCd || 0) - dt);
+  {
+    const cars = world.traffic && world.traffic.userData ? world.traffic.userData.cars : null;
+    const p = player.phys;
+    if (cars && p.speed > 10 && !player.fighter.down && state.countdown <= 0) {
+      for (const car of cars) {
+        const u = car.userData;
+        if (u.at === undefined || u.dir <= 0 || u.warnedOncoming) continue;   // oncoming only (dir +1)
+        const d = u.s - p.s;
+        if (d <= 0) continue;
+        const ttc = (d - u.halfL) / (p.speed + u.speed);
+        if (ttc > 4 || ttc < 1.5) continue;
+        if (Math.abs(u.at - p.lateral) > u.halfW + 1.0) continue;
+        u.warnedOncoming = true;
+        if (state.oncomingCd <= 0) {
+          audio.oneShot('horn', 0.75, (u.hornPitch || 1) * 0.98);
+          setTimeout(() => audio.oneShot('horn', 0.7, (u.hornPitch || 1) * 0.98), 160);   // a long blast
+          state.warn = 'ONCOMING!';
+          state.oncomingCd = 1.5;
+        }
+        break;
+      }
+      // re-arm a car once it is behind the rider, or far out of range again
+      // (recycled / teleported): it may come round again
+      for (const car of cars) {
+        const u = car.userData;
+        if (u.warnedOncoming && (u.s < p.s - 10 || u.s > p.s + 400)) u.warnedOncoming = false;
+      }
+    }
+  }
+
   // ---- TRAFFIC: horn, and REAL contact for every rider -------------------
   //
   // HORN. A driver leans on it when a bike is about to be where they are: any
@@ -1673,6 +1711,11 @@ function stepGame(dt) {
       if (hz === 'gravel') audio.oneShot('scrape', 0.5, 0.8);
     }
     state.lastHazard = hz;
+  }
+
+  // SHADOWS OVER THE CREST: cars hidden behind a rise show their shadow first
+  if (crestShadows) {
+    try { crestShadows.update(dt, player.phys.s, world.traffic && world.traffic.userData ? world.traffic.userData.cars : null); } catch (e) { /* cosmetic */ }
   }
 
   // PARKED CARS: solid; a side scrape is a scrape, hitting the back of one

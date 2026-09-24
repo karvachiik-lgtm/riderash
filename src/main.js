@@ -8,6 +8,7 @@ import { PLAYER_CHAIN, chainState } from './chainweapon.js';   // [chain agent]
 import { buildRoad, buildRoadside, buildBackdrop, centreAt, centreTangent, headAt } from './level.js';
 import { buildTraffic, updateTraffic, trafficHit, resetTraffic } from './world.js';
 import { buildFinish, placeFinish } from './finishline.js';
+import { TrackDress } from './trackdress.js';
 import { trafficContact, applyTrafficHit } from './traffic.js';
 import { buildLighting, followSun } from './lighting.js';
 import { Player } from './player.js';
@@ -158,6 +159,7 @@ let playerSpec = makeSpec({ height: 1.75, build: 'normal', colors: { ...(CFG.PLA
 // constructed after the loader has run. `loadAssets` fills it in.
 const assets = { bike: null, rider: null };
 let finishGantry = null;   // the FINISH banner, moved to each race's line in __START__
+let trackDress = null;     // chevrons, rails, warnings, countdown boards, START gantry (per course)
 
 // The character designer. Constructed lazily the first time it is opened, so a
 // player who never opens it never pays for its scene.
@@ -451,6 +453,7 @@ async function init() {
   scene.add(road, side, back, traffic);
   finishGantry = buildFinish();
   scene.add(finishGantry);
+  trackDress = new TrackDress(scene);
   world.traffic = traffic;
 
   // fills the MODULE-SCOPE `assets`, so the showroom can reach the rider later
@@ -1792,6 +1795,7 @@ window.__START__ = () => {
   try { if (scenery) scenery.setCourse(spine); } catch (e) { console.warn('[riderash] scenery:', e); }
   state.finishS = spine.totalLength;
   placeFinish(finishGantry, state.finishS);
+  try { if (trackDress) window.__TRACKDRESS__ = trackDress.build(state.finishS); } catch (e) { console.warn('[riderash] trackdress:', e); }
   world.raceLen = spine.totalLength;
   resetRace();
   state.running = true;

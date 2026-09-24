@@ -40,9 +40,9 @@ function textTexture(text) {
   return t;
 }
 
-export function buildFinish() {
+export function buildFinish(label = 'FINISH') {
   const g = new THREE.Group();
-  g.name = 'finish';
+  g.name = label.toLowerCase();
   const span = CFG.ROAD_W + CFG.KERB_W * 2 + 1.6;
   const H = 6.2;
   const steel = new THREE.MeshStandardMaterial({ color: 0x9aa0a6, roughness: 0.45, metalness: 0.6, name: 'finish_steel' });
@@ -56,7 +56,7 @@ export function buildFinish() {
   g.add(beam);
   // banner: chequer band over a red FINISH board, readable from both sides
   const board = new THREE.Mesh(new THREE.PlaneGeometry(span * 0.8, 1.1),
-    new THREE.MeshBasicMaterial({ map: textTexture('FINISH'), side: THREE.DoubleSide, fog: true, name: 'finish_board' }));
+    new THREE.MeshBasicMaterial({ map: textTexture(label), side: THREE.DoubleSide, fog: true, name: 'finish_board' }));
   board.position.set(0, H - 0.9, 0);
   board.rotation.y = Math.PI;   // front face toward the approaching rider (travel is local +z)
   g.add(board);

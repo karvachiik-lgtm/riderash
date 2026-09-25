@@ -41,6 +41,7 @@ import { mergeJoints } from '../assetlib.js';
 import { clearAxes, poseSeated, poseRideDynamics, poseCombat, solveSeat, solveLimbs } from './riderpose.js';
 import { Fighter, ATTACKS } from './combat.js';
 import { Dismount } from './dismount.js';
+import { ensureRest } from './ragdoll.js';
 
 const MERGE_OPTS = { vertexColors: true, allNodes: true, keepColour: (h) => h === 0x1b1b1e };
 
@@ -174,6 +175,12 @@ export class Cop {
       // Hands to the grips and KNEES FORWARD by IK, like every other rider --
       // without this the cop fell back to the bare angle table.
       try { solveSeat(this.rider, this.bike); } catch (e) { /* table fallback */ }
+      // HIS REST POSE, taken now while it is the clean riding pose. The on-foot
+      // gait (arrest.js, via dismount.poseOnFoot) sways the pelvis with `+=` and
+      // relies on restoreRest() to undo it each frame; without a snapshot that
+      // was a no-op and the sway ACCUMULATED -- the cop walked up to you with
+      // his pelvis rolled 2.8 rad, upside down (tools/arrestcheck.mjs).
+      ensureRest(this.rider);
     }
     this.group.traverse((n) => { if (n.isMesh) { n.castShadow = false; n.receiveShadow = true; } });
     scene.add(this.group);

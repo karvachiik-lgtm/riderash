@@ -1309,11 +1309,11 @@ function frameBody(dt) {
 // runs the same frameBody the browser does, just without waiting on the GPU.
 window.__STATE__ = state;
 window.__CFG__ = CFG;       // harness: flip tunables at runtime
-window.__SIM__ = (sec, renderAfter = false) => {
+window.__SIM__ = (sec, renderAfter = false, dt = 1 / 60) => {   // dt: harness frame-rate sweeps
   const prev = window.__NORENDER__;
   window.__NORENDER__ = true;
-  const n = Math.max(1, Math.round(sec * 60));
-  try { for (let i = 0; i < n; i++) { frameBody(1 / 60); input.endFrame(); } }
+  const n = Math.max(1, Math.round(sec / dt));
+  try { for (let i = 0; i < n; i++) { frameBody(dt); input.endFrame(); } }
   finally { window.__NORENDER__ = prev; }
   if (renderAfter) window.__RENDER__();
   return n;
@@ -2466,13 +2466,17 @@ function startPlayerArrest() {
   if (replay) replay.event('cop', 'ARRESTED', player.fighter, 5);
 }
 const BRAKE_INPUT = { throttle: 0, brake: 1, steer: 0, tuck: false, attackPressed: () => false, pressed: {} };
+// once stopped, hands OFF the brake: brake held at a standstill is the player's
+// paddle-back (physics.js BACKING UP), and a collared bike crept back at walking
+// pace through the whole scene, the cop chasing it (tools/arrestcheck.mjs)
+const STOPPED_INPUT = { ...BRAKE_INPUT, brake: 0 };
 function stepArrestScene(dt) {
   const A = state.arrest;
   // the player: a thrown body finishes its fall and STAYS down; one still on
   // the bike (collared to a stop) brakes to a halt
   const d = player.dismount;
   if (d && d.onFoot) { if (d.state === 'FALLING') d.update(dt, null); d.render(dt); }
-  else { player.phys.advance(dt, BRAKE_INPUT); player.phys.sync(); player.group.position.copy(player.phys.pos); }
+  else { player.phys.advance(dt, player.phys.speed > 0.3 ? BRAKE_INPUT : STOPPED_INPUT); player.phys.sync(); player.group.position.copy(player.phys.pos); }
   // the pack rides on down the road
   for (const r of rivals) {
     if (r.out || r.fighter.down || !r.phys) continue;
@@ -2590,6 +2594,7 @@ function radarActive(live) {
 }
 
 function freeGroupBuffers(root) {
+  if (window.__KEEP_BUFFERS__) return;   // harness: keep CPU geometry to raycast the road (tools/arrestcheck.mjs)
   const drop = (a) => { if (a && a.onUpload) a.onUpload(function () { this.array = null; }); };
   root.traverse((o) => {
     if (o.isSprite) return;
@@ -2609,7 +2614,15 @@ function freeGroupBuffers(root) {
 // hung), a bust gets a mugshot off the cuffing shot, a plunge a postcard.
 const endPhoto = new EndPhoto();
 window.__ENDPHOTO__ = endPhoto;
-window.__ENDINGS__ = { bust: () => { state.raceOver = true; startPlayerArrest(); }, plunge: () => startPlunge() };   // harness: play an ending
+window.__ENDINGS__ = { bust: () => { state.raceOver = true; startPlayerArrest(); }, plunge: () => startPlunge(),   // harness: play an ending
+  // harness: the cop arrests rival `i` where he lies (tools/arrestcheck.mjs)
+  arrestRival: (i, variant) => {
+    const r = rivals[i];
+    if (!r || !cop || state.copArrest || state.arrest) return false;
+    r.out = true; r.outWhy = 'arrested';
+    state.copArrest = new Arrest(cop, { phys: r.phys, fighter: r.fighter, dismount: r.dismount }, { scene, variant });
+    return true;
+  } };
 const END = { SNAP: 2.4, get HOLD() { return window.__END_HOLD__ ?? (navigator.webdriver ? 0.4 : 3.4); } };
 let snapNext = false, photoReq = null;
 function endCtx(pos) {

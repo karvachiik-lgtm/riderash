@@ -27,15 +27,19 @@
 // that rider is out.
 import * as THREE from 'three';
 import { centreAt, centreTangent } from './level.js';
-import { restoreRest } from './ragdoll.js';
+import { ensureRest, restoreRest, captureLocal, blendFrom } from './ragdoll.js';
 import { armAim, poseStanding } from './riderpose.js';
+import { solveLimb, effectorWorld, rootWorld } from './limbik.js';
 
 export const ARREST = {
   STOP_MAX: 3.0,       // s to pull up
   OFF_T: 0.8,          // s stepping off
   WALK_V: 1.7,         // m/s
-  WALK_MAX: 5.5,       // s: then he is simply there
-  REACH: 1.0,          // m from the body where he stops
+  WALK_MAX: 9.0,       // s: then he starts where he is. 5.5 ran out on the 7 m walk
+                       // before he had turned to face them (measured)
+  REACH: 0.75,         // m from the suspect's body (pelvis) where he stands to write / lecture
+  CUFF_REACH: 0.32,    // m from the suspect's WRISTS where he stands (or kneels) to cuff
+  CUFF_LOW: 0.2,       // ...and when those wrists are down on the road
   CUFF_T: 2.4,
   WRITE_T: 3.0,        // s writing the ticket (lecture: shorter, he has already said his piece)
   WAG_T: 2.4,          // s of finger-wagging
@@ -46,6 +50,18 @@ export const ARREST = {
 };
 
 const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _t = new THREE.Vector3(), _box = new THREE.Box3();
+const _c = new THREE.Vector3(), _h = new THREE.Vector3(), _pole = new THREE.Vector3();
+/** The road's height under world (x, z): the flat cross-section at the nearest
+ *  centreline point. A walker's height used to be frozen where he stepped off,
+ *  so on a hill he sank into the rise or walked on air (measured: 5-8 cm). */
+function roadY(x, z) {
+  let zc = z;
+  for (let i = 0; i < 3; i++) {
+    centreAt(zc, _c); centreTangent(zc, _t);
+    zc += ((x - _c.x) * _t.x + (z - _c.z) * _t.z) * _t.z;
+  }
+  return centreAt(zc, _c).y;
+}
 function roadPoint(s, lat, out) {                        // + lat = the rider's right
   centreAt(-s, _a); centreTangent(-s, _t);
   return out.set(_a.x + _t.z * lat, _a.y, _a.z - _t.x * lat);
@@ -70,18 +86,78 @@ export class Arrest {
     cop.state = 'arrest';
     cop.active = false;                 // no siren, no radar strobe, not a fighter
     this._detached = false;
+    // REST POSES before anything is posed: the on-foot gait adds its pelvis sway
+    // with `+=` and restoreRest() is what takes it off again each frame. A rig
+    // that had never been through a ragdoll had no snapshot, so that was a no-op
+    // and the sway piled up into an upside-down cop (tools/arrestcheck.mjs).
+    if (cop.rider) ensureRest(cop.rider);
+    if (this.suspect) ensureRest(this.suspect.owner.rider);
+    // CUFFED STANDING: behind a kneeling suspect, or beside one still in the
+    // saddle (their wrists are at the bars, a metre up: kneeling, he cuffed
+    // the road). Kneeling only for a body on the ground.
+    this.standCuff = this.variant === 'knees' || (seated && !this.suspect);
   }
 
-  /** Where the target's BODY is (lying rider or seated one). */
+  /** The suspect's rig, whatever it is doing (seated, thrown, made to kneel). */
+  suspectRig() {
+    const d = this.target.dismount, r = d && d.player && d.player.rider;
+    return r && r.userData && r.userData.joints && r.userData.joints.pelvis ? r : null;
+  }
+
+  /** Where the target's BODY is: the suspect's pelvis (seated, lying or
+   *  kneeling). It used to be the bike's ground point for a seated rider and the
+   *  feet for one made to lie down, so he cuffed the air 1-2 m off (measured). */
   targetPoint(out) {
+    const r = this.suspectRig();
+    if (r && (!this.suspect || this.suspect.pos)) { r.updateWorldMatrix(true, false); return r.userData.joints.pelvis.getWorldPosition(out); }
     if (this.suspect && this.suspect.pos) return out.copy(this.suspect.pos);
     const d = this.target.dismount;
-    if (d && d.onFoot && d.rag && d.rag.root) {           // the thrown body
-      const r = d.player.rider;
-      if (r && r.userData.joints && r.userData.joints.pelvis) return r.userData.joints.pelvis.getWorldPosition(out);
-    }
     if (d && d.onFoot && d.walk) return roadPoint(d.walk.s, d.walk.lateral, out);
     return out.copy(this.target.phys.pos);
+  }
+
+  /** Where he cuffs: the midpoint of the wrists when the scene has put them
+   *  together (knees, ground); otherwise -- still in the saddle, or thrown and
+   *  sprawled -- the wrist on HIS side, which he takes in both hands. (Reaching
+   *  for a far wrist across a sprawled body folded him on top of it.) */
+  wristPoint(out) {
+    const r = this.suspectRig();
+    if (!r || (this.suspect && !this.suspect.pos)) return null;
+    const sj = r.userData.joints, sp = r.userData.spec || { forearm: 0.27 };
+    r.updateWorldMatrix(true, true);
+    const a = sj.leftArm.fore.localToWorld(new THREE.Vector3(0, -sp.forearm, 0));
+    const b = sj.rightArm.fore.localToWorld(new THREE.Vector3(0, -sp.forearm, 0));
+    if (this.suspect) return out.addVectors(a, b).multiplyScalar(0.5);
+    centreTangent(-this.target.phys.s, _t);                  // + lateral = (t.z, -t.x)
+    const nx = _t.z * this.side, nz = -_t.x * this.side;     // toward his side
+    return out.copy(a.x * nx + a.z * nz >= b.x * nx + b.z * nz ? a : b);
+  }
+
+  /** Where he stands to do the business, on the ground: behind a kneeling
+   *  suspect (cuffed from behind), otherwise at arm's length on his own side. */
+  standPoint(tp, from, out) {
+    const S = this.suspect;
+    // cuffing, he works at the WRISTS and stands close enough to reach them
+    // (an arm is ~0.6 m: at the ticket's arm's length he cuffed 0.3-0.7 m of
+    // air, measured); writing or lecturing, at arm's length from the body
+    const cuffing = this.variant !== 'ticket' && this.variant !== 'lecture';
+    const wp = cuffing ? this.wristPoint(_pole) || tp : tp;
+    // wrists down on the road: he kneels in close over them (from 0.32 m he
+    // had to fold 65 deg at the waist and still came up short: measured)
+    const low = cuffing && wp !== tp && wp.y - roadY(wp.x, wp.z) < 0.35;
+    const r = cuffing ? (low ? ARREST.CUFF_LOW : ARREST.CUFF_REACH) : ARREST.REACH;
+    // A FIXED SPOT, not one measured from wherever he is: that slid along with
+    // him as he came up the bike, and he spiralled in onto the seat (measured:
+    // 0.08 m from a seated rider's pelvis). Behind a kneeling suspect; else
+    // square across the road from the work, on his own side.
+    if (S && S.pos && this.variant === 'knees') {
+      out.set(wp.x - Math.sin(S.facing) * r, 0, wp.z - Math.cos(S.facing) * r);
+    } else {
+      centreTangent(-this.target.phys.s, _t);             // + lateral = (t.z, -t.x)
+      out.set(wp.x + _t.z * this.side * r, 0, wp.z - _t.x * this.side * r);
+    }
+    out.y = roadY(out.x, out.z);
+    return out;
   }
 
   update(dt) {
@@ -116,6 +192,9 @@ export class Arrest {
       rider.getWorldPosition(_a);
       this.seatAt = _a.clone();
       cop._riderScale = cop._riderScale || rider.scale.x;       // attach() folds the bike's scale in
+      // the riding pose as it was, to blend the step-off out of (a cut from
+      // seated to standing turned the torso 2.2 rad in one frame: measured)
+      this._offPose = captureLocal(rider);
       scene.attach(rider);
       rider.rotation.reorder('YXZ');
       // the stepping-off point: beside the bike, on the target's side
@@ -130,23 +209,30 @@ export class Arrest {
     if (this.phase === 'off') {
       const k = Math.min(1, this.t / ARREST.OFF_T);
       this._pose(j, dt, 0);
+      blendFrom(this._offPose, k * k * (3 - 2 * k));
       _a.copy(this.seatAt).lerp(w.pos, k * k * (3 - 2 * k));
       this._place(rider, _a, w.facing, k);
       if (k >= 1) this._enter('walk');
       return;
     }
     if (this.phase === 'walk') {
-      const dx = tp.x - w.pos.x, dz = tp.z - w.pos.z, dist = Math.hypot(dx, dz);
-      const bearing = Math.atan2(dx, dz);
+      // to the spot he works from, then square up to the body. (He used to walk
+      // at the body until within reach, whichever way he happened to arrive,
+      // and could end the walk facing away from them: measured 114-176 deg.)
+      const sp = this.standPoint(tp, w.pos, _h);
+      const dx = sp.x - w.pos.x, dz = sp.z - w.pos.z, dist = Math.hypot(dx, dz);
+      const arrived = dist < 0.05;
+      const bearing = arrived ? Math.atan2(tp.x - w.pos.x, tp.z - w.pos.z) : Math.atan2(dx, dz);
       let err = bearing - w.facing; while (err > Math.PI) err -= 2 * Math.PI; while (err < -Math.PI) err += 2 * Math.PI;
       w.facing += THREE.MathUtils.clamp(err, -3 * dt, 3 * dt);
-      const v = Math.min(ARREST.WALK_V, Math.max(0, dist - ARREST.REACH) * 1.5) * (Math.abs(err) < 1.2 ? 1 : 0.3);
-      w.pos.x += Math.sin(w.facing) * v * dt; w.pos.z += Math.cos(w.facing) * v * dt;
+      const v = arrived ? 0 : Math.min(ARREST.WALK_V, dist * 2.5) * (Math.abs(err) < 1.2 ? 1 : 0.3);
+      const step = Math.min(v * dt, dist);
+      if (dist > 1e-6) { w.pos.x += dx / dist * step; w.pos.z += dz / dist * step; }
+      w.pos.y = roadY(w.pos.x, w.pos.z);
       if (D) { D.walk.speed = v; D.walk.facing = w.facing; }
       this._pose(j, dt, v);
       this._place(rider, w.pos, w.facing, 1);
-      if (dist <= ARREST.REACH + 0.15 || this.t > ARREST.WALK_MAX) {
-        if (this.t > ARREST.WALK_MAX) { w.pos.x = tp.x - Math.sin(w.facing) * ARREST.REACH; w.pos.z = tp.z - Math.cos(w.facing) * ARREST.REACH; }
+      if ((arrived && Math.abs(err) < 0.1) || this.t > ARREST.WALK_MAX) {
         const first = this.variant === 'lecture' ? 'wag' : this.variant === 'ticket' ? 'write' : 'cuff';
         this._enter(first);
         this.opts.onEvent && this.opts.onEvent(first);
@@ -155,6 +241,7 @@ export class Arrest {
     }
     if (this.phase === 'wag') {
       this._pose(j, dt, 0);
+      this._faceBody(dt, tp);
       this._poseWag(j, Math.min(1, this.t / 0.4), this.t);
       this._place(rider, w.pos, w.facing, 1);
       if (this.t >= ARREST.WAG_T) { this._enter('write'); this.opts.onEvent && this.opts.onEvent('write'); }
@@ -162,6 +249,7 @@ export class Arrest {
     }
     if (this.phase === 'write') {
       this._pose(j, dt, 0);
+      this._faceBody(dt, tp);
       this._poseWrite(j, Math.min(1, this.t / 0.4), this.t);
       this._pad(true);
       this._place(rider, w.pos, w.facing, 1);
@@ -173,6 +261,7 @@ export class Arrest {
     }
     if (this.phase === 'hand') {
       this._pose(j, dt, 0);
+      this._faceBody(dt, tp);
       this._poseHand(j, Math.min(1, this.t / 0.3));
       this._pad(false, true);
       this._place(rider, w.pos, w.facing, 1);
@@ -181,16 +270,21 @@ export class Arrest {
     }
     if (this.phase === 'cuff') {
       this._pose(j, dt, 0);
-      this._poseCuff(j, Math.min(1, this.t / 0.5), this.t, this.variant === 'knees');
+      const k = Math.min(1, this.t / 0.5);
+      this._faceBody(dt, this.wristPoint(_c) || tp);
+      this._poseCuff(j, k, this.t, this.standCuff);
       this._place(rider, w.pos, w.facing, 1);
+      this._cuffHands(j, k);
       if (this.t > 1.1 && !this._clicked) { this._clicked = true; this.opts.onEvent && this.opts.onEvent('click'); }
       if (this.t >= ARREST.CUFF_T) this._enter('hold');
       return;
     }
     if (this.phase === 'hold') {
-      if (j && this.variant !== 'ticket' && this.variant !== 'lecture') { this._pose(j, dt, 0); this._poseCuff(j, Math.max(0, 1 - this.t / 0.6), 0); }
+      const cuffed = this.variant !== 'ticket' && this.variant !== 'lecture';
+      if (j && cuffed) { this._pose(j, dt, 0); this._poseCuff(j, Math.max(0, 1 - this.t / 0.6), 0, this.standCuff); }
       else if (j) { this._pose(j, dt, 0); this._poseHand(j, Math.max(0, 1 - this.t / 0.5)); this._pad(false, this.t < 0.4); }
       if (rider && w) this._place(rider, w.pos, w.facing, 1);
+      if (j && cuffed) this._cuffHands(j, Math.max(0, 1 - this.t / 0.6));
       if (this.t >= ARREST.HOLD_T) { this.done = true; this.opts.onDone && this.opts.onDone(); }
     }
   }
@@ -230,6 +324,123 @@ export class Arrest {
       D.walk.speed = speed;
       D.poseOnFoot(j, dt);
     }
+  }
+
+  // keep squared up to the body through the business (a seated suspect's bike
+  // may still be rolling to a stop)
+  _faceBody(dt, tp) {
+    const w = this.walker;
+    let err = Math.atan2(tp.x - w.pos.x, tp.z - w.pos.z) - w.facing;
+    while (err > Math.PI) err -= 2 * Math.PI; while (err < -Math.PI) err += 2 * Math.PI;
+    w.facing += THREE.MathUtils.clamp(err, -2 * dt, 2 * dt);
+  }
+
+  // THE CUFFS GO ON THE WRISTS: both hands by two-bone IK onto the suspect's
+  // wrists (wherever the variant has put them: behind the head, behind the
+  // back, on the bars, flung out on the road), weighted in by k from the pose.
+  // Called after _place, so every world matrix is this frame's.
+  _cuffHands(j, k) {
+    const ik = j.__ik, sr = this.suspectRig();
+    if (!ik || !sr || k <= 0) return;
+    this._haulArm(sr, k);
+    const sj = sr.userData.joints, sp = sr.userData.spec || { forearm: 0.27, hand: 0.09 };
+    sr.updateWorldMatrix(true, true);
+    const wrist = (A) => A.fore.localToWorld(new THREE.Vector3(0, -sp.forearm, 0));
+    const w = this.walker, rx = Math.cos(w.facing), rz = -Math.sin(w.facing);   // his LEFT (+x of the rig), in world
+    // EACH HAND ON A WRIST: his left hand takes the wrist on his left. (Both
+    // went to the midpoint; wrists behind a head are half a metre apart, so
+    // each hand closed on air 0.25 m off: measured.)
+    let wl = wrist(sj.leftArm), wr = wrist(sj.rightArm);
+    if (wl.x * rx + wl.z * rz < wr.x * rx + wr.z * rz) [wl, wr] = [wr, wl];
+    // still in the saddle (the far hand is on the far grip) or sprawled on the
+    // road: he takes the wrist on his side in both hands
+    if (!this.suspect) {
+      const near = this.wristPoint(new THREE.Vector3());
+      wl = near.clone().addScaledVector(_t.set(rx, 0, rz), 0.05); wr = near.clone().addScaledVector(_t.set(rx, 0, rz), -0.05);
+    }
+    const onto = { left: wl, right: wr };
+    // REACH: bend at the waist just as far as it takes for both hands to get
+    // there (bisection, like riderpose.keepGripsInReach). A wrist out at the
+    // bars or down on the road was 0.15-0.35 m past a straight arm (measured).
+    this.cop.rider.updateWorldMatrix(true, true);
+    const from = { left: ik.limbs.left && effectorWorld(ik.limbs.left), right: ik.limbs.right && effectorWorld(ik.limbs.right) };
+    const solve = () => {
+      this.cop.rider.updateWorldMatrix(true, true);
+      let res = 0;
+      for (const side of ['left', 'right']) if (from[side]) res = Math.max(res, this._cuffArm(ik.limbs[side], side === 'left' ? 1 : -1, onto[side], from[side], rx, rz, k));
+      return res;
+    };
+    const T = j.torso;
+    let res = solve();
+    if (res > 0.01 && T) {
+      const x0 = T.rotation.x;
+      let lo = 0, hi = 0.9;
+      for (let i = 0; i < 6; i++) {
+        const m = (lo + hi) / 2;
+        T.rotation.x = x0 + m;
+        if (solve() > 0.01) lo = m; else hi = m;
+      }
+      T.rotation.x = x0 + hi;
+      res = solve();
+    }
+    this._ikRes = res;                                   // the harness reads the shortfall
+  }
+
+  // HAULING THE ARM UP. A thrown rider's wrist lies on the road; kneeling, his
+  // shoulders are ~1 m up and an arm is 0.6 m, so reaching it folded him 75 deg
+  // over the body (measured, and it read as a heap). He does what an officer
+  // does: takes the arm on his side and draws it up off the road toward
+  // himself. The suspect's own arm IK, weighted by k, after the body's pose
+  // for the frame (so nothing accumulates).
+  _haulArm(sr, k) {
+    const d = this.target.dismount;
+    // face down with the hands behind the back ('ground'): both wrists drawn
+    // up off the small of the back, as an officer lifts cuffed hands (resting
+    // on the back they left him folded 63 deg over the body: measured)
+    if (this.suspect && this.variant === 'ground') {
+      const sik = sr.userData.joints.__ik;
+      if (!sik) return;
+      sr.updateWorldMatrix(true, true);
+      for (const side of ['left', 'right']) {
+        const L = sik.limbs[side];
+        if (!L) continue;
+        const sh = rootWorld(L, new THREE.Vector3());
+        const tgt = effectorWorld(L, new THREE.Vector3());
+        tgt.y += 0.15 * k;
+        solveLimb(L, tgt, _pole.set(sh.x, sh.y + 0.5, sh.z));
+      }
+      sr.updateWorldMatrix(true, true);
+      return;
+    }
+    if (this.suspect || !(d && d.onFoot)) return;
+    const sik = sr.userData.joints.__ik;
+    if (!sik) return;
+    const sj = sr.userData.joints, sp = sr.userData.spec || { forearm: 0.27 };
+    sr.updateWorldMatrix(true, true);
+    const a = sj.leftArm.fore.localToWorld(new THREE.Vector3(0, -sp.forearm, 0));
+    const b = sj.rightArm.fore.localToWorld(new THREE.Vector3(0, -sp.forearm, 0));
+    centreTangent(-this.target.phys.s, _t);
+    const nx = _t.z * this.side, nz = -_t.x * this.side;     // toward his side
+    const L = sik.limbs[a.x * nx + a.z * nz >= b.x * nx + b.z * nz ? 'left' : 'right'];
+    if (!L) return;
+    const sh = rootWorld(L, new THREE.Vector3());
+    const me = this.walker.pos, dx = me.x - sh.x, dz = me.z - sh.z, dl = Math.hypot(dx, dz) || 1;
+    const goal = new THREE.Vector3(sh.x + dx / dl * 0.3, roadY(sh.x, sh.z) + 0.45, sh.z + dz / dl * 0.3);
+    const tgt = effectorWorld(L, new THREE.Vector3()).lerp(goal, k);
+    solveLimb(L, tgt, _pole.set(sh.x, sh.y + 0.4, sh.z));
+    sr.updateWorldMatrix(true, true);
+  }
+
+  // one arm onto its wrist: `from` is where the pose put the hand, blended
+  // toward the wrist by k; the elbow is pushed out to the side and down, like
+  // a man working at something low
+  _cuffArm(L, sx, wrist, from, rx, rz, k) {
+    if (!L) return 0;
+    const tgt = _h.copy(wrist).lerp(from, 1 - k);
+    L.root.parent.updateWorldMatrix(true, false);
+    _pole.copy(L.root.position).applyMatrix4(L.root.parent.matrixWorld);
+    _pole.x += rx * sx * 0.45; _pole.z += rz * sx * 0.45; _pole.y -= 0.35;
+    return solveLimb(L, tgt, _pole);
   }
 
   // THE CUFF: down on one knee beside them, leaning in, hands together low
@@ -309,6 +520,7 @@ export class Arrest {
       o.group.updateMatrixWorld(true);
       S.seat = rider.getWorldPosition(new THREE.Vector3());
       S.scale = rider.scale.x;
+      S.from = captureLocal(rider);                           // the seated pose, blended out of
       (this.opts.scene || this.cop.scene).attach(rider);
       rider.rotation.reorder('YXZ');
       S.pos = roadPoint(tp.s, tp.lateral + this.side * 1.1, new THREE.Vector3());
@@ -338,13 +550,17 @@ export class Arrest {
       if (L.knee) L.knee.rotation.x += 2.2 * down * (1 - lie);
     }
     if (j.neck) { j.neck.rotation.x += 0.25 * down * (1 - lie); j.neck.rotation.y += 1.1 * lie; }
+    // out of the saddle pose over the step, not in one frame (the legs
+    // straightened at once and lifted the body 0.22 m: measured)
+    blendFrom(S.from, e);
     // from the seat to the spot beside the bike, then down
     _a.copy(S.seat).lerp(S.pos, e);
     rider.position.copy(_a);
     rider.rotation.set(1.5 * lie, S.facing, 0, 'YXZ');         // + x tips the body forward: face down
     rider.updateMatrixWorld(true);
     _box.setFromObject(rider, true);
-    if (Number.isFinite(_box.min.y)) rider.position.y += (S.pos.y - _box.min.y) * e;
+    const gap = S.pos.y - _box.min.y, under = roadY(_a.x, _a.z) - _box.min.y;   // eased down, never through the road
+    if (Number.isFinite(gap)) rider.position.y += Math.max(gap * e, under);
   }
 
   _releaseSuspect() {
@@ -366,7 +582,9 @@ export class Arrest {
     rider.rotation.set(0, yaw, 0, 'YXZ');
     rider.updateMatrixWorld(true);
     _box.setFromObject(rider, true);
-    const ground = pos.y;
-    if (Number.isFinite(_box.min.y)) rider.position.y += (ground - _box.min.y) * k;
+    // eased onto the road by k, but NEVER below it: legs straightening under a
+    // body still at seat height went 0.18 m through the road (measured)
+    const gap = pos.y - _box.min.y, under = roadY(pos.x, pos.z) - _box.min.y;
+    if (Number.isFinite(gap)) rider.position.y += Math.max(gap * k, under);
   }
 }

@@ -198,6 +198,15 @@ one that decides what you are allowed to build:
   everything upstream of the code: reference images — which `404.md` explicitly
   expects to come from an external image tool — the critic's bar frames, the sky
   panoramas, and audio. See §10.
+- **The one-wheeler (`assets/bike_mono.js`) was drawn from an imported mesh, not
+  built with one.** An Atlas-generated GLB (project "RideRash replay references",
+  1.6 M triangles) was downloaded to a scratch folder OUTSIDE the repo and MEASURED:
+  the wheel fitted as a circle, the body's top, belly and half-width sampled at 48
+  stations. Those numbers are the tables in the asset; the body is lofted through
+  them (superellipse sections on a Catmull-Rom spline, 18 k triangles). Silhouette
+  IoU against the reference: side 0.87, top 0.91, front 0.77 (the front gap is the
+  contract's grips and pegs, which are wider than the reference's). The GLB never
+  enters the game or the repo.
 - **No glyphs anywhere.** Signage is shape and colour only. (The title screen is
   UI chrome, not game-world signage — text there is fine.)
 

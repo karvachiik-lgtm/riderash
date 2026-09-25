@@ -23,7 +23,7 @@ export const BIKE_KINDS = ['sport', 'naked', 'super', 'muscle'];
 
 // The career garage (career.js BIKES) -> the machine you see. The rat is a rat bike;
 // the brawler is the heavy one; works and super are race replicas.
-export const BIKE_FOR_TIER = { rat: 'naked', racer: 'sport', brawler: 'muscle', works: 'super', super: 'super' };
+export const BIKE_FOR_TIER = { rat: 'naked', racer: 'sport', brawler: 'muscle', works: 'super', super: 'super', mono: 'mono' };
 
 // AUTHORED, not rolled: the pack is five slots and each one is a look someone chose, so
 // the same slot is the same silhouette every race and no two neighbours match. The

@@ -896,7 +896,9 @@ export class BikePhys {
    */
   setMachine(m = {}) {
     const f = (v) => (Number.isFinite(v) && v > 0 ? v : 1);
-    this.machine = { power: f(m.power), grip: f(m.grip), mass: f(m.mass) };
+    // agility: lean-steer and swerve response; brake: stopping force; both 1 on
+    // every two-wheeler, and only the one-wheeler departs from them
+    this.machine = { power: f(m.power), grip: f(m.grip), mass: f(m.mass), agility: f(m.agility), brake: f(m.brake) };
     return this;
   }
 
@@ -1021,7 +1023,7 @@ export class BikePhys {
       // a bike, so the force is capped at the tyre's own limit and the lever
       // only decides how quickly you get there.
       const gripLimit = PHYS.BRAKE_G * PHYS.GRAVITY * PHYS.MASS;
-      const Fb = Math.min(PHYS.BRAKE_FORCE * upright, gripLimit) * (this.speed > 1 ? 1 : 0);
+      const Fb = Math.min(PHYS.BRAKE_FORCE * upright, gripLimit) * (this.speed > 1 ? 1 : 0) * (this.machine.brake || 1);
       F -= Fb; FxTyre -= Fb;
     }
     if (!throttle && !brake) {
@@ -1734,7 +1736,7 @@ export class BikePhys {
     // circle. If the tyre is already at its limit, the assist is zero.
     let Fassist = 0;
     if (this.arcade) {
-      const handling = PHYS.PLAYER_HANDLING * (this.swerveT > 0 ? PHYS.SWERVE_HANDLING : 1);
+      const handling = PHYS.PLAYER_HANDLING * (this.swerveT > 0 ? PHYS.SWERVE_HANDLING : 1) * (this.machine.agility || 1);
       const raw = Fcamber * (handling - 1);
       const budget = PHYS.TYRE_LAT_PEAK * loadN * this.grip * circle;
       const room = Math.max(0, budget - Math.abs(Ffront + Frear + Fcamber));
@@ -2007,7 +2009,7 @@ export class BikePhys {
     if (!d) return false;
     this.swerveT = PHYS.SWERVE_TIME;
     this.swerveCool = PHYS.SWERVE_COOL;
-    this.lateralV += d * PHYS.SWERVE_KICK;
+    this.lateralV += d * PHYS.SWERVE_KICK * (this.machine.agility || 1);
     this.leanVel += d * 4;                      // the bike flicks into it
     return true;
   }

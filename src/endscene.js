@@ -25,6 +25,12 @@ const LINES = {
     'Undefeated, unhinged, unbothered.',
     'The trophy is a hubcap. You will treasure it forever.',
   ],
+  trial: [
+    'One wheel, zero chill. Your chiropractor says hi.',
+    'Balance: questionable. Fun: confirmed.',
+    'Now you know why nobody sells these.',
+    'The garage has a new favourite. The bank account does not.',
+  ],
   podium: [
     'Close enough to smell the trophy. It smells like gasoline.',
     'Through to the next round. The bike is held together by spite and zip ties.',
@@ -71,7 +77,7 @@ const LINES = {
     'Took the scenic route. Straight down.',
   ],
 };
-const TITLE = { win: 'WINNER', podium: 'QUALIFIED', loss: 'ALSO RAN', bust: 'BOOKED', ticket: 'TICKETED', plunge: 'GREETINGS FROM THE VALLEY' };
+const TITLE = { trial: 'TEST RIDE', win: 'WINNER', podium: 'QUALIFIED', loss: 'ALSO RAN', bust: 'BOOKED', ticket: 'TICKETED', plunge: 'GREETINGS FROM THE VALLEY' };
 
 export class EndPhoto {
   constructor() {
@@ -128,7 +134,7 @@ export class EndPhoto {
     } else {
       const conf = kind === 'win' ? '<i class="ep-confetti"></i>'.repeat(26) : '';
       html = `<div class="ep ep-pola ep-${kind}"><i class="ep-tape"></i><div class="ep-frame">${img}</div>
-        <b class="ep-title">${TITLE[kind]}${ctx.place ? ` · ${ctx.place}` : ''}</b>
+        <b class="ep-title">${TITLE[kind]}${ctx.place && kind !== 'trial' ? ` · ${ctx.place}` : ''}</b>
         <p class="ep-line">${f(pick(LINES[kind]))}</p>${conf}</div>`;
     }
     this.card = html;

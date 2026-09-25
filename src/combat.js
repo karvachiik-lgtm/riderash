@@ -242,7 +242,7 @@ export class Fighter {
     target.heldBy = this;
     target.breakMeter = 0;
     target.active = null;                  // a grab interrupts their swing
-    target.hp = Math.max(0, target.hp - a.dmg);
+    target.hp = Math.max(0, target.hp - a.dmg * (target.frail || 1));
     target.hitFlash = 0.22;
     target.lastHitBy = this;
     this.combo++;
@@ -284,7 +284,7 @@ export class Fighter {
     them.speed += (vTow - them.speed) * Math.min(1, 6 * dt);
     if (them.speed < 0) them.speed = 0;
     // it hurts, and it tires you out
-    tgt.hp = Math.max(0, tgt.hp - CFG.GRAPPLE_DPS * dt);
+    tgt.hp = Math.max(0, tgt.hp - CFG.GRAPPLE_DPS * dt * (tgt.frail || 1));
     tgt.stamina = Math.max(0, tgt.stamina - 10 * dt);
     this.stamina = Math.max(0, this.stamina - 4 * dt);
     tgt.hitFlash = Math.max(tgt.hitFlash, 0.06);
@@ -308,7 +308,7 @@ export class Fighter {
       // THE THROW: shoved AWAY from the holder, hard, and spun.
       const a = ATTACKS.grapple;
       const mult = 1 + holder.combo * CFG.COMBO_MULT;
-      tgt.hp = Math.max(0, tgt.hp - CFG.GRAPPLE_THROW_DMG * mult);
+      tgt.hp = Math.max(0, tgt.hp - CFG.GRAPPLE_THROW_DMG * mult * (tgt.frail || 1));
       tgt.hitFlash = 0.22;
       tgt.anim.recoil = 1;
       const behind = holder.owner.s < tgt.owner.s ? 1 : -1;
@@ -395,7 +395,7 @@ export class Fighter {
     let dmg = a.dmg * mult;
     // landing a hit on someone mid-wind-up is a counter: more damage
     if (target.active && !target.active.hit) { dmg *= 1.5; hooks.onCounter?.(this); }
-    target.hp = Math.max(0, target.hp - dmg);
+    target.hp = Math.max(0, target.hp - dmg * (target.frail || 1));
     target.hitFlash = 0.22;
     target.anim.recoil = 1;
     target.lastHitBy = this;

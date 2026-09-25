@@ -123,6 +123,14 @@ export const BIKES = [
     blurb: 'Factory parts, a team truck, and no excuses left.' },
   { id: 'super',   name: 'SUPERBIKE', price: 52000, power: TIER_POWER[4], grip: 1.25, mass: 1.00, colour: 0x1fbf6a,
     blurb: 'The fastest thing on the coast. Ride it like you stole it.' },
+  // THE EASTER EGG: a sport bike's bodywork on ONE fat wheel (assets/bike_mono.js).
+  // The fastest thing in the garage and the hardest to ride: more top end than
+  // the superbike, a lane change like a thought, but less grip in the bends,
+  // softer brakes, and so light a punch puts you on the floor. Not for sale
+  // until Level 4 -- anyone can take it for a TEST RIDE.
+  { id: 'mono', name: 'ONE-WHEELER', price: 90000, power: 1.64, grip: 0.9, mass: 0.82, agility: 1.35, brake: 0.8, frail: 1.3,
+    colour: 0xe0501c, unlockLevel: 4, isNew: true,
+    blurb: 'One wheel. No brakes worth mentioning. No regrets.' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -381,6 +389,7 @@ export class Career {
       write(this.state);
       return { ok: true, bike: b, cash: this.state.cash, switched: true };
     }
+    if (b.unlockLevel && this.level < b.unlockLevel) return { ok: false, why: `on sale from Level ${b.unlockLevel} - take it for a test ride` };
     if (this.state.cash < b.price) return { ok: false, why: 'not enough cash' };
     this.state.cash -= b.price;
     this.state.bike = id;

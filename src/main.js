@@ -393,7 +393,7 @@ async function loadAssets() {
     // than scaled to their own height: CFG.SEAT_* and every contact are in bike-local
     // units, so one scale for every machine is what keeps each rider on his saddle.
     assets.bikes = { sport: assets.bike };
-    for (const k of ['naked', 'super', 'muscle']) {
+    for (const k of ['naked', 'super', 'muscle', 'mono']) {
       const b = await ASSET(`./assets/bike_${k}.js`, { keepHierarchy: true });
       if (b.userData && b.userData.joints && b.userData.joints.frontWheel) {
         b.scale.copy(assets.bike.scale);
@@ -1567,6 +1567,7 @@ function updateGaps(dt) {
   const ps = player.phys.s;
   let ahead = null, behind = null;
   for (const r of rivals) {
+    if (r.out && r.outWhy === 'trial') continue;       // parked for a test ride
     const d = r.phys.s - ps;
     if (d >= 0 && (!ahead || d < ahead.d)) ahead = { r, d };
     if (d < 0 && (!behind || d > behind.d)) behind = { r, d };
@@ -2204,8 +2205,8 @@ function stepGame(dt) {
   if (replay && state.running) { try { replay.capture(dt, player.group.position); } catch (e) { /* never the frame */ } }
 
   hud.update({
-    position: world.positionOf(player.phys),
-    field: world.parts.length,
+    position: raceEvent().trial ? 1 : world.positionOf(player.phys),
+    field: raceEvent().trial ? 1 : world.parts.length,
     mph: player.phys.mph,
     // speedometer (hud.js Speedo): nitro lamp/flash and the gear the engine
     // audio is actually in, so the digit matches the note you hear
@@ -2549,7 +2550,7 @@ function pinPhoto(res) {
 function startEndingScene(pos) {
   audio.siren(0);
   document.getElementById('copflag')?.classList.remove('on');
-  const kind = pos === 1 ? 'win' : pos <= 4 ? 'podium' : 'loss';
+  const kind = raceEvent().trial ? 'trial' : pos === 1 ? 'win' : pos <= 4 ? 'podium' : 'loss';
   const f = player.group.position;
   state.ending = { pos, kind, t: 0, shown: false, ang: Math.atan2(camera.position.x - f.x, camera.position.z - f.z) };
   hud.show(false);                       // the scene is the picture now
@@ -2643,9 +2644,19 @@ let lastResult = null;
 // cleared on the way back to the menu.
 let freeEvent = null;
 function raceEvent() { return freeEvent || career.event; }
+// the machine this race is ridden on: the garage's, or the one-wheeler on a test ride
+function raceBike() { return (freeEvent && freeEvent.trial && BIKES.find((b) => b.id === 'mono')) || career.bike; }
+// THE TEST RIDE: the one-wheeler, alone, on a short run of the coast road
+function startTrial() {
+  freeEvent = { ...SERIES[1], lenMul: 0.35, name: 'TEST RIDE', free: true, trial: true };
+  document.getElementById('title').classList.remove('on');
+  window.__START__();
+}
+window.__TRIAL__ = startTrial;   // harness
 function freeResult() {
   return { fine: 0, bill: 0, paid: 0, cash: career.state.cash, over: false, advanced: false, complete: false, free: true };
 }
+const TRIAL_LINE = 'On sale in the garage from <b>Level 4</b>. Start saving.';
 const FREE_LINE = '<b>FREE RIDE</b> — nothing won, nothing lost, nothing on the bill. Just the road.';
 
 function endRace(pos) {
@@ -2702,7 +2713,11 @@ function endRace(pos) {
   }).join('');
   const table = `<table class="board">${board}</table>`;
   if (freeEvent) lines.splice(2, lines.length - 2, FREE_LINE);
-  hud.ended(title, lines.join('<br>') + table + statsTable());
+  if (freeEvent && freeEvent.trial) {
+    title = 'TEST RIDE';
+    lines.splice(0, lines.length, `The ONE-WHEELER, ${clock} for ${(state.finishS / 1000).toFixed(1)} km`, TRIAL_LINE);
+  }
+  hud.ended(title, lines.join('<br>') + (freeEvent && freeEvent.trial ? '' : table) + statsTable());
   pinPhoto(res);
   if (touchpad) touchpad.reset();
   phone.end();                   // menus may let the phone sleep
@@ -2923,7 +2938,7 @@ function resetRace() {
   document.querySelectorAll('#over .ep-pin').forEach((n) => n.remove());
   // The garage's bike is the machine you see: tier -> class (src/kit.js), tier colour.
   try {
-    if (player && career.bike) player.setBike(bikeSource(assets, BIKE_FOR_TIER[career.bike.id] || 'sport'), career.bike.colour);
+    if (player && raceBike()) player.setBike(bikeSource(assets, BIKE_FOR_TIER[raceBike().id] || 'sport'), raceBike().colour);
   } catch (e) { console.warn('[riderash] setBike:', e); }
   state.time = 0; state.score = 0; state.hits = 0; state.knockDowns = 0; state.contacts = 0; state.trafficHits = 0; state.trafficWrecks = 0;
   warnQueue.length = 0;                               // menu-time callouts are not race news
@@ -2953,7 +2968,7 @@ function resetRace() {
   player.reset();
   // No police in the career's very first race: that one teaches the ride and
   // the fight. Every race after it can have a cop.
-  if (cop) cop.reset(raceEvent().level, career.state.race > 0 || career.state.wins > 0);
+  if (cop) cop.reset(raceEvent().level, !raceEvent().trial && (career.state.race > 0 || career.state.wins > 0));
   // ...and out of the fight list now, not when the countdown ends: through the
   // whole grid a stale cop from the last race was a fighter anyone could hit
   if (cop) { const k = world.fighters.indexOf(cop.fighter); if (k >= 0) world.fighters.splice(k, 1); }
@@ -2961,7 +2976,7 @@ function resetRace() {
   // Full integrator reset -- see BikePhys.reset. Setting four fields by hand
   // leaked lateralV from the previous race and started the next one at the rail.
   // The player's machine is the bike they bought -- see BikePhys.setMachine.
-  if (career.bike) player.phys.setMachine(career.bike);
+  if (raceBike()) player.phys.setMachine(raceBike());
   // START BEHIND THE PACK. The player used to line up on the front row, level
   // with the leaders, so the race began already won. Road Rash puts you at the
   // back: you have to ride through the field, and that is where the fights are.
@@ -2971,6 +2986,7 @@ function resetRace() {
   // cooldowns were all carrying into the next race.
   const pf = player.fighter;
   pf.resetCombat();
+  pf.frail = raceBike().frail || 1;       // the one-wheeler goes down easier
   pf.hasWeapon = true;
   state.carHitCd = 0; state.hornCd = 0;
   state.countdown = CFG.COUNTDOWN;
@@ -3024,7 +3040,14 @@ function resetRace() {
       // same SLATER is the wall in race one and unbeatable in race five.
       entry: packForThisRace[i] || null,
       slot: i });
+    if (r.group) r.group.visible = true;
   });
+  // THE TEST RIDE is ridden alone: the pack parked out of the race, out of sight
+  if (raceEvent().trial) for (const r of rivals) {
+    r.out = true; r.outWhy = 'trial';
+    r.phys.s = -800; r.phys.sync();
+    if (r.group) r.group.visible = false;
+  }
   // Traffic is per-race state too -- see resetTraffic for the leak this closes.
   if (world && world.traffic) resetTraffic(world.traffic, 0, CFG.TRAFFIC_BY_LEVEL[(raceEvent().level || 1) - 1] ?? 1);
   hud.show(true);
@@ -3219,7 +3242,8 @@ function buildGarage() {
     const affordable = riding || owned || career.cash >= b.price;
     const el = document.createElement('button');
     el.type = 'button';
-    el.className = 'map bike' + (riding ? ' sel' : '') + (affordable ? '' : ' locked');
+    const levelLocked = b.unlockLevel && career.level < b.unlockLevel && !owned;
+    el.className = 'map bike' + (riding ? ' sel' : '') + (affordable && !levelLocked ? '' : ' locked') + (b.id === 'mono' ? ' bike-mono' : '');
     el.innerHTML =
       `<span class="nm">${b.name}</span>` +
       `<span class="sw">` +
@@ -3228,7 +3252,11 @@ function buildGarage() {
         `<i style="background:#8a9199"></i>` +
       `</span>` +
       `<span class="bl">${b.blurb}</span>` +
-      `<span class="pr">${riding ? 'RIDING' : owned ? 'OWNED' : '$' + b.price}</span>`;
+      `<span class="pr">${riding ? 'RIDING' : owned ? 'OWNED' : levelLocked ? `COMING SOON · LVL ${b.unlockLevel}` : '$' + b.price}</span>` +
+      (b.isNew ? '<i class="sticker">NEW</i>' : '') +
+      (b.id === 'mono' ? '<span class="try" role="button" tabindex="0">TEST RIDE</span>' : '');
+    const tr = el.querySelector('.try');
+    if (tr) tr.addEventListener('click', (e) => { e.stopPropagation(); if (!state.running) startTrial(); });
     el.addEventListener('click', () => {
       if (state.running || riding) return;
       const r = career.buy(b.id);

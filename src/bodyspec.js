@@ -236,7 +236,7 @@ export const LOOK_OPTIONS = {
   suit:    ['none', 'bat'],
   gloves:  ['full', 'fingerless', 'none'],
   bottomPrint: ['none', 'flag'],     // stars and stripes on swim bottoms (shape and colour, no lettering)
-  buckle:  ['plain', 'star'],        // a big rodeo buckle: gold rim, blue field, white star
+  buckle:  ['plain', 'star'],        // a big rodeo buckle: the Stars and Stripes in a gold frame
 };
 export const LOOK_DEFAULTS = {
   helmet: 'full', helmetSize: 1.0, headSize: 1.25, bust: 1.4, seat: 1.3, visor: 'smoke', stripe: 'racing', finish: 'gloss',

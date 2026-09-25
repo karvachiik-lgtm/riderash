@@ -249,6 +249,30 @@ export default function (THREE) {
     return t;
   }
 
+  // THE FLAG AS A PANEL (the buckle): 13 stripes, red top and bottom; the
+  // canton over the top seven, 40% of the width, rows of white stars.
+  function flagPanelTex() {
+    const W = 76, H = 40, d = new Uint8Array(W * H * 4);
+    const red = [178, 34, 52], white = [246, 242, 234], blue = [40, 58, 118];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const v = y / H, u = x / W;               // v = 0 is the TOP row (DataTexture rows run bottom-up; flipped below)
+      let c = Math.floor(v * 13) % 2 ? white : red;
+      if (u < 0.4 && v < 7 / 13) {
+        c = blue;
+        const cu = u / 0.4 * 6, cv = v / (7 / 13) * 5;
+        const fx = cu - Math.floor(cu) - 0.5, fy = cv - Math.floor(cv) - 0.5;
+        if (fx * fx + fy * fy < 0.07) c = white;
+      }
+      const i = ((H - 1 - y) * W + x) * 4;
+      d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = 255;
+    }
+    const t = new THREE.DataTexture(d, W, H);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.magFilter = THREE.LinearFilter;
+    t.needsUpdate = true;
+    return t;
+  }
+
   // TATTOOS: ink painted into a small DataTexture over the skin tone -- pure
   // code, no canvas, no image. The lathe segments carry UVs with u around the
   // limb and v down it (0 at the joint), so a pattern is a function of (u, v).
@@ -343,18 +367,13 @@ export default function (THREE) {
     // belt, and a steel buckle at the front
     pelvis.add(mk(cbox(S.pelvisW * 1.03, S.pelvisH * 0.2, S.pelvisD * 1.03, 0.012), seam, 0, S.pelvisH * 0.42, 0));
     if (L.buckle === 'star') {
-      // A RODEO BUCKLE: a big gold oval, a blue field, a white five-point star
-      const bz = S.pelvisD * 0.52, by = S.pelvisH * 0.42, bw = 0.055;
-      const rim = mk(new THREE.CylinderGeometry(bw, bw, 0.012, 20), gold, 0, by, bz + 0.004, Math.PI / 2);
-      rim.scale.set(1.25, 1, 0.8); pelvis.add(rim);
-      const field = mk(new THREE.CylinderGeometry(bw * 0.78, bw * 0.78, 0.004, 20), P(0x24346e, 0.35, 0.3, 0.6, 0.2), 0, by, bz + 0.011, Math.PI / 2);
-      field.scale.set(1.25, 1, 0.8); pelvis.add(field);
-      const star = new THREE.Shape();
-      for (let k = 0; k < 10; k++) {
-        const r = k % 2 ? bw * 0.22 : bw * 0.55, a = Math.PI / 2 + k * Math.PI / 5;
-        if (k) star.lineTo(Math.cos(a) * r, Math.sin(a) * r); else star.moveTo(Math.cos(a) * r, Math.sin(a) * r);
-      }
-      pelvis.add(mk(new THREE.ShapeGeometry(star), P(0xf4f0e8, 0.4, 0.0, 0.3, 0.3), 0, by, bz + 0.0135));
+      // A RODEO BUCKLE: a gold frame round the Stars and Stripes -- thirteen
+      // stripes, the blue canton top-left with its star grid. No lettering.
+      const bz = S.pelvisD * 0.52, by = S.pelvisH * 0.42, bw = 0.12, bh = 0.075;
+      pelvis.add(mk(cbox(bw, bh, 0.012, 0.008), gold, 0, by, bz + 0.004));
+      const flag = mk(new THREE.PlaneGeometry(bw * 0.84, bh * 0.76), P(0xffffff, 0.45, 0.1, 0.8, 0.15), 0, by, bz + 0.0105);
+      flag.material.map = flagPanelTex();
+      pelvis.add(flag);
     } else pelvis.add(mk(cbox(0.06, S.pelvisH * 0.2, 0.014, 0.004), steel, 0, S.pelvisH * 0.42, S.pelvisD * 0.52));
     // back pockets, as raised panels
     for (const s of [-1, 1]) pelvis.add(mk(cbox(S.pelvisW * 0.3, S.pelvisH * 0.42, 0.012, 0.004), denim, s * S.pelvisW * 0.22, -S.pelvisH * 0.04, -S.pelvisD * 0.51));

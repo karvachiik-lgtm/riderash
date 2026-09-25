@@ -198,16 +198,22 @@ one that decides what you are allowed to build:
   everything upstream of the code: reference images — which `404.md` explicitly
   expects to come from an external image tool — the critic's bar frames, the sky
   panoramas, and audio. See §10.
-- **The one-wheeler (`assets/bike_mono.js`) was drawn from an imported mesh, not
-  built with one.** An Atlas-generated GLB (project "RideRash replay references",
-  1.6 M triangles) was downloaded to a scratch folder OUTSIDE the repo and MEASURED:
-  the wheel fitted as a circle, the body's top, belly and half-width sampled at 48
-  stations. Those numbers are the tables in the asset; the body is lofted through
-  them (superellipse sections on a Catmull-Rom spline). Silhouette IoU against the
-  reference at 1:1 was side 0.87 / top 0.91 / front 0.77; it was then deliberately
-  stretched (22% longer, 20% wider, raked) to read sportier, and painted after
-  photographs of the real machine (orange fading to gold, a broad black band, a
-  five-spoke silver rim). 33 k triangles. The GLB never enters the game or the repo.
+- **The one-wheeler (`assets/bike_mono.js`) is a film-style monowheel superbike,
+  drawn from Atlas concept art (FLUX.2 Max side / 3/4 views plus four
+  camera-control turnarounds, project "RideRash monowheel concept", kept outside
+  the repo).** No vertex is imported: faceted hulls lofted through hand-set
+  cross-sections, a lathed 1.28 m car-width tyre with block tread, extruded side
+  plates, flat shading throughout so it reads LOW-POLY. A long armoured nose
+  straddles the tyre, a big glass bubble carries a heads-up display drawn in
+  shapes only (no glyphs), wide clip-ons, rear-set pegs, a 3.1 m overall length
+  with a kicked-up tail boom and four pipes under it.
+- **It seats the rider its own way.** The tyre is taller than the family's
+  saddle, so the bike declares `userData.bike.seatLift` (0.52 m, added to the
+  rider socket by player.js and the showroom) and `minLean` / `maxLean`
+  (1.45-1.55 rad), which riderpose.solveSeat uses as its torso-lean search range:
+  the rider lies almost flat on the spine pad. Past the family's 0.9 rad crouch
+  poseSeated lifts the neck back by most of the extra lean, so the head looks
+  ahead into the HUD rather than at the road under the wheel.
 - **The one-wheeler rides differently.** It is balanced, not braked: under throttle
   the nose dips and the tail rises and the rider leans in (player.js, pivoting on
   `userData.bike.hubZ`); braking tips it back. Stamp on the brakes above ~70 mph

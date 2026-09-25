@@ -919,7 +919,8 @@ export class Showroom {
       }
       this.socket.position.set(
         CFG_SEAT.x,
-        CFG_SEAT.y - (this.spec.seatContactY || 0) + (this.spec.seatBob || 0),
+        CFG_SEAT.y - (this.spec.seatContactY || 0) + (this.spec.seatBob || 0)
+          + (((this.bike.userData && this.bike.userData.bike) || {}).seatLift || 0),
         CFG_SEAT.z,
       );
       this.socket.add(b);

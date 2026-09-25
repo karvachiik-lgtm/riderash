@@ -148,7 +148,10 @@ export function poseSeated(joints, tuck = 1) {
   // arms that constraint is gone, so a 0.14 rad fold at full speed is free.
   const torso = (Q ? Q.torso : RIDING.torsoRest + t * (RIDING.torsoTuck - RIDING.torsoRest)) + (Q ? 0.14 * t : 0);
   set(joints.torso, torso);
-  set(joints.neck, RIDING.neckRest + t * (RIDING.neckTuck - RIDING.neckRest) - (Q ? 0.10 * t : 0));
+  // past the usual crouch the head is lifted back by most of the extra lean, so
+  // a rider lying on the tank still looks ahead (through the screen), not down
+  const deep = Q ? Math.max(0, Q.torso - 0.9) : 0;
+  set(joints.neck, RIDING.neckRest + t * (RIDING.neckTuck - RIDING.neckRest) - (Q ? 0.10 * t : 0) - deep * 0.85);
 
   // fallback angles (no IK context): the measured table, with the legs on the
   // KNEES-FORWARD branch -- see RIDING.hip in reach.js
@@ -335,7 +338,15 @@ export function solveSeat(rider, bike) {
   const q = { torso: RIDING.torsoTuck };
   let best = Infinity, bestT = q.torso;
   const sh = new THREE.Vector3(), gp = new THREE.Vector3();
-  for (let tq = 0.0; tq <= 0.90001; tq += 0.03) {
+  // a bike class can allow (maxLean) or demand (minLean) a deeper lie-down --
+  // the one-wheeler: chest on the spine behind its screen
+  let maxLean = 0.9, minLean = 0;
+  bike.traverse((n) => {
+    const b = n.userData && n.userData.bike;
+    if (b && b.maxLean) maxLean = b.maxLean;
+    if (b && b.minLean) minLean = b.minLean;
+  });
+  for (let tq = minLean; tq <= maxLean + 1e-5; tq += 0.03) {
     j.torso.rotation.x = tq;
     let e = 0;
     for (const k of ['left', 'right']) {

@@ -20,6 +20,12 @@ const _pivotE = new THREE.Euler();
 const _pivotM = new THREE.Matrix4();
 const _pivotShift = new THREE.Vector3();
 
+/** Extra saddle height a bike class declares (userData.bike.seatLift, bike-local m). */
+function seatLiftOf(bike) {
+  const b = bike && bike.userData && bike.userData.bike;
+  return (b && +b.seatLift) || 0;
+}
+
 export class Player {
   constructor(scene, assets) {
     this.phys = new BikePhys({ startS: 0, lateral: 0, speed: 8, arcade: true });
@@ -161,7 +167,7 @@ export class Player {
       // spec.seatBob.)
       this.socket.position.set(
         CFG.SEAT_X,
-        CFG.SEAT_Y - this._seatContactY + this._seatBob,
+        CFG.SEAT_Y - this._seatContactY + this._seatBob + seatLiftOf(this.bike),
         CFG.SEAT_Z,
       );
       this.bike.add(this.socket);
@@ -258,7 +264,7 @@ export class Player {
     const spec = this.rider.userData && this.rider.userData.spec;
     this._seatContactY = spec ? spec.seatContactY : 0;
     this._seatBob = (spec && spec.seatBob) || 0;
-    this.socket.position.set(CFG.SEAT_X, CFG.SEAT_Y - this._seatContactY + this._seatBob, CFG.SEAT_Z);
+    this.socket.position.set(CFG.SEAT_X, CFG.SEAT_Y - this._seatContactY + this._seatBob + seatLiftOf(this.bike), CFG.SEAT_Z);
     this.socket.add(this.rider);
     this.rider.position.set(0, 0, 0);
     this.seatFit = solveSeat(this.rider, this.bike);
@@ -303,6 +309,9 @@ export class Player {
       if (!n.geometry.boundingSphere) n.geometry.computeBoundingSphere();
       n.castShadow = (n.geometry.boundingSphere ? n.geometry.boundingSphere.radius : 0) >= 0.22;
     });
+    // a machine with its own saddle height (the one-wheeler sits the rider
+    // over a tyre taller than the others' saddles) moves the socket with it
+    if (this.socket) this.socket.position.y = CFG.SEAT_Y - (this._seatContactY || 0) + (this._seatBob || 0) + seatLiftOf(bike);
     if (this.rider) this.seatFit = solveSeat(this.rider, this.bike);
     this._bikeKey = key;
     this.group.userData.bikeClass = (src.userData && src.userData.bike && src.userData.bike.kind) || null;

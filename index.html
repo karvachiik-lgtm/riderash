@@ -727,7 +727,8 @@
   let seen = false; try { seen = sessionStorage.getItem('riderash.intro') === '1'; } catch (e) { /* private mode */ }
   const saver = navigator.connection && navigator.connection.saveData;
   const calm = matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (seen || saver || calm || navigator.webdriver || !v.canPlayType) return;   // (and not under test automation)
+  let lowQ = false; try { lowQ = (JSON.parse(localStorage.getItem('riderash.settings.v1') || '{}').quality === 'low'); } catch (e) { /* none saved */ }
+  if (seen || saver || calm || lowQ || navigator.webdriver || !v.canPlayType) return;   // (and not under test automation)
   el.hidden = false;
   const done = () => {
     if (el.classList.contains('out')) return;
@@ -865,11 +866,12 @@
       <span>Effects</span><input type="range" id="set-sfx" aria-label="Effects volume" min="0" max="1" step="0.05"><output id="o-sfx"></output>
       <span>Music</span><input type="range" id="set-music" aria-label="Music volume" min="0" max="1" step="0.05"><output id="o-music"></output>
       <span>Quality</span><select id="set-quality" aria-label="Quality">
-        <option value="auto">Auto (adapts to frame rate)</option>
-        <option value="high">High</option>
-        <option value="medium">Medium</option>
-        <option value="low">Low</option>
+        <option value="high">High resolution — everything on (~250 MB)</option>
+        <option value="medium">Balanced</option>
+        <option value="low">Low / Mobile — lean on memory (~130 MB)</option>
+        <option value="auto">Auto — steps down if the frame rate drops</option>
       </select>
+      <span></span><small id="qnote" style="grid-column: span 2; font-size: 10px; letter-spacing: .04em; color: #7c8288; line-height: 1.4">High: grass, full landmarks, bloom and grading, sharp shadows. Low / Mobile: no grass, lighter landmarks, half-size textures, no post effects. Texture size changes on the next reload.</small>
       <span>Camera</span><select id="set-camera" aria-label="Default camera"></select>
       <span>Frame rate</span><label class="ck"><input type="checkbox" id="set-fps"> show FPS counter</label>
       <span>Touch pad</span><select id="set-touch" aria-label="On-screen touch controls">

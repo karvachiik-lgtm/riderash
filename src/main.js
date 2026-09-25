@@ -10,6 +10,7 @@ import { GhatDress } from './ghat.js';
 import { ValleyDress } from './valley.js';
 import { TunnelDress, setCourseTunnels, tunnelK } from './tunnels.js';
 import { Arrest } from './arrest.js';
+import { Landmarks } from './landmarks.js';
 import { buildTraffic, updateTraffic, trafficHit, resetTraffic } from './world.js';
 import { buildFinish, placeFinish } from './finishline.js';
 import { TrackDress } from './trackdress.js';
@@ -59,7 +60,14 @@ const canvas = document.getElementById('c');
 // the loading bar at 0% forever with the reason only in the console.
 let renderer;
 try {
-  renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+  // NO CANVAS MSAA. High and Balanced render the scene into the post chain's
+  // own target (postfx.js), which is not multisampled -- so a 4x multisampled
+  // CANVAS bought no antialiasing there at all, only ~90 MB of GPU memory at
+  // 2.2k x 1.25k (MEASURED). Low / Mobile draws straight to the canvas, and
+  // for it the memory is the point. (Phones' pixel density hides the edges.)
+  let lowQ = false;
+  try { const q = JSON.parse(localStorage.getItem('riderash.settings.v1') || '{}').quality; lowQ = q === 'low' || (!q && typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches); } catch (e) { /* none saved */ }
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: lowQ ? 'default' : 'high-performance' });
 } catch (e) {
   window.__FATAL__?.('This browser or device could not start WebGL, which the game needs. '
     + 'Try a current Chrome, Edge, Firefox or Safari, and check that hardware acceleration is on.', String(e && e.message || e));
@@ -182,7 +190,7 @@ let hazardView = null;     // oil slicks and gravel on the deck
 let animals = null;        // cows and deer on the rural roads
 let parked = null;         // cars at the kerb in town
 let crestShadows = null;   // a car's shadow shows over a blind crest before the car does
-let backdropGroup = null, ghatDress = null, valleyDress = null, tunnelDress = null;
+let backdropGroup = null, ghatDress = null, valleyDress = null, tunnelDress = null, landmarks = null;
 let _tunK = 0;                  // how deep in a tunnel the camera is (stepTunnelLight)     // per-course road profile (level.js) dressing
 let roadGroup = null, roadsideGroup = null;   // rebuilt when a course's lane layout differs (lanes.js)
 let raceCounter = 0;       // races started this session, so a replayed event gets a new outfit
@@ -431,7 +439,9 @@ async function init() {
   // The failure mode is quiet — a missing map is not an error in three.js — so
   // the order here is load-bearing.
   try {
-    await loadTextures((p, name) => progress(0.02 + p * 0.10, name));
+    // (the quality tier decides the texture size; changing it later applies on reload)
+    const texQ = settings.quality === 'auto' ? autoTier() : settings.quality;
+    await loadTextures((p, name) => progress(0.02 + p * 0.10, name), texQ === 'low' ? 0.5 : 1);
   } catch (e) { console.warn('[riderash] textures failed:', e); }
   try {
     sky = new DynamicSky(renderer, { sky_day: getTexture('sky_day'), sky_dusk: getTexture('sky_dusk') });
@@ -498,6 +508,7 @@ async function init() {
   try { ghatDress = new GhatDress(scene); } catch (e) { console.warn('[riderash] ghat:', e); ghatDress = null; }
   try { valleyDress = new ValleyDress(scene); } catch (e) { console.warn('[riderash] valley:', e); valleyDress = null; }
   try { tunnelDress = new TunnelDress(scene); } catch (e) { console.warn('[riderash] tunnels:', e); tunnelDress = null; }
+  try { landmarks = new Landmarks(scene); } catch (e) { console.warn('[riderash] landmarks:', e); landmarks = null; }
   try { animals = new Animals(scene); window.__ANIMALS__ = animals; } catch (e) { console.warn('[riderash] animals:', e); }
   try { crossTraffic = new CrossTraffic(scene); window.__CROSS__ = crossTraffic; } catch (e) { console.warn('[riderash] cross traffic:', e); crossTraffic = null; }
   // INSTANT REPLAY (replay.js): records the race as it is drawn
@@ -1159,6 +1170,7 @@ function guardBodies() {
 
 function frameBody(dt) {
   if (valleyDress) valleyDress.update(dt);
+  if (landmarks) landmarks.update(dt, camera.position);
   stepTunnelLight(dt);
   // COUNTDOWN. A race should begin, not fade in. The world runs -- traffic
   // moves, the pack idles, the camera settles -- but throttle and steering are
@@ -2267,6 +2279,20 @@ function maybeArrestRival() {
 addEventListener('keydown', () => { if (state.arrest && state.arrest.total > 1) state.arrest.finish(); });
 addEventListener('pointerdown', () => { if (state.arrest && state.arrest.total > 1) state.arrest.finish(); });
 
+function freeGroupBuffers(root) {
+  const drop = (a) => { if (a && a.onUpload) a.onUpload(function () { this.array = null; }); };
+  root.traverse((o) => {
+    if (o.isSprite) return;
+    if (o.isInstancedMesh) { if (!o.boundingSphere) o.computeBoundingSphere(); drop(o.instanceMatrix); drop(o.instanceColor); }
+    const g = o.geometry;
+    if (!g) return;
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    if (!g.boundingBox) g.computeBoundingBox();
+    for (const k in g.attributes) drop(g.attributes[k]);
+    drop(g.index);
+  });
+}
+
 function bustRace() {
   if (replay) { replay.event('cop', 'BUSTED', player.fighter, 5); replay.stop(); }
   document.getElementById('copflag')?.classList.remove('on');
@@ -2412,6 +2438,10 @@ window.__START__ = () => {
   try { if (ghatDress) ghatDress.build(state.finishS, (ev.lenMul * 100) | 0); } catch (e) { console.warn('[riderash] ghat:', e); }
   try { if (valleyDress) valleyDress.build(state.finishS, (ev.lenMul * 100) | 0); } catch (e) { console.warn('[riderash] valley:', e); }
   try { setCourseTunnels(ev.map, spine, state.finishS, (ev.lenMul * 100) | 0); if (tunnelDress) tunnelDress.build(); } catch (e) { console.warn('[riderash] tunnels:', e); }
+  // MEMORY: these are rebuilt every race and never read back on the CPU once
+  // uploaded; drop their JS copies (scenery.js does the same for its chunks)
+  for (const d of [ghatDress, valleyDress, tunnelDress]) if (d && d.group) freeGroupBuffers(d.group);
+  try { const lk = `${ev.map}:${ev.lenMul}:${tier}`; if (landmarks && landmarks._key !== lk) { landmarks._key = lk; landmarks.build(ev.map, state.finishS, scene.userData.setMaterialEnv, tier === 'low'); } } catch (e) { console.warn('[riderash] landmarks:', e); }
   try { window.__HAZARDS__ = placeHazards(spine, state.finishS); if (hazardView) hazardView.build(); } catch (e) { console.warn('[riderash] hazards:', e); }
   if (flagger) {
     flagger.reset(window.__FLAGGER_OUTFIT__ != null ? window.__FLAGGER_OUTFIT__ : (career.state.race || 0) + (career.state.wins || 0) * 3 + raceCounter++);
@@ -3233,9 +3263,11 @@ audio.setVolumes(settings);
 // 5.6 M pixels, which no mobile GPU fills at 60 through the post chain. The
 // ratio falls until width*height*ratio^2 fits (RallyRoadRash does the same).
 const TIERS = {
-  high:   { pr: 2.0,  px: 3.7e6, shadow: 2048, post: true,  shadows: true },
+  // (px 2.8e6: the post chain's half-float targets scale with it, and at 3.7 M
+  // they alone were ~118 MB -- the biggest single item in the budget)
+  high:   { pr: 2.0,  px: 2.8e6, shadow: 2048, post: true,  shadows: true },
   medium: { pr: 1.25, px: 2.1e6, shadow: 1024, post: true,  shadows: true },
-  low:    { pr: 1.0,  px: 1.2e6, shadow: 1024, post: false, shadows: false },
+  low:    { pr: 1.0,  px: 0.9e6, shadow: 1024, post: false, shadows: false },
 };
 const TIER_ORDER = ['high', 'medium', 'low'];
 let tier = 'high', lowFpsTicks = 0;

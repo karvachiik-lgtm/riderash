@@ -82,9 +82,9 @@ const VIS_R = 1250;         // fog at 0.0004 exp2 is ~22% at 1250 m; a 12 m pine
 const FAR_LAT = 80;         // props further than this from the centreline always draw as LOD
 // Per tier: draw distance, full-detail distance, density of small props.
 export const SCENERY_TIERS = {
-  high:   { visR: VIS_R, nearR: 300, density: 1.0 },
-  medium: { visR: 950,   nearR: 220, density: 0.75 },
-  low:    { visR: 700,   nearR: 150, density: 0.5 },
+  high:   { visR: VIS_R, nearR: 300, density: 1.0,  grass: 1.0 },
+  medium: { visR: 950,   nearR: 220, density: 0.75, grass: 0.45 },
+  low:    { visR: 700,   nearR: 150, density: 0.5,  grass: 0 },       // mobile: no grass at all
 };
 const PRE = 800;            // dress this far BEHIND the start line (matches the road's 800 m)
 const T0 = 34.5;            // terrain inner edge: the level's verge ends at 35.5 m (level.js)
@@ -195,6 +195,14 @@ function prng(seed) {
 }
 const hashStr = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
 const pickW = (list, r) => { let tot = 0; for (const [, w] of list) tot += w; let x = r * tot; for (const [k, w] of list) { x -= w; if (x <= 0) return k; } return list[list.length - 1][0]; };
+// MEMORY: a per-course buffer (terrain skirt, instance matrices and colours)
+// is read once, when it is uploaded to the GPU, and never again -- nothing
+// raycasts the scenery and its bounds are computed at build. Keeping the JS
+// copy doubled its cost; drop it on upload. (NOT for shared kit geometry.)
+function freeAfterUpload(attr) {
+  if (!attr || !attr.onUpload) return;
+  attr.onUpload(function () { this.array = null; });
+}
 // seeded 2D value noise (0..1), for terrain displacement
 const _vh = (x, y) => { let n = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263); n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967296; };
 function vnoise2(x, y) {
@@ -359,7 +367,7 @@ export class Scenery {
 
   /** Rebuild for the spine's current map (no-op if it is already dressed). */
   setCourse(spine) {
-    const key = `${spine.mapId}|${spine.lenMul || 1}|${this.tier.density}`;
+    const key = `${spine.mapId}|${spine.lenMul || 1}|${this.tier.density}|${this.tier.grass}`;
     if (key === this.mapKey) return;
     this.mapKey = key;
     this.spine = spine;
@@ -962,7 +970,7 @@ export class Scenery {
     for (let i = 0; i < nChunks; i++) grass.push({ m: [], c: [], n: 0 });     // flat number arrays, not objects
     {
       const gr = prng(hashStr(spine.mapId + 'grass'));
-      const per = Math.round(14 * density);                      // tufts per metre of road, both sides
+      const per = Math.round(14 * (this.tier.grass ?? 1));       // tufts per metre of road, both sides
       const gc = new THREE.Color(), g2 = new THREE.Color();
       const gm = new THREE.Matrix4(), gq = new THREE.Quaternion(), gs = new THREE.Vector3(), gp = new THREE.Vector3(), ge = new THREE.Euler();
       for (let s = Math.max(-150, -PRE); s < sEnd; s += 1) {
@@ -1019,6 +1027,7 @@ export class Scenery {
       im.instanceMatrix.needsUpdate = true; if (im.instanceColor) im.instanceColor.needsUpdate = true;
       im.castShadow = false; im.receiveShadow = true;
       im.computeBoundingSphere();
+      freeAfterUpload(im.instanceMatrix); freeAfterUpload(im.instanceColor);
       parent.add(im); stats.meshes++;
     };
     for (let ci = 0; ci < nChunks; ci++) {
@@ -1037,11 +1046,14 @@ export class Scenery {
         gi.instanceMatrix.needsUpdate = true;
         gi.castShadow = false; gi.receiveShadow = true;
         gi.computeBoundingSphere();
+        freeAfterUpload(gi.instanceMatrix); freeAfterUpload(gi.instanceColor);
         near.add(gi); stats.meshes++;
       }
       const sMid = -PRE + (ci + 0.5) * CHUNK;
       const fc = frame(Math.min(sMid, sEnd));
       if (terrainGeos[ci]) {
+        for (const k in terrainGeos[ci].attributes) freeAfterUpload(terrainGeos[ci].attributes[k]);
+        freeAfterUpload(terrainGeos[ci].index);
         const tm = new THREE.Mesh(terrainGeos[ci], this.terrainMat);
         tm.receiveShadow = true; tm.userData.ownGeo = true; g.add(tm); stats.meshes++;
       }

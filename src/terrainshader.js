@@ -54,6 +54,8 @@ export function enhanceTerrain(mat, opts = {}) {
     uBump: { value: opts.bump ?? 1.0 },
     uStrata: { value: opts.strata ?? 1.0 },
     uDetail: { value: opts.detail ?? 1.0 },
+    uStreak: { value: opts.streak ?? 0.0 },      // dark vertical streaks (Yosemite granite)
+    uFarVeg: { value: opts.farVeg ?? 1.0 },      // far steep faces read as vegetated (0: bare rock)
   };
   mat.userData.terrainUniforms = U;
   const prev = mat.onBeforeCompile;
@@ -71,6 +73,7 @@ export function enhanceTerrain(mat, opts = {}) {
         varying vec3 vTrN;
         uniform vec3 uRock; uniform vec3 uDirt;
         uniform float uRockAmt; uniform float uBump; uniform float uStrata; uniform float uDetail;
+        uniform float uStreak; uniform float uFarVeg;
         float trH;
         ${NOISE}`)
       .replace('#include <color_fragment>', `#include <color_fragment>
@@ -93,13 +96,16 @@ export function enhanceTerrain(mat, opts = {}) {
           float rk = smoothstep(0.26, 0.46, slope + 0.12 * (meso - 0.5)) * uRockAmt;
           // far off, a steep face is mostly vegetated ledges: rock shows in streaks only
           float farV = smoothstep(150.0, 700.0, dist);
-          rk *= 1.0 - farV * (0.75 - 0.5 * smoothstep(0.5, 0.8, macro));
+          rk *= 1.0 - uFarVeg * farV * (0.75 - 0.5 * smoothstep(0.5, 0.8, macro));
           float band = 0.5 + 0.5 * sin(vTrW.y * 1.35 + tr_noise(vec2(q.x * 0.08, vTrW.y * 0.3)) * 5.0);
           // joints: thin, mostly vertical, and only here and there (a mask breaks the contour look)
           float crack = smoothstep(0.035, 0.0, abs(tr_noise(q * vec2(0.55, 0.12)) - 0.5)) * smoothstep(0.55, 0.75, tr_noise(q * 0.07 + 3.0)) * near;
           // strata fade with distance: fine bands alias into a paper-stack at 800 m
           float farK = 1.0 - smoothstep(120.0, 600.0, dist);
           vec3 rock = uRock * (0.72 + 0.34 * mix(0.5, band, uStrata * (0.25 + 0.75 * farK)) + 0.18 * (grain - 0.5) * near) * (1.0 - 0.45 * crack);
+          // water-stained streaks running down the face
+          float streak = smoothstep(0.55, 0.85, tr_noise(vec2(q.x * 0.07, vTrW.y * 0.004 + q.x * 0.002)));
+          rock *= 1.0 - uStreak * streak * 0.5;
           // and far faces take on the big-patch variation instead (vegetated ledges)
           rock = mix(rock, rock * (0.7 + 0.6 * macro), 1.0 - farK);
           diffuseColor.rgb = mix(diffuseColor.rgb, rock, rk);
@@ -119,7 +125,7 @@ export function enhanceTerrain(mat, opts = {}) {
         }`);
   };
   // a stable program key so every enhanced material shares one compiled program
-  mat.customProgramCacheKey = () => 'riderash-terrain-v1';
+  mat.customProgramCacheKey = () => 'riderash-terrain-v2';
   mat.needsUpdate = true;
   return mat;
 }

@@ -232,7 +232,7 @@ function canvasTexture(data, size, srgb) {
 
 function buildLocal(name) {
   const r = RR_RECIPES[name];
-  const size = r.size;
+  const size = Math.round(r.size * TEX_SCALE);
   const n = makeNoise(r.seed);
   const hf = new Float32Array(size * size);
   const alb = new Uint8ClampedArray(size * size * 4);
@@ -301,7 +301,11 @@ const breathe = () => new Promise((res) => setTimeout(res, 0));
  * Build every surface, then load the two sky panoramas. Keeps the old name and
  * the old progress callback so main.js's init order is untouched.
  */
-export async function loadTextures(onProgress) {
+// LOW / MOBILE generates every surface at half size: a quarter of the texture
+// memory (the maps are tiled and seen at speed; half resolution is not missed).
+let TEX_SCALE = 1;
+export async function loadTextures(onProgress, scale = 1) {
+  TEX_SCALE = scale;
   const names = Object.keys(SOURCES);
   const total = names.length + 1;   // + the skies, loaded as one step
   let done = 0;
@@ -311,7 +315,7 @@ export async function loadTextures(onProgress) {
     try {
       const set = src.from === 'local'
         ? buildLocal(src.recipe)
-        : { ...surface(THREE, src.recipe, 512), roughMean: harnessRoughMean(src.recipe) };
+        : { ...surface(THREE, src.recipe, Math.round(512 * TEX_SCALE)), roughMean: harnessRoughMean(src.recipe) };
       SETS[name] = set;
       TEX[name] = set.map;
       TEX[`${name}_n`] = set.normalMap;

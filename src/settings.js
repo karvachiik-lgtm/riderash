@@ -6,11 +6,22 @@ const KEY = 'riderash.settings.v1';
 export const QUALITY = ['auto', 'high', 'medium', 'low'];
 export const TOUCH = ['auto', 'on', 'off'];
 
+// GRAPHICS: HIGH RESOLUTION is the default (everything on, budgeted to about
+// 250 MB). A phone or a low-memory device starts on LOW / MOBILE instead: no
+// grass, lighter landmarks and props, no post effects, a small canvas -- about
+// half the memory, and a steadier frame rate. Either can be changed in Settings.
+function mobileDevice() {
+  try {
+    const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+    const lowMem = navigator.deviceMemory && navigator.deviceMemory <= 4;
+    return !!(coarse || lowMem);
+  } catch (e) { return false; }
+}
 const DEFAULTS = {
   master: 0.8,
   sfx: 1.0,
   music: 0.55,
-  quality: 'auto',
+  quality: mobileDevice() ? 'low' : 'high',
   camMode: 5,        // DRONE; see main.js state.camMode
   showFps: false,
   touch: 'auto',     // on-screen controls: auto = shown while touch is the input in use

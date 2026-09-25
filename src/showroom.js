@@ -751,7 +751,7 @@ export class Showroom {
       // a whole random wardrobe, weighted toward the plausible (most riders
       // wear a lid; most accessories are off)
       look: {
-        helmet: pick(['full', 'full', 'open', 'none']), helmetSize: 0.92 + Math.random() * 0.2, headSize: 0.92 + Math.random() * 0.2,
+        helmet: pick(['full', 'full', 'open', 'none']), helmetSize: 0.92 + Math.random() * 0.2, headSize: 1.38 + Math.random() * 0.25,
         visor: pick(LOOK_OPTIONS.visor), stripe: pick(LOOK_OPTIONS.stripe), finish: pick(LOOK_OPTIONS.finish),
         hair: pick(LOOK_OPTIONS.hair), hairColor: pick(PALETTE.hair), beard: pick(['none', 'none', ...LOOK_OPTIONS.beard]),
         top: pick(LOOK_OPTIONS.top), tattoo: pick(['none', ...LOOK_OPTIONS.tattoo]), inkColor: pick(PALETTE.ink),

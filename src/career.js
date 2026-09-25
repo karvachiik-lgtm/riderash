@@ -223,6 +223,12 @@ function write(s) {
 // the showroom ever grows a fifth slider, this is the one place that has to learn
 // about it, and the failure mode is a dropped field rather than a corrupt save.
 const RIDER_BUILDS = ['lean', 'normal', 'stocky', 'heavy'];
+// the default head went from 1.0 to 1.5x: a save still on the OLD default moves
+// with it once (a size the player actually chose is left alone)
+function headV2(r, look) {
+  if (!r.headV2 && look.headSize === 1) look.headSize = 1.5;
+  return look;
+}
 function sanitiseRider(r) {
   if (!r || typeof r !== 'object') return null;
   const num = (v, lo, hi, fb) => (Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : fb);
@@ -241,7 +247,8 @@ function sanitiseRider(r) {
       skin:   col(c.skin,   0x9c7358),
     },
     // the wardrobe: bodyspec.makeLook validates every field on the way in
-    look: makeLook(r.look),
+    look: headV2(r, makeLook(r.look)),
+    headV2: true,
   };
 }
 
@@ -274,6 +281,7 @@ export class Career {
       limbLong: spec.limbLong,
       colors: spec.colors,
       look: spec.look,
+      headV2: true,
     });
     if (!s) return;
     this.state.rider = s;

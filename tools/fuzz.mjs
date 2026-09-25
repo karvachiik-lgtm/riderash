@@ -199,9 +199,12 @@ for (let race = 0; race < RACES; race++) {
       p.s = S.finishS - 3; p.speed = Math.max(p.speed, 25); p.sync(); W.__SIM__(1);
     }
     if (!S.raceOver) bad('race did not end after crossing the line');
-    // a bust plays the arrest cutscene (arrest.js) before the results: let it run
-    for (let i = 0; i < 40 && S.arrest; i++) W.__SIM__(0.5);
+    // every ending plays out before the results: the finish scene, the arrest
+    // cutscene (arrest.js), then the end photo (endscene.js)
+    const ending = () => S.arrest || S.ending || W.__ENDPHOTO__.active || W.__OVER_PENDING__;
+    for (let i = 0; i < 40 && ending(); i++) W.__SIM__(0.5);
     if (S.arrest) bad('arrest cutscene did not finish');
+    if (S.ending || W.__ENDPHOTO__.active) bad('end scene / photo did not finish');
     if (!$('over').classList.contains('on')) bad('results screen not shown');
     const title = $('overh').textContent, btn = $('again').textContent;
     const R = W.__REPLAY__, stats = R.stats();

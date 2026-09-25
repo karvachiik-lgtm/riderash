@@ -57,6 +57,8 @@ import { Cop } from './cops.js';
 import { PHYS } from './physics.js';
 import { BIKE_FOR_TIER, bikeSource } from './kit.js';
 import { initTips } from './tips.js';
+import { EndPhoto } from './endscene.js';
+import { armAim } from './riderpose.js';
 
 const canvas = document.getElementById('c');
 // NO WEBGL, NO GAME -- but say so. A constructor that throws here used to leave
@@ -1200,14 +1202,17 @@ function frameBody(dt) {
     guardBodies();
   } else if (state.running && state.arrest) {
     stepArrestScene(dt);
+  } else if (state.running && state.ending) {
+    stepEndingScene(dt);
   }
+  endPhoto.update(dt);
 
   // The camera MUST be driven on every frame. updateCamera was defined but
   // never called, so the chase camera stayed wherever the idle orbit left it
   // while the player drove away: measured 302 m of separation, which is why the
   // hero read as a tiny speck and then left the frame entirely.
   if (state.running) {
-    if (state.plunge) plungeCamera(); else if (state.arrest) arrestCamera(dt); else updateCamera(dt, state);
+    if (state.plunge) plungeCamera(); else if (state.arrest) arrestCamera(dt); else if (state.ending) endingCamera(dt); else updateCamera(dt, state);
   } else {
     updateCameraIdle(dt);
   }
@@ -1249,9 +1254,10 @@ function frameBody(dt) {
 
   // HARNESS: `__NORENDER__` skips the present so a software-GL harness can step
   // the real game loop quickly (see __SIM__); `__RENDER__` presents on demand.
-  if (window.__NORENDER__) return;
+  if (window.__NORENDER__) { flushPhoto(false); return; }
   if (postfx) postfx.render(dt, speedFrac);
   else renderer.render(scene, camera);
+  flushPhoto(true);
 }
 
 // HARNESS: advance the real game loop by `sec` of simulated time at a fixed
@@ -2178,7 +2184,7 @@ function stepGame(dt) {
   if (pos !== state.lastPos) { state.lastPos = pos; if (pos === 1) state.warn = 'LEADING'; }
   if (player.phys.s >= state.finishS && !state.raceOver) {
     state.raceOver = true;
-    endRace(pos);
+    startEndingScene(pos);
   }
 
   // HUD
@@ -2294,7 +2300,7 @@ function stepPlunge(dt) {
   g.position.addScaledVector(P.n, P.vx * dt).addScaledVector(P.f, P.v * dt);
   g.position.y += P.vy * dt;
   g.rotation.x += PLUNGE.SPIN * dt; g.rotation.z += PLUNGE.SPIN * 0.6 * dt;
-  if (P.t >= PLUNGE.TIME && !state.raceOver) { state.raceOver = true; eliminateRace(); }
+  if (P.t >= PLUNGE.TIME && !state.raceOver) { state.raceOver = true; photoThen('plunge', true, eliminateRace); }
 }
 function plungeCamera() {
   // the camera stays at the edge and watches you go
@@ -2315,6 +2321,7 @@ function eliminateRace() {
   ];
   audio.siren(0);
   hud.ended(res.over ? "YOU'RE OUT OF THE GAME" : 'OVER THE EDGE', lines.join('<br>') + statsTable());
+  pinPhoto(res);
   state.running = false;
   state.endedAt = performance.now();
   state.plunge = null;
@@ -2340,10 +2347,11 @@ function startPlayerArrest() {
   state.arrest = new Arrest(cop, { phys: player.phys, fighter: player.fighter, dismount: player.dismount }, {
     scene,
     onEvent: (e) => {
-      if (e === 'cuff') state.warn = 'ARRESTED';
+      if (e === 'cuff') { state.warn = 'ARRESTED'; snapNext = true; }
       if (e === 'click') { audio.oneShot('impact', 0.4, 2.4); setTimeout(() => audio.oneShot('impact', 0.35, 2.6), 180); feel.pattern([25, 150, 25], 0.5); }
     },
-    onDone: () => { state.arrest = null; bustRace(); },
+    // the mugshot holds on the orbiting arrest shot; THEN the results
+    onDone: () => photoThen('bust', !endPhoto.img, () => { state.arrest = null; bustRace(); }),
   });
   // the orbit starts from wherever the chase camera is now
   const f = state.arrest.focus;
@@ -2399,8 +2407,14 @@ function maybeArrestRival() {
   }
 }
 // any key / tap skips the arrest once it has had a second
-addEventListener('keydown', () => { if (state.arrest && state.arrest.total > 1) state.arrest.finish(); });
-addEventListener('pointerdown', () => { if (state.arrest && state.arrest.total > 1) state.arrest.finish(); });
+// (and the end photo, once it is up; one press skips one thing)
+function skipEnding() {
+  if (endPhoto.active) { endPhoto.skip(); return; }
+  if (state.arrest && !state.arrest.done && state.arrest.total > 1) state.arrest.finish();
+  else if (state.ending && state.ending.t > 1 && !state.ending.shown) state.ending.t = Math.max(state.ending.t, END.SNAP);
+}
+addEventListener('keydown', skipEnding);
+addEventListener('pointerdown', skipEnding);
 
 function freeGroupBuffers(root) {
   const drop = (a) => { if (a && a.onUpload) a.onUpload(function () { this.array = null; }); };
@@ -2415,6 +2429,105 @@ function freeGroupBuffers(root) {
     drop(g.index);
   });
 }
+
+// ---- THE LAST PICTURE (endscene.js) -------------------------------------------
+// Every race ends on a photo: the finish gets a short scene first (the camera
+// swings round to your front as you coast down, fist in the air or head
+// hung), a bust gets a mugshot off the cuffing shot, a plunge a postcard.
+const endPhoto = new EndPhoto();
+window.__ENDPHOTO__ = endPhoto;
+window.__ENDINGS__ = { bust: () => { state.raceOver = true; startPlayerArrest(); }, plunge: () => startPlunge() };   // harness: play an ending
+const END = { SNAP: 2.4, get HOLD() { return window.__END_HOLD__ ?? (navigator.webdriver ? 0.4 : 3.4); } };
+let snapNext = false, photoReq = null;
+function endCtx(pos) {
+  const ev = career.event;
+  return {
+    name: (career.state && career.state.riderName) || 'A. NONYMOUS',
+    course: ev ? ev.name : '',
+    field: Math.max(1, world.parts.length - 1),
+    place: pos ? `${ORDINALS[pos - 1] || pos} PLACE` : '',
+  };
+}
+// ask for the photo: snapped off the next rendered frame (when `snap`), then
+// shown; `done` runs when it is dismissed
+function photoThen(kind, snap, done, pos) {
+  if (snap) snapNext = true;
+  hud.show(false);
+  photoReq = { kind, ctx: endCtx(pos), done };
+}
+function flushPhoto(rendered) {
+  if (snapNext && rendered) { snapNext = false; endPhoto.snap(renderer.domElement); }
+  // (not rendered: a harness stepping without presenting -- no picture, but
+  // the photo still shows and times out, so nothing waits on a frame)
+  if (photoReq) {
+    const r = photoReq; photoReq = null; if (!rendered) snapNext = false;
+    endPhoto.show(r.kind, r.ctx, END.HOLD, r.done);
+  }
+}
+// the results card carries the photo, pinned on the left
+function pinPhoto(res) {
+  const over = document.getElementById('over');
+  if (!over) return;
+  if (res && res.over) endPhoto.repossess();
+  over.querySelectorAll('.ep-pin').forEach((n) => n.remove());
+  over.insertAdjacentHTML('afterbegin', endPhoto.pinned());
+}
+
+function startEndingScene(pos) {
+  audio.siren(0);
+  document.getElementById('copflag')?.classList.remove('on');
+  const kind = pos === 1 ? 'win' : pos <= 4 ? 'podium' : 'loss';
+  const f = player.group.position;
+  state.ending = { pos, kind, t: 0, shown: false, ang: Math.atan2(camera.position.x - f.x, camera.position.z - f.z) };
+  hud.show(false);                       // the scene is the picture now
+}
+function stepEndingScene(dt) {
+  const E = state.ending;
+  E.t += dt;
+  // you coast to a stop past the line; the pack rides on in
+  const d = player.dismount;
+  if (d && d.onFoot) { if (d.state === 'FALLING') d.update(dt, null); d.render(dt); }
+  else {
+    player.phys.advance(dt, BRAKE_INPUT); player.phys.sync(); player.group.position.copy(player.phys.pos);
+    const j = player.rider && player.rider.userData && player.rider.userData.joints;
+    if (j) {
+      if (E.kind === 'loss') {
+        // head hung, shoulders down
+        if (j.neck) j.neck.rotation.x = Math.min(0.55, E.t * 0.6);
+        if (j.torso) j.torso.rotation.x = 0.35 + Math.min(0.2, E.t * 0.2);
+      } else if (E.t > 0.35) {
+        // a fist punched at the sky, pumping (twice as hard for the win)
+        const pump = Math.sin(E.t * (E.kind === 'win' ? 9 : 6));
+        armAim(j, 'right', [-0.18, 0.96, 0.12 + 0.08 * pump], [0, 0, 1], 0.35 + 0.35 * Math.max(0, pump), 0);
+        if (j.neck) j.neck.rotation.x = -0.25;
+      }
+    }
+  }
+  for (const r of rivals) {
+    if (r.out || r.fighter.down || !r.phys) continue;
+    r.phys.advance(dt, { throttle: true, brake: false, steer: THREE.MathUtils.clamp(-r.phys.lateral * 0.08, -0.3, 0.3), tuck: false });
+    r.applyVisual(dt);
+  }
+  if (E.t >= END.SNAP && !E.shown) {
+    E.shown = true;
+    photoThen(E.kind, true, () => { state.ending = null; endRace(E.pos); }, E.pos);
+  }
+}
+function endingCamera(dt) {
+  const E = state.ending;
+  if (!E) return;
+  const f = player.group.position, fw = player.phys.forward;
+  // from wherever the chase camera was round to a three-quarter FRONT view
+  const front = Math.atan2(fw.x, fw.z) + 0.55;
+  let dA = front - E.ang; dA = Math.atan2(Math.sin(dA), Math.cos(dA));
+  E.ang += dA * Math.min(1, dt * 1.6);
+  const k = Math.min(1, E.t / 1.8), r = 7 - 2.4 * k, h = 2.2 - 0.7 * k;
+  if (Math.abs(camera.fov - 42) > 0.1) { camera.fov += (42 - camera.fov) * Math.min(1, dt * 2); camera.updateProjectionMatrix(); }
+  _endCam.set(f.x + Math.sin(E.ang) * r, f.y + h, f.z + Math.cos(E.ang) * r);
+  camera.position.lerp(_endCam, Math.min(1, dt * 4));
+  camera.lookAt(f.x, f.y + 1.15, f.z);
+}
+const _endCam = new THREE.Vector3();
 
 function bustRace() {
   if (replay) { replay.event('cop', 'BUSTED', player.fighter, 5); replay.stop(); }
@@ -2433,6 +2546,7 @@ function bustRace() {
   audio.siren(0);
   audio.oneShot('horn', 0.6, 0.8);
   hud.ended(res.over ? "YOU'RE OUT OF THE GAME" : 'BUSTED!', lines.join('<br>') + statsTable());
+  pinPhoto(res);
   state.running = false;
   state.endedAt = performance.now();
   audio.idle();
@@ -2502,6 +2616,7 @@ function endRace(pos) {
   }).join('');
   const table = `<table class="board">${board}</table>`;
   hud.ended(title, lines.join('<br>') + table + statsTable());
+  pinPhoto(res);
   if (touchpad) touchpad.reset();
   phone.end();                   // menus may let the phone sleep
   state.running = false;
@@ -2716,6 +2831,8 @@ function resetRace() {
   // an arrest in progress (skipped, quit, restarted): the cop back on his bike
   for (const k of ['arrest', 'copArrest']) { if (state[k]) { try { state[k].release(); } catch (e) { /* the rig may be gone */ } state[k] = null; } }
   state.arrestCam = null;
+  state.ending = null; photoReq = null; snapNext = false; endPhoto.clear();
+  document.querySelectorAll('#over .ep-pin').forEach((n) => n.remove());
   // The garage's bike is the machine you see: tier -> class (src/kit.js), tier colour.
   try {
     if (player && career.bike) player.setBike(bikeSource(assets, BIKE_FOR_TIER[career.bike.id] || 'sport'), career.bike.colour);

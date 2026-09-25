@@ -37,7 +37,7 @@ export default function (THREE) {
   // the original rider -- full-face lid, leathers, gloves -- so a spec without a
   // look (an old save, a rival) builds the same body as before, mesh for mesh.
   const L = Object.assign({
-    helmet: 'full', helmetSize: 1, headSize: 1, bust: 1.4, seat: 1.3, visor: 'smoke', stripe: 'racing', finish: 'gloss', hair: 'short',
+    helmet: 'full', helmetSize: 1, headSize: 1.5, bust: 1.4, seat: 1.3, visor: 'smoke', stripe: 'racing', finish: 'gloss', hair: 'short',
     hairColor: 0x2a1d14, beard: 'none', top: 'leather', bottom: 'jeans', pattern: 'plain', figure: 'm',
     hat: 'none', shoes: 'boots', tattoo: 'none', inkColor: 0x1c2433,
     glasses: 'none', chain: 'none', suit: 'none', scarf: 'none', scarfColor: 0x8a1f1f, earring: false,

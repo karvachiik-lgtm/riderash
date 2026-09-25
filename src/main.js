@@ -1408,8 +1408,14 @@ function runAttract() {
   el.hidden = false;
   document.body.classList.add('attract');
   attractShot = null; attractI = -1;
+  // THE SOUND GATE: while the browser still has the sound blocked, the first
+  // press starts the music and the intro plays on with it (a prompt says so);
+  // only a press once it is audible -- or the SKIP button -- skips the intro
+  const gate = document.getElementById('introsound');
+  const gateT = setInterval(() => { if (gate) gate.classList.toggle('on', !audible() && document.body.classList.contains('attract')); if (audible() || !document.body.classList.contains('attract')) { if (gate) gate.classList.remove('on'); clearInterval(gateT); } }, 250);
   const done = (ev) => {
     if (!document.body.classList.contains('attract')) return;
+    if (ev && ev.type !== 'click' && !audible()) { startSound(); return; }
     window.__INTRO_END__ = ev ? (ev.type + ':' + (ev.key || ev.target?.id || '')) : 'timer';
     try { sessionStorage.setItem('riderash.intro', '1'); } catch (e) { /* private mode */ }
     el.classList.add('out');
@@ -3814,14 +3820,20 @@ function initSoundtrack() {
   audio.init().then(() => soundtrack.init()).catch((e) => console.warn('[soundtrack]', e));
   return soundtrack;
 }
-for (const ev of ['pointerdown', 'keydown', 'touchstart']) {
-  addEventListener(ev, () => {
-    audio.init().catch(() => {});
-    initSoundtrack();
-    if (!state.running) audio.playMusic('menu');
-    audioExt.init().catch(() => {});   // ADDITIVE: extra beds/beeps
-  }, { once: true });
+// THE MUSIC FROM THE VERY START. Tried at boot -- a browser that allows
+// autoplay (a returning player, a high media-engagement score) plays the title
+// anthem under the loading screen and the intro flythrough -- and again on the
+// first key / tap for one that does not (runAttract keeps the intro going for
+// that first press: see soundGate).
+function startSound() {
+  audio.init().catch(() => {});
+  initSoundtrack();
+  if (!state.running) audio.playMusic('menu');
+  audioExt.init().catch(() => {});   // ADDITIVE: extra beds/beeps
 }
+const audible = () => !!(audio.ctx && audio.ctx.state === 'running');
+for (const ev of ['pointerdown', 'keydown', 'touchstart']) addEventListener(ev, startSound, { once: true });
+startSound();
 
 try {
   await init();

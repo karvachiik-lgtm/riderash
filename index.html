@@ -1004,6 +1004,12 @@ body.cine #hud, body.cine .hud { opacity: 0; transition: opacity .5s; }
 .bike .try:hover, .bike .try:focus { background: #ece6d9; color: #0b0b0c; outline: none; }
 #title .bike.bike-mono .pr { color: #e3b93c; }
 @media (max-width: 760px) { #title .bike.bike-mono { margin-left: 0; } #title .bike.bike-mono::before { display: none; } }
+/* the intro's sound gate prompt: shown only while the browser has sound blocked */
+#introsound { position: absolute; left: 50%; bottom: 13vh; transform: translateX(-50%); z-index: 2; pointer-events: none; opacity: 0;
+  font: 700 13px/1 var(--ui, sans-serif); letter-spacing: .32em; color: #fff; padding: 9px 18px; border: 1px solid rgba(255,255,255,.45);
+  background: rgba(0,0,0,.45); transition: opacity .4s; white-space: nowrap; }
+#introsound.on { opacity: 1; animation: introPulse 1.6s ease-in-out infinite; }
+@keyframes introPulse { 50% { opacity: .45; } }
 </style>
 </head>
 <body>
@@ -1018,6 +1024,7 @@ body.cine #hud, body.cine .hud { opacity: 0; transition: opacity .5s; }
   <div id="introtitle" class="logo"><span class="lg-a">RIDE</span><span class="lg-b">RASH</span></div>
   <div id="introsub"></div>
   <button id="introskip" class="pe">SKIP ›</button>
+  <div id="introsound">PRESS ANY KEY · SOUND ON</div>
 </div>
 <div id="load">
   <h1 class="logo"><span class="lg-a">RIDE</span><span class="lg-b">RASH</span></h1>

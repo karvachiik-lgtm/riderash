@@ -1,0 +1,15 @@
+{
+  "name": "riderash-tools",
+  "private": true,
+  "type": "module",
+  "description": "Developer tools for RideRash: the fuzz / regression harness.",
+  "scripts": {
+    "fuzz": "node fuzz.mjs",
+    "fuzz:quick": "node fuzz.mjs --races 2",
+    "fuzz:late": "node fuzz.mjs --races 5 --start 20"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.55.0",
+    "three": "0.169.0"
+  }
+}

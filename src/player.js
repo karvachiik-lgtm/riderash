@@ -489,7 +489,11 @@ export class Player {
   // right-hand turn (physics.js: `targetLean = steer * LEAN_MAX`, and `steer` is
   // +1 when the right key is down).
   const leanVis = Math.tanh(p.lean * 1.25) * 0.72;
-  const targetLean = leanVis * (0.55 + 0.45 * Math.min(1, p.speed / 28));
+  // THE ONE-WHEELER leans a quarter further (nothing but a tyre crown under
+  // it) and, past ~100 mph, starts a small speed wobble
+  const monoB = this.bike.userData && this.bike.userData.bike && this.bike.userData.bike.mono ? this.bike.userData.bike : null;
+  let targetLean = leanVis * (0.55 + 0.45 * Math.min(1, p.speed / 28)) * (monoB ? 1.25 : 1);
+  if (monoB && p.speed > 45) { this._wobT = (this._wobT || 0) + dt; targetLean += Math.sin(this._wobT * 11) * 0.012 * Math.min(2, (p.speed - 45) / 8); }
   this.bikeLean += (targetLean - this.bikeLean) * Math.min(1, dt * 8);
   this.bike.rotation.z = this.bikeLean;
       // AIRBORNE AND WHEELIE POSE. `airY` lifts the whole rider+bike group off
@@ -545,13 +549,25 @@ export class Player {
       // patches below the wheelie, so they compose. Order matters and is handled
       // by the pivot compensation below.
       const suspPitch = Math.atan2((p.suspRear || 0) - (p.suspFront || 0), CFG.WHEELBASE);
-      const pitchX = Math.sin(p.wheelSpin * 0.5) * 0.001 - (p.wheelie || 0) + suspPitch;
+      let pitchX = Math.sin(p.wheelSpin * 0.5) * 0.001 - (p.wheelie || 0) + suspPitch;
+      // THE ONE-WHEELER IS BALANCED, LIKE A SEGWAY: to accelerate the rider
+      // pushes his weight forward and the gyros tip the machine with him, so
+      // under throttle the NOSE DIPS and the pointed TAIL RISES; to slow down
+      // he sits back and it tips the other way. Proportional to the real
+      // acceleration, eased. (+x is nose down on this rig.)
+      if (monoB) {
+        const acc = (p.speed - (this._monoLastV ?? p.speed)) / Math.max(1e-3, dt);
+        this._monoLastV = p.speed;
+        const want = Math.max(-0.2, Math.min(0.13, acc * 0.012));
+        this._monoPitch = (this._monoPitch || 0) + (want - (this._monoPitch || 0)) * Math.min(1, dt * 4);
+        pitchX = this._monoPitch - (this.monoBack || 0);
+      }
       this.bike.rotation.x = pitchX;
       {
         // wheelie (+ve nose up -> rotation.x negative) plants the REAR contact;
         // a stoppie plants the FRONT. Local +z is forward (the asset faces +z).
         const halfWB = CFG.WHEELBASE * 0.5;
-        const pz = (pitchX <= 0 ? -halfWB : halfWB) * this._bikeScale;
+        const pz = monoB ? (monoB.hubZ || 0) * this._bikeScale : (pitchX <= 0 ? -halfWB : halfWB) * this._bikeScale;
         _pivotP.set(0, 0, pz);
         // Use the NODE'S OWN Euler order, so the compensation matches the matrix
         // the renderer will actually build for the bike.
@@ -584,7 +600,10 @@ export class Player {
           // far over the bike is, which is the "humans sitting in contact with the
           // bike when the bike tilts" bar.
           this.rider.position.set(0, 0, 0);
-          this.rider.rotation.set(0, 0, this.bikeLean * 0.18);
+          // (on the one-wheeler the rider's body drives it: he leans INTO the
+          // throttle and sits back on the brakes, on top of the machine's tilt)
+          const onMono = !!(this.bike && this.bike.userData && this.bike.userData.bike && this.bike.userData.bike.mono);
+          this.rider.rotation.set(onMono ? ((this._monoPitch || 0) - (this.monoBack || 0)) * 0.9 : 0, 0, this.bikeLean * 0.18);
           this.poseRider(j, f);
         }
       }

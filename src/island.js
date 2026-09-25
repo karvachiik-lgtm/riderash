@@ -54,6 +54,7 @@ const RULES = [
   [/^GRABBED!|YOU GOT THROWN/, 'danger', 'fist'],
   [/^(COW|DEER|MOOSE)!|^HIT A /, 'danger', 'animal'],
   [/ONCOMING|WIPEOUT|T-BONED$|^DOWN$|WENT DOWN|PARKED CAR|^OVER THE EDGE/, 'danger', 'danger'],
+  [/LEANING BACK|THROWN OFF THE BACK/, 'danger', 'danger'],
   [/YOU PUT .* OVER THE EDGE|COP WENT OVER/, 'good', 'fist'],
   [/WENT OVER THE EDGE/, 'warn', 'danger'],
   [/^OIL/, 'danger', 'slick'],

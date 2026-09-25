@@ -1711,6 +1711,7 @@ function stepGame(dt) {
   else {
     player.update(dt, gridInput, world, hooks);
     weaveFree(dt, gridInput);
+    noseOver(dt, gridInput);
     if (player.phys.overEdge && !state.raceOver) startPlunge();
   }
   // SLIDE DUST. A thrown body scrubbing along the tarmac kicks up grit, and the
@@ -1886,9 +1887,11 @@ function stepGame(dt) {
                pan: (r.phys.lateral - player.phys.lateral) / 4 };
     }
   }
+  const monoRide = raceBike().id === 'mono';
   audio.update({
     speed: player.phys.speed,
-    maxSpeed: CFG.MAX_SPEED,
+    maxSpeed: monoRide ? player.phys.topSpeed : CFG.MAX_SPEED,
+    enginePitch: monoRide ? 1.28 : 1,
     throttle: input.down.up ? 1 : 0,
     rival: near,
     lean: player.phys.lean,
@@ -2477,6 +2480,27 @@ function weaveFree(dt, inp) {
 function grabberName(f) {
   const r = rivals.find((x) => x.fighter === f);
   return r ? (r.name || 'A RIVAL') : 'A RIVAL';
+}
+
+// THE ONE-WHEELER'S TRAP: it is balanced, not braked -- to slow down the rider
+// sits back and the machine tips back with him. Stand on the brakes at speed
+// and he leans too far: the tail drops (player.monoBack), a warning, then off
+// the back. Ease off and it comes back. Braking on this machine is a skill:
+// feather it, never stamp it.
+const NOSE = { V: 31, WARN: 0.4, OVER: 1.0 };
+function noseOver(dt, inp) {
+  if (raceBike().id !== 'mono') { player.monoBack = 0; state.noseT = 0; return; }
+  const f = player.fighter, p = player.phys;
+  const hard = !f.down && (inp && (inp.brake || 0) > 0.5) && p.speed > NOSE.V;
+  state.noseT = hard ? (state.noseT || 0) + dt : Math.max(0, (state.noseT || 0) - dt * 2);
+  player.monoBack = Math.min(0.28, state.noseT * 0.3);
+  if (state.noseT > NOSE.WARN && state.noseT - dt <= NOSE.WARN) { state.warn = 'LEANING BACK! EASE OFF'; feel.pulse(0.4); }
+  if (state.noseT > NOSE.OVER) {
+    state.noseT = 0; player.monoBack = 0;
+    if ((f.hold || f.heldBy) && f._endHold) f._endHold('break', state.hooks || {});
+    f.down = true; f.downTimer = CFG.WRECK_TIME; f.active = null; f.invuln = CFG.INVULN_AFTER;
+    state.warn = 'THROWN OFF THE BACK'; state.shake = Math.min(1.4, state.shake + 0.9); state.hooks?.onImpact?.(1.0);
+  }
 }
 
 function radarActive(live) {

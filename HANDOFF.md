@@ -203,10 +203,16 @@ one that decides what you are allowed to build:
   1.6 M triangles) was downloaded to a scratch folder OUTSIDE the repo and MEASURED:
   the wheel fitted as a circle, the body's top, belly and half-width sampled at 48
   stations. Those numbers are the tables in the asset; the body is lofted through
-  them (superellipse sections on a Catmull-Rom spline, 18 k triangles). Silhouette
-  IoU against the reference: side 0.87, top 0.91, front 0.77 (the front gap is the
-  contract's grips and pegs, which are wider than the reference's). The GLB never
-  enters the game or the repo.
+  them (superellipse sections on a Catmull-Rom spline). Silhouette IoU against the
+  reference at 1:1 was side 0.87 / top 0.91 / front 0.77; it was then deliberately
+  stretched (22% longer, 20% wider, raked) to read sportier, and painted after
+  photographs of the real machine (orange fading to gold, a broad black band, a
+  five-spoke silver rim). 33 k triangles. The GLB never enters the game or the repo.
+- **The one-wheeler rides differently.** It is balanced, not braked: under throttle
+  the nose dips and the tail rises and the rider leans in (player.js, pivoting on
+  `userData.bike.hubZ`); braking tips it back. Stamp on the brakes above ~70 mph
+  and you lean too far: LEANING BACK! then THROWN OFF THE BACK (main.js noseOver).
+  Machine stats agility / brake / frail (physics.js setMachine, combat.js).
 - **No glyphs anywhere.** Signage is shape and colour only. (The title screen is
   UI chrome, not game-world signage — text there is fine.)
 

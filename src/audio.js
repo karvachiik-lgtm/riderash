@@ -356,7 +356,8 @@ export class Audio {
       const rpm = Math.max(0, Math.min(1, (sp - lo) / (hi - lo)));
       // a brief dip in the first 90 ms after an upshift: the clutch
       const shifting = t - this._shiftT < 0.09;
-      const rate = 0.60 + rpm * 1.15 + (gear - 1) * 0.04 - (shifting ? 0.12 : 0);
+      // (enginePitch: a machine's own voice -- the one-wheeler is higher-strung)
+      const rate = (0.60 + rpm * 1.15 + (gear - 1) * 0.04 - (shifting ? 0.12 : 0)) * (g.enginePitch || 1);
       e.src.playbackRate.setTargetAtTime(rate, t, shifting ? 0.02 : 0.05);
       // off the throttle the engine note falls back: overrun, not drive
       const load = g.throttle === undefined ? 1 : 0.55 + 0.45 * Math.max(0, g.throttle);

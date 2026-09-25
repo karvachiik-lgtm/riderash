@@ -33,6 +33,7 @@ const STEP_M = 6;           // sampling interval along the road
 // the cruise view: how long it must be quiet first, how fast it eases out and
 // snaps back in, and how much road it draws ahead
 const CRUISE = { AFTER: 2.5, OUT: 1.1, IN: 7, AHEAD: 720 };
+const MODES = ['auto', 'focus', 'full'];
 
 export class Radar {
   constructor(canvas) {
@@ -57,6 +58,19 @@ export class Radar {
     // straight back to the close top-down sweep.
     this.calm = 0;                // 0 = the close sweep, 1 = the cruise view
     this.quiet = 0;               // seconds since anything happened
+    // THE MODE, the player's (the pill above the dish, or N):
+    //   auto   the above: close sweep while things happen, far view when calm
+    //   focus  always the close top-down sweep, at the chosen radius
+    //   full   the whole route to the flag, fitted to the dish
+    this.mode = 'auto';
+    try { const m = localStorage.getItem('riderash.radarMode'); if (MODES.includes(m)) this.mode = m; } catch (e) { /* private mode */ }
+    this.full = 0;                // 0..1, the full-route view's fade
+    this._route = null;           // cached route polyline for `full`
+    this.pill = document.createElement('button');
+    this.pill.type = 'button'; this.pill.id = 'radarmode';
+    this.pill.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); this.cycleMode(); });
+    document.body.appendChild(this.pill);
+    this._pillKey = '';
     // + / - are drawn on the lower rim; a tap on the left half zooms out, the
     // right half zooms in. The canvas takes pointer events for this alone.
     this.cv.classList.add('pe');
@@ -67,6 +81,26 @@ export class Radar {
       e.preventDefault();
       this.zoom(x < 0.5 ? +1 : -1);
     });
+  }
+
+  cycleMode() {
+    this.mode = MODES[(MODES.indexOf(this.mode) + 1) % MODES.length];
+    try { localStorage.setItem('riderash.radarMode', this.mode); } catch (e) { /* private mode */ }
+    this._pillKey = '';
+  }
+
+  /** The pill sits centred on the dish's top edge, wherever CSS put the dish. */
+  _placePill() {
+    const r = this.cv.getBoundingClientRect(), shown = r.width > 0 && getComputedStyle(this.cv).visibility !== 'hidden'
+      && getComputedStyle(this.cv).display !== 'none' && !document.body.classList.contains('replaying');
+    const key = `${Math.round(r.left)}|${Math.round(r.top)}|${Math.round(r.width)}|${shown}|${this.mode}`;
+    if (key === this._pillKey) return;
+    this._pillKey = key;
+    const P = this.pill;
+    P.style.display = shown ? '' : 'none';
+    P.style.left = `${r.left + r.width / 2}px`;
+    P.style.top = `${r.top + 1}px`;
+    P.innerHTML = MODES.map((m) => `<span class="${m === this.mode ? 'on' : ''}">${m.toUpperCase()}</span>`).join('');
   }
 
   /** +1 = zoom OUT (more road), -1 = zoom IN. */
@@ -214,6 +248,80 @@ export class Radar {
     g.restore();
   }
 
+  // ---- THE FULL VIEW ---------------------------------------------------------
+  // The whole course, start to flag, top-down and fitted to the dish: the part
+  // already ridden dim, what is left bright, the flag, the pack and you on it.
+  // North-up would spin nothing but also show a winding course sideways; it is
+  // turned so the START->FLAG line runs up the dish, and never rotates after.
+  _full(g, p, rivals, finishS, k) {
+    const S = this.size, R = this.r;
+    const F = Number.isFinite(finishS) ? finishS : 3000;
+    if (!this._route || this._route.F !== F || this._route.c0 !== centreAt(0).x) {
+      const pts = [];
+      for (let s = 0; s <= F; s += Math.max(10, F / 300)) { const c = centreAt(-s); pts.push(c.x, c.z, s); }
+      const e = centreAt(-F); pts.push(e.x, e.z, F);
+      const a = centreAt(0);
+      const ang = Math.atan2(e.x - a.x, e.z - a.z);           // start->flag heading
+      const ca = Math.cos(ang), sa = Math.sin(ang);
+      const rot = [];
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (let i = 0; i < pts.length; i += 3) {
+        const x = pts[i] - a.x, z = pts[i + 1] - a.z;
+        const u = x * ca - z * sa, v = x * sa + z * ca;       // v along start->flag
+        rot.push(u, v, pts[i + 2]);
+        minX = Math.min(minX, u); maxX = Math.max(maxX, u); minY = Math.min(minY, v); maxY = Math.max(maxY, v);
+      }
+      const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+      let ext = 1;
+      for (let i = 0; i < rot.length; i += 3) ext = Math.max(ext, Math.hypot(rot[i] - cx, rot[i + 1] - cy));
+      this._route = { F, c0: a.x, rot, cx, cy, sc: (R * 0.74) / ext, ax: a.x, az: a.z, ca, sa };
+    }
+    const T = this._route;
+    const map = (x, z, out) => {
+      const dx = x - T.ax, dz = z - T.az;
+      const u = dx * T.ca - dz * T.sa, v = dx * T.sa + dz * T.ca;
+      out[0] = R + (u - T.cx) * T.sc; out[1] = R * 0.92 - (v - T.cy) * T.sc; return out;
+    };
+    g.save();
+    g.globalAlpha = k;
+    g.fillStyle = 'rgba(14,16,18,0.9)'; g.fillRect(0, 0, S, S);
+    g.lineCap = 'round'; g.lineJoin = 'round';
+    const line = (from, to, style, w) => {
+      g.beginPath(); let started = false;
+      for (let i = 0; i < T.rot.length; i += 3) {
+        const s = T.rot[i + 2]; if (s < from || s > to) continue;
+        const x = R + (T.rot[i] - T.cx) * T.sc, y = R * 0.92 - (T.rot[i + 1] - T.cy) * T.sc;
+        if (!started) { g.moveTo(x, y); started = true; } else g.lineTo(x, y);
+      }
+      g.strokeStyle = style; g.lineWidth = w; g.stroke();
+    };
+    line(0, p.s, 'rgba(236,230,217,0.22)', 3);
+    line(p.s, T.F, 'rgba(236,230,217,0.9)', 3);
+    const pt = [0, 0];
+    // start and flag
+    map(centreAt(0).x, centreAt(0).z, pt); g.fillStyle = 'rgba(236,230,217,0.5)'; g.fillRect(pt[0] - 2, pt[1] - 2, 4, 4);
+    const fe = centreAt(-T.F); map(fe.x, fe.z, pt); this._flagIcon(g, pt[0], pt[1], 7);
+    // the pack
+    if (rivals) for (const r of rivals) {
+      if (!r || !r.phys) continue;
+      map(r.phys.pos.x, r.phys.pos.z, pt);
+      g.fillStyle = '#' + (r.color != null ? r.color.toString(16).padStart(6, '0') : '999999');
+      g.globalAlpha = k * (r.fighter && r.fighter.down ? 0.4 : 1);
+      g.beginPath(); g.arc(pt[0], pt[1], 2.6, 0, Math.PI * 2); g.fill();
+      g.globalAlpha = k;
+    }
+    // you: an arrow along your heading, in the map's frame
+    map(p.pos.x, p.pos.z, pt);
+    const hx = Math.sin(p.yaw), hz = Math.cos(p.yaw);
+    const du = hx * T.ca - hz * T.sa, dv = hx * T.sa + hz * T.ca;
+    const a = Math.atan2(du, dv);
+    g.save(); g.translate(pt[0], pt[1]); g.rotate(a);
+    g.fillStyle = '#e3b93c'; g.strokeStyle = '#0b0b0c'; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(0, -7); g.lineTo(5, 5); g.lineTo(0, 2); g.lineTo(-5, 5); g.closePath(); g.fill(); g.stroke();
+    g.restore();
+    g.restore();
+  }
+
   /** A little chequered flag on a pole, `h` px tall. */
   _flagIcon(g, x, y, h) {
     g.fillStyle = 'rgba(236,230,217,0.95)';
@@ -229,11 +337,16 @@ export class Radar {
     if (!this.cv || !player) return;
     const g = this.ctx, R = this.r, S = this.size;
     // CALM: quick to snap in when something happens, slow to ease out again
+    // (placed at 4 Hz: it reads layout, which is not free every frame)
+    this._pillT = (this._pillT || 0) - (dt || 0.016);
+    if (this._pillT <= 0 || !this._pillKey) { this._pillT = 0.25; this._placePill(); }
     this.quiet = opts.active ? 0 : this.quiet + (dt || 0);
-    const calmWant = !opts.active && this.quiet > CRUISE.AFTER && !(player.onFoot || (player.fighter && player.fighter.down)) ? 1 : 0;
+    const calmWant = this.mode === 'auto' && !opts.active && this.quiet > CRUISE.AFTER && !(player.onFoot || (player.fighter && player.fighter.down)) ? 1 : 0;
+    this.full += ((this.mode === 'full' ? 1 : 0) - this.full) * Math.min(1, (dt || 0.016) * 6);
+    if (this.full < 0.002) this.full = 0;
     this.calm += (calmWant - this.calm) * Math.min(1, (dt || 0.016) * (calmWant ? CRUISE.OUT : CRUISE.IN));
     if (this.calm < 0.002) this.calm = 0;
-    const A = 1 - this.calm;      // the close sweep's opacity
+    const A = 1 - Math.max(this.calm, this.full);      // the close sweep's opacity
     // AUTO ZOOM-OUT while down or walking: the far level, back to the player's
     // own level the moment he is riding again.
     this.auto = !!(player.onFoot || (player.fighter && player.fighter.down));
@@ -258,6 +371,7 @@ export class Radar {
     g.fillStyle = 'rgba(10,12,14,0.62)';
     g.fillRect(0, 0, S, S);
     if (this.calm > 0) this._cruise(g, p, rivals, traffic, opts.finishS, this.calm);
+    if (this.full > 0) this._full(g, p, rivals, opts.finishS, this.full);
     g.globalAlpha = A;
     if (A > 0.01) {
 
@@ -396,8 +510,9 @@ export class Radar {
     // In the cruise view the band carries the distance to the flag instead.
     g.fillStyle = 'rgba(0,0,0,0.45)';
     g.fillRect(0, S * 0.80, S, S * 0.2);
-    if (this.calm > 0.02 && Number.isFinite(opts.finishS)) {
-      g.globalAlpha = this.calm;
+    const farK = Math.max(this.calm, this.full);
+    if (farK > 0.02 && Number.isFinite(opts.finishS)) {
+      g.globalAlpha = farK;
       const left = Math.max(0, opts.finishS - p.s);
       const txt = left >= 1000 ? `${(left / 1000).toFixed(1)} KM` : `${Math.round(left / 10) * 10} M`;
       g.font = `700 ${Math.round(S * 0.12)}px Anton, Rajdhani, system-ui, sans-serif`;
@@ -409,7 +524,7 @@ export class Radar {
       const frac = Math.min(1, Math.max(0, p.s / Math.max(1, opts.finishS)));
       g.fillStyle = 'rgba(236,230,217,0.18)'; g.fillRect(S * 0.2, S * 0.955, S * 0.6, 2);
       g.fillStyle = 'rgba(227,185,60,0.95)'; g.fillRect(S * 0.2, S * 0.955, S * 0.6 * frac, 2);
-      g.globalAlpha = A;
+      g.globalAlpha = 1 - farK;
     } else g.globalAlpha = 1;
     g.fillStyle = 'rgba(232,228,220,0.9)';
     g.font = `700 ${Math.round(S * 0.14)}px Rajdhani, system-ui, sans-serif`;

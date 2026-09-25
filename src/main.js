@@ -1354,22 +1354,27 @@ let idleAngle = 0;
 // camera tours the course -- a slow reveal of each landmark (landmarks.js
 // shots) from the road beside it, alternating with low glides along the
 // tarmac. Hard cuts between shots, each ~6.5 s, looping.
-const ATTRACT = { SHOT: 6.5, HERO: 22 };
+const ATTRACT = { SHOT: 6.5, HERO: 16 };
 let attractT = 0, attractI = -1, attractShot = null;
+window.__ATTRACT_NEXT__ = () => { attractT = 1e9; };   // harness: cut to the next shot
+window.__ATTRACT__ = () => ({ i: attractI, shot: attractShot && { kind: attractShot.kind, name: attractShot.name }, shots: landmarks && landmarks.shots ? landmarks.shots.length : 0 });   // harness
 function pickAttractShot(i) {
   const shots = (landmarks && landmarks.shots) || [];
   const L = (spine && spine.totalLength) || 5000;
-  if (shots.length && i % 2 === 0) {
-    const sh = shots[(i / 2) % shots.length | 0];
+  // THE MENU CYCLES TOO: the held shot with the rider standing in it, then a
+  // landmark reveal, then a glide down the road, and round again -- the menu
+  // used to hold on the one road view for good once she was added
+  const menu = !document.body.classList.contains('attract');
+  const slot = menu ? i % 3 : (i % 2 === 0 ? 1 : 2);
+  if (menu && slot === 0) return { kind: 'hero', name: null, s0: straightAt(200 + ((i * 1237) % Math.max(400, L - 600)), L) };
+  if (shots.length && slot === 1) {
+    const sh = shots[(menu ? (i / 3 | 0) : (i / 2 | 0)) % shots.length];
     // the nearest road point to it, and a start a little before
     let best = 0, bd = Infinity;
     for (let s = 0; s < L; s += 25) { const c = centreAt(-s); const d = (c.x - sh.centre.x) ** 2 + (c.z - sh.centre.z) ** 2; if (d < bd) { bd = d; best = s; } }
     return { kind: 'reveal', name: sh.name, s0: Math.max(0, best - Math.max(260, sh.r * 1.4)), target: sh.centre.clone(), r: sh.r };
   }
   const s0 = 200 + ((i * 1237) % Math.max(400, L - 600));
-  // THE MENU (the intro is over): a held shot on the road with the rider in
-  // the leathers standing in it -- a moving camera would slide her along
-  if (!document.body.classList.contains('attract')) return { kind: 'hero', name: null, s0: straightAt(s0, L) };
   return { kind: 'glide', name: null, s0 };
 }
 // a stretch that is straight for the next ~40 m (the hero shot looks down it)
@@ -1396,10 +1401,13 @@ function updateCameraIdle(dt) {
   attractT += dt;
   const menu = !document.body.classList.contains('attract');
   const dur = attractShot && attractShot.kind === 'hero' ? ATTRACT.HERO : ATTRACT.SHOT;
-  if (!attractShot || attractT > dur || (menu && attractShot.kind !== 'hero')) {
-    attractT = 0; attractI++;
+  // the intro handing over to the menu cuts straight to the held shot (slot 0)
+  const handover = menu && attractShot && attractShot.intro;
+  if (!attractShot || attractT > dur || handover) {
+    attractT = 0; attractI = handover ? Math.ceil((attractI + 1) / 3) * 3 : attractI + 1;
     if (attractI >= 3 && attractDone) { attractDone(); attractDone = null; }
     attractShot = pickAttractShot(attractI);
+    if (!menu) attractShot.intro = true;
     const sub = document.getElementById('introsub');
     if (sub) { sub.style.opacity = attractShot.name ? 1 : 0; if (attractShot.name) sub.textContent = attractShot.name + '  ·  ' + ((MAPS[career.event.map]) || {}).label; }
   }
@@ -2769,7 +2777,7 @@ function openDrivePicker(ride) {
   if (!el) { el = document.createElement('div'); el.id = 'drivepick'; document.body.appendChild(el); }
   const cur = career.monoDrive;
   const bar = (v) => `<i class="dp-bar"><b style="width:${Math.round(v * 100)}%"></b></i>`;
-  el.innerHTML = `<div class="dp-box"><h3>CHOOSE THE ONE-WHEELER</h3><p class="dp-sub">Same frame, one wheel. What drives it changes everything.</p><div class="dp-row">` +
+  el.innerHTML = `<div class="dp-box"><h3>CHOOSE YOUR BIKE</h3><p class="dp-sub">Same frame, one wheel. What drives it changes everything.</p><div class="dp-row">` +
     Object.entries(MONO_DRIVES).map(([k, d], i) => `<button type="button" class="dp-card${k === cur ? ' sel' : ''}" data-k="${k}">
       <span class="dp-ico">${DRIVE_ICON[k]}</span><b class="dp-nm">${d.label}</b><small class="dp-tag">${d.tag}</small>
       <span class="dp-stats"><em>LAUNCH</em>${bar(d.bars.launch)}<em>TOP SPEED</em>${bar(d.bars.top)}<em>WEIGHT</em>${bar(d.bars.weight)}<em>BRAKES</em>${bar(d.bars.brakes)}</span>
@@ -3630,6 +3638,7 @@ document.getElementById('start').addEventListener('click', () => window.__START_
 // Radar zoom from the keyboard: = / + in, - out (the rim buttons do the same).
 window.addEventListener('keydown', (e) => {
   if (!state.running) return;
+  if (e.code === 'KeyN' && !e.repeat) radar.cycleMode();
   if (e.code === 'Equal' || e.code === 'NumpadAdd') radar.zoom(-1);
   else if (e.code === 'Minus' || e.code === 'NumpadSubtract') radar.zoom(+1);
 });

@@ -185,6 +185,14 @@
           text-shadow:0 1px 2px rgba(0,0,0,.85); pointer-events:none; white-space:nowrap; }
   #gaps .d { display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:5px; }
   #gaps .m { color:var(--amber); margin-left:6px; }
+  /* the radar's mode pill: AUTO / FOCUS / FULL, centred on the dish's top edge
+     (radar.js places it); a tap, or N, steps to the next */
+  #radarmode { position:fixed; z-index:45; transform:translate(-50%,-50%); display:flex; gap:1px; padding:2px;
+    background:rgba(10,12,14,.78); border:1px solid rgba(216,52,42,.45); border-radius:999px; cursor:pointer;
+    font:700 9.5px/1 Rajdhani, system-ui, sans-serif; letter-spacing:.14em; pointer-events:auto; }
+  #radarmode span { padding:3px 7px 2px; border-radius:999px; color:rgba(232,228,220,.5); transition:background .15s, color .15s; }
+  #radarmode span.on { background:#e3b93c; color:#0b0b0c; }
+  #radarmode:hover span:not(.on) { color:rgba(232,228,220,.85); }
   #radar { width:148px; height:148px; display:block;
            filter: drop-shadow(0 2px 10px rgba(0,0,0,.55)); }
   .hud-br { position:absolute; right:var(--hr); bottom:calc(var(--spd) + 28px); text-align:right; }
@@ -1139,7 +1147,7 @@ body.cine #hud, body.cine .hud { opacity: 0; transition: opacity .5s; }
     <kbd>W</kbd>/<kbd>↑</kbd> throttle &nbsp; <kbd>S</kbd>/<kbd>↓</kbd> brake &nbsp;
     <kbd>A</kbd><kbd>D</kbd> steer &nbsp; <kbd>J</kbd> punch &nbsp; <kbd>K</kbd> kick &nbsp;
     <kbd>L</kbd> chain &nbsp; <kbd>G</kbd> grab/throw &nbsp; <kbd>Shift</kbd> tuck &nbsp; <kbd>Space</kbd> nitro &nbsp; <kbd>E</kbd> swerve<br>
-     <kbd>C</kbd> camera &nbsp; <kbd>1</kbd>-<kbd>7</kbd> views &nbsp; <kbd>M</kbd> mute &nbsp; <kbd>Esc</kbd>/<kbd>P</kbd> pause
+     <kbd>C</kbd> camera &nbsp; <kbd>1</kbd>-<kbd>7</kbd> views &nbsp; <kbd>M</kbd> mute &nbsp; <kbd>N</kbd> radar &nbsp; <kbd>Esc</kbd>/<kbd>P</kbd> pause
   </p>
   <div id="tips" role="note"></div>
 </div>

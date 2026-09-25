@@ -921,6 +921,10 @@ function updateCamera(dt, g) {
 const _introPos = new THREE.Vector3(), _introLook = new THREE.Vector3(), _introQ = new THREE.Quaternion(), _introQ2 = new THREE.Quaternion();
 
 // ---------- game state ----------
+// EVERY CALLOUT IN A FRAME, not just the last one written: state.warn is a
+// setter that queues, and the HUD's island ranks the queue (island.js). A
+// CONTACT written after a COLLARED used to replace it.
+const warnQueue = [];
 const state = {
   ready: false,
   running: false,
@@ -957,6 +961,14 @@ const state = {
   weather: 0,
   timeOfDay: 0.55,
 };
+{
+  let w = '';
+  Object.defineProperty(state, 'warn', {
+    get: () => w,
+    set: (v) => { w = v; if (v) { warnQueue.push(String(v)); if (warnQueue.length > 16) warnQueue.shift(); } },
+    enumerable: true, configurable: true,
+  });
+}
 
 // ---------- per-frame ----------
 let last = performance.now();
@@ -1462,8 +1474,6 @@ function stepGame(dt) {
     const inList = world.fighters.includes(cop.fighter);
     if (cop.active && !inList) world.fighters.push(cop.fighter);
     else if (!cop.active && inList) world.fighters.splice(world.fighters.indexOf(cop.fighter), 1);
-    // held by the law: say so every frame, it is the one thing that matters now
-    if (cop.fighter.hold && cop.fighter.hold.target === player.fighter && !ev) state.warn = 'PULLING YOU OVER — MASH J K L!';
     if (ev === 'arrived') state.warn = 'COPS!';
     else if (ev === 'down') state.warn = 'COP DOWN!';
     else if (ev === 'gone') state.warn = cop.fighter.down ? '' : 'LOST THE COP';
@@ -1885,6 +1895,11 @@ function stepGame(dt) {
     combo: player.fighter.combo,
     score: state.score,
     warn: state.warn,
+    warns: warnQueue.splice(0),
+    live: {
+      cop: cop && cop.state === 'chase' && !cop.fighter.down ? Math.max(0, Math.round(Math.hypot(cop.phys.s - player.phys.s, cop.phys.lateral - player.phys.lateral))) : null,
+      collar: cop && cop.fighter.hold && cop.fighter.hold.target === player.fighter ? player.fighter.breakMeter || 0 : null,
+    },
     swapped: state.swapped,
     // The meter reads what the MACHINE HAS COST so far this race, so a crash is
     // a decision the player can see rather than a bill at the finish.

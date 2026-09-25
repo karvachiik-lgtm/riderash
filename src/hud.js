@@ -1,5 +1,6 @@
 // RideRash — HUD, wired to the DOM already in index.html.
 import { CFG } from './config.js';
+import { Island } from './island.js';
 
 export class HUD {
   constructor() {
@@ -28,6 +29,8 @@ export class HUD {
     this._last = {};
     this._warnT = 0;
     this._swapT = 0;
+    const host = document.getElementById('hud');
+    this.island = host ? new Island(host) : null;
   }
 
   show(on) { this.el.hud.classList.toggle('on', on); }
@@ -95,9 +98,12 @@ export class HUD {
     }
 
     // warnings
-    if (g.warn) { this._warnT = 1.4; this.el.warn.textContent = g.warn; }
-    this._warnT -= dt;
-    this.el.warn.classList.toggle('on', this._warnT > 0);
+    // every callout this frame goes to the island, which ranks and shows them
+    if (this.island) {
+      this.island.push(g.warns || (g.warn ? [g.warn] : null));
+      this.island.setLive(g.live);
+      this.island.update(dt);
+    }
     this.el.swap.classList.toggle('on', g.swapped > 0);
 
     // the rider you are fighting: name and health, fading in only within range

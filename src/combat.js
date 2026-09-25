@@ -446,5 +446,23 @@ export class Fighter {
     hooks.onKnockDown?.(this, target);
   }
 
+  /**
+   * A FRESH FIGHTER for a new race (or a cop pulling out again). Every field a
+   * race can leave behind, including BOTH ends of a hold: a race that ended
+   * mid-grab used to start the next one with the player still "held" (every
+   * key a struggle, no attacks) or with the cop still holding him.
+   */
+  resetCombat() {
+    if (this.hold && this.hold.target && this.hold.target.heldBy === this) this.hold.target.heldBy = null;
+    if (this.heldBy && this.heldBy.hold && this.heldBy.hold.target === this) this.heldBy.hold = null;
+    this.hold = null; this.heldBy = null; this.breakMeter = 0; this.holdEnd = null;
+    this.hp = this.maxHp; this.stamina = CFG.STAMINA_MAX;
+    this.down = false; this.downTimer = 0; this._remountHandled = false;
+    this.combo = 0; this.comboTimer = 0; this.active = null;
+    this.hitFlash = 0; this.invuln = 0; this.lastHitBy = null;
+    for (const k in this.cooldowns) this.cooldowns[k] = 0;
+    for (const k in this.anim) this.anim[k] = 0;
+  }
+
   get speedFactor() { return Math.min(1, (this.owner.speed || 0) / 20); }
 }

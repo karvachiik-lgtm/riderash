@@ -357,15 +357,7 @@ export class Rival {
     this.decisionTimer = 0;
     this.aggroTimer = 0;
     this.wantsToAttack = null;
-    this.fighter.hp = this.fighter.maxHp;
-    this.fighter.stamina = CFG.STAMINA_MAX;
-    this.fighter.down = false;
-    this.fighter.downTimer = 0;
-    this.fighter.combo = 0;
-    this.fighter.active = null;
-    this.fighter.hitFlash = 0;
-    this.fighter.invuln = 0;
-    for (const k in this.fighter.cooldowns) this.fighter.cooldowns[k] = 0;
+    this.fighter.resetCombat();
     return this;
   }
 

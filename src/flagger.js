@@ -225,7 +225,17 @@ export class Flagger {
     if (name === this.outfit && this.body) return;
     if (this.body) {
       this.group.remove(this.body);
-      this.body.traverse((n) => { if (n.isMesh) { n.geometry.dispose(); } });
+      // free the old outfit on the GPU too: its materials and their textures
+      // (the flag's checker is a fresh texture per outfit) leaked one per race
+      this.body.traverse((n) => {
+        if (!n.isMesh) return;
+        n.geometry.dispose();
+        for (const m of Array.isArray(n.material) ? n.material : [n.material]) {
+          if (!m) continue;
+          for (const k of ['map', 'normalMap', 'roughnessMap', 'emissiveMap']) if (m[k]) m[k].dispose();
+          m.dispose();
+        }
+      });
     }
     this.outfit = name;
     this.spec = makeSpec(flagOutfitSpec(name));

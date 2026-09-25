@@ -136,6 +136,9 @@ export class Island {
 
   setLive(live) { this.live = live || {}; }
 
+  /** New race: nothing from the last one (or from the menus) carries over. */
+  clear() { this.cur = null; this.queue = []; this.live = {}; this._shown = ''; this.el.className = ''; }
+
   update(dt) {
     for (const q of this.queue) q.age += dt;
     this.queue = this.queue.filter((q) => q.age < 1.4);   // late news is no news

@@ -584,7 +584,8 @@ export class Replay {
       else used = false;
       if (used) { e.preventDefault(); e.stopImmediatePropagation(); this._syncUi(); }
     }, true);
-    window.addEventListener('keyup', (e) => { if (this.active) e.stopImmediatePropagation(); }, true);
+    // key-UPS are NOT swallowed: a throttle released while watching must reach
+    // the game's input, or the bike comes back from the replay still accelerating
   }
 
   _cycle(d) {

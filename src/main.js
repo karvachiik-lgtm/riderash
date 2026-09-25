@@ -494,7 +494,7 @@ async function init() {
     replay = new Replay(scene, camera, document.body, {
       followSun: (p) => { if (lights) followSun(lights.sun, p); },
       onExit: (from) => {
-        if (from === 'pause') { $('pause').classList.add('on'); hud.show(true); }
+        if (from === 'pause') { $('pause').classList.add('on'); hud.show(true); if (touchpad) applyTouchVisibility(); }
         else $('over').classList.add('on');
       },
     });
@@ -2185,6 +2185,8 @@ function resetRace() {
     if (player && career.bike) player.setBike(bikeSource(assets, BIKE_FOR_TIER[career.bike.id] || 'sport'), career.bike.colour);
   } catch (e) { console.warn('[riderash] setBike:', e); }
   state.time = 0; state.score = 0; state.hits = 0; state.knockDowns = 0; state.contacts = 0; state.trafficHits = 0; state.trafficWrecks = 0;
+  warnQueue.length = 0;                               // menu-time callouts are not race news
+  if (hud && hud.island) hud.island.clear();
   state.raceOver = false; state.shake = 0; state.hitstop = 0; state.wrecksBy = {}; state.stats = freshStats(); state.swapped = 0; state.lastPos = 6;
   camInitialised = false; camRoll = 0; crashHold = 0;
   // THE PACK FOR THIS RACE, built once from the roster and the career event.
@@ -2209,6 +2211,10 @@ function resetRace() {
   // No police in the career's very first race: that one teaches the ride and
   // the fight. Every race after it can have a cop.
   if (cop) cop.reset(career.event.level, career.state.race > 0 || career.state.wins > 0);
+  // ...and out of the fight list now, not when the countdown ends: through the
+  // whole grid a stale cop from the last race was a fighter anyone could hit
+  if (cop) { const k = world.fighters.indexOf(cop.fighter); if (k >= 0) world.fighters.splice(k, 1); }
+  state.lastAnimal = null; state.lastHazard = null; state.wasBoosting = false;
   // Full integrator reset -- see BikePhys.reset. Setting four fields by hand
   // leaked lateralV from the previous race and started the next one at the rail.
   // The player's machine is the bike they bought -- see BikePhys.setMachine.
@@ -2221,13 +2227,8 @@ function resetRace() {
   // Rival (§5.16). `downTimer`, `invuln`, `hitFlash` and the per-attack
   // cooldowns were all carrying into the next race.
   const pf = player.fighter;
-  pf.hp = pf.maxHp;
-  pf.stamina = CFG.STAMINA_MAX;
-  pf.down = false; pf.downTimer = 0;
-  pf.combo = 0; pf.active = null;
-  pf.hitFlash = 0; pf.invuln = 0;
+  pf.resetCombat();
   pf.hasWeapon = true;
-  for (const k in pf.cooldowns) pf.cooldowns[k] = 0;
   state.carHitCd = 0; state.hornCd = 0;
   state.countdown = CFG.COUNTDOWN;
   player.phys.sync();
@@ -2384,6 +2385,8 @@ function publishState() {
   // player is actually made of rather than re-deriving it.
   window.__BODYSPEC__ = player.rider && player.rider.userData ? player.rider.userData.spec : null;
   window.__RIVALS__ = rivals;   // harness: the pack, for contact and slipstream diagnosis
+  window.__WORLD__ = world;     // harness: fighters list, standings
+  window.__CAREER__ = career;   // harness: jump races
   // The traffic, for the oncoming near-miss meter in _feel.mjs. `dir === 1` is
   // ONCOMING (see world.js), so the harness can count only the cars that come at
   // you -- which is the pressure the feel meter is about.
@@ -2546,7 +2549,7 @@ const devUi = initDevMode({
     return true;
   },
   spawnAnimal: (kind) => animals ? animals.spawnAt(kind, player.phys.s + 140, player.phys.lateral) : false,
-  winNow: () => { const p = player.phys; p.s = state.finishS - 3; p.speed = Math.max(p.speed, 25); p.sync(); },
+  winNow: () => { if (player.dismount && player.dismount.onFoot) player.dismount.reset(); player.fighter.down = false; const p = player.phys; p.s = state.finishS - 3; p.speed = Math.max(p.speed, 25); p.sync(); },
   setTraffic: (off) => {
     window.__TRAFFIC_OFF__ = off;
     if (!off && world.traffic) {
@@ -2756,6 +2759,7 @@ function openReplay(mode, from) {
   if (!replay || !replay.times.length) return;
   $(from === 'pause' ? 'pause' : 'over').classList.remove('on');
   hud.show(false);
+  if (touchpad) touchpad.show(false);        // phone controls would sit over the replay bar
   try { document.activeElement?.blur?.(); } catch (e) { /* ignore */ }
   if (!replay.enter(mode, from)) replay.hooks.onExit(from);
 }

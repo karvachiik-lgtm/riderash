@@ -190,8 +190,7 @@ export class Cop {
     this.group.visible = false;
     this.phys.reset({ s: -1000, lateral: 0, speed: 0 });
     const f = this.fighter;
-    f.down = false; f.downTimer = 0; f.hp = f.maxHp; f.active = null; f.invuln = 0;
-    f.stamina = CFG.STAMINA_MAX;
+    f.resetCombat();
     f.hasWeapon = true;           // a nightstick; the player can take it off him, like a chain
   }
 
@@ -233,7 +232,7 @@ export class Cop {
     this.group.visible = false;
     if (this.dismount) this.dismount.reset();
     const f = this.fighter;
-    f.down = false; f.hp = f.maxHp; f.active = null;
+    f.resetCombat();          // a cop who gives up lets go of you
     this.phys.reset({ s: -1000, lateral: 0, speed: 0 });
     this.nextAt = this.t + COPS.GAP_BY_LEVEL[this.level - 1] * (0.8 + Math.random() * 0.4);
   }

@@ -722,6 +722,48 @@ let slideDustT = 0;
 const _slideV = new THREE.Vector3();
 
 
+// THE CAMERA DOES NOT SIT INSIDE A BUS. The chase camera is 4 m behind the
+// rider and knew nothing about traffic: stopped behind (or remounting beside) a
+// truck, it ended up in the roof and the whole frame was a white box (seen in a
+// remount probe). Sample the line from the rider's head out to the camera; at
+// the first sample inside a vehicle's (inflated) box, pull the camera in to just
+// short of it. Only the drawn position moves -- camPos keeps its smoothing.
+const _occP = new THREE.Vector3(), _occL = new THREE.Vector3(), _occE = new THREE.Vector3();
+function carBlocks(pt) {
+  const lists = [world.traffic && world.traffic.userData ? world.traffic.userData.cars : null, crossTraffic ? crossTraffic.cars : null];
+  for (const cars of lists) {
+    if (!cars) continue;
+    for (const c of cars) {
+      if (!c.visible || c.position.distanceToSquared(pt) > 400) continue;
+      const m = c.children && c.children[0];
+      const bb = m && m.geometry && (m.geometry.boundingBox || (m.geometry.computeBoundingBox(), m.geometry.boundingBox));
+      if (!bb) continue;
+      m.worldToLocal(_occL.copy(pt));
+      const pad = 0.35;
+      if (_occL.x > bb.min.x - pad && _occL.x < bb.max.x + pad && _occL.y > bb.min.y - pad && _occL.y < bb.max.y + pad
+          && _occL.z > bb.min.z - pad && _occL.z < bb.max.z + pad) return true;
+    }
+  }
+  return false;
+}
+function unoccludeCamera(pos, focus) {
+  if (!focus) return;
+  _occE.set(focus.x, focus.y + 1.3, focus.z);
+  const N = 10;
+  for (let i = 1; i <= N; i++) {
+    const t = i / N;
+    _occP.lerpVectors(_occE, pos, t);
+    if (carBlocks(_occP)) {
+      // pull in AND crane up: the closer it has to come, the higher it goes,
+      // so the rider is seen from over the vehicle rather than from his elbow
+      const k = Math.max(0.45, t - 1 / N);
+      pos.lerpVectors(_occE, pos, k);
+      pos.y += (1 - k) * 2.6;
+      return;
+    }
+  }
+}
+
 function updateCamera(dt, g) {
   const p = player.phys;
   // WHILE ON FOOT, FRAME THE MAN, NOT THE MACHINE.
@@ -853,6 +895,7 @@ function updateCamera(dt, g) {
   if (player.bike) player.bike.visible = !M.hideBike;
 
   camera.position.copy(camPos);
+  unoccludeCamera(camera.position, focus);
 
   // ---- FREE CAMERA (harness only) -----------------------------------------
   //
@@ -1848,7 +1891,12 @@ function stepGame(dt) {
           // puts the SLOWER rider down. The knockdown is applied through the
           // SAME hook a punch uses, so a collision wreck and a punch wreck score
           // and spark identically -- one code path, not two.
-          const vi = a.speed < b.speed ? i : j;
+          // the SLOWER rider goes down -- unless he is on the heavy machine and
+          // the hit was not hard enough to topple it, in which case the other one does
+          const hf = (k) => (bodies[k].phys.machine && bodies[k].phys.machine.heft) || 1;
+          let vi = a.speed < b.speed ? i : j;
+          if (closing < CFG.CONTACT_WRECK * Math.sqrt(hf(vi))) vi = vi === i ? j : i;
+          if (closing < CFG.CONTACT_WRECK * Math.sqrt(hf(vi))) continue;
           const v = bodies[vi];
           const f = v.fighter;
           if (!f.down && !f.invuln) {
@@ -2106,7 +2154,7 @@ function stepGame(dt) {
     if (v < 1) continue;
     const isP = rd === player;
     if (isP) audio.oneShot('impact', Math.min(1, v / 12), 1.1);
-    if (v > 9 && !(f.invuln > 0)) {
+    if (v > 9 * Math.sqrt((rd.phys.machine && rd.phys.machine.heft) || 1) && !(f.invuln > 0)) {
       const who = isP ? 'player' : (rd.name || 'rival');
       (state.wrecksBy = state.wrecksBy || {})[who] = (state.wrecksBy[who] || 0) + 1;
       if ((f.hold || f.heldBy) && f._endHold) f._endHold('break', hooks);
@@ -2498,7 +2546,9 @@ function grabberName(f) {
 // and he leans too far: the tail drops (player.monoBack), a warning, then off
 // the back. Ease off and it comes back. Braking on this machine is a skill:
 // feather it, never stamp it.
-const NOSE = { V: 31, WARN: 0.4, OVER: 1.0 };
+// Tuned so ordinary braking for a bend is safe: only a long hard stamp from
+// well over 80 mph (1.5 s of it) throws you; the warning comes at 0.8 s.
+const NOSE = { V: 37, WARN: 0.8, OVER: 1.5 };
 function noseOver(dt, inp) {
   if (raceBike().id !== 'mono') { player.monoBack = 0; state.noseT = 0; return; }
   const f = player.fighter, p = player.phys;

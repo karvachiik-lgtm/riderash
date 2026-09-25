@@ -146,7 +146,9 @@ export function poseSeated(joints, tuck = 1) {
   // A little more crouch with speed. The table's tuck and rest leans are equal
   // (the arm solve could not reach the bars from anything else); with IK on the
   // arms that constraint is gone, so a 0.14 rad fold at full speed is free.
-  const torso = (Q ? Q.torso : RIDING.torsoRest + t * (RIDING.torsoTuck - RIDING.torsoRest)) + (Q ? 0.14 * t : 0);
+  // + __leanExtra: a body lean the owner adds on top (the one-wheeler's rider
+  // pushes into the throttle and sits back on the brakes)
+  const torso = (Q ? Q.torso : RIDING.torsoRest + t * (RIDING.torsoTuck - RIDING.torsoRest)) + (Q ? 0.14 * t : 0) + (joints.__leanExtra || 0);
   set(joints.torso, torso);
   // past the usual crouch the head is lifted back by most of the extra lean, so
   // a rider lying on the tank still looks ahead (through the screen), not down

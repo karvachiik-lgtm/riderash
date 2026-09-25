@@ -334,8 +334,12 @@ export default function (THREE) {
   // ------------------------------------------------------------- the bars
   // very wide clip-ons out of the nose's flanks, well outboard of the screen
   const GRIP = { x: 0.56, y: 1.36, z: 0.62 };
+  // A MONOWHEEL STEERS BY LEANING: the bars are fixed to the nose. The contract's
+  // `frontSteer` is still published (the game writes the steer angle to it every
+  // frame) but carries nothing -- on 0.56 m clip-ons a real steer angle swung
+  // the grips 16 cm out from under the rider's hands.
   const frontSteer = new THREE.Group(); frontSteer.position.set(0, GRIP.y, GRIP.z); g.add(frontSteer);
-  const bars = new THREE.Group(); frontSteer.add(bars);
+  const bars = new THREE.Group(); bars.position.copy(frontSteer.position); fairing.add(bars);
   for (const s of [-1, 1]) {
     const arm = mesh(new THREE.BoxGeometry(0.2, 0.04, 0.05), metal, bars); arm.position.set(s * 0.40, -0.02, 0.0); arm.rotation.z = s * -0.12;
     const grip = mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.12, 8), rubber, bars);

@@ -794,6 +794,7 @@ export class BikePhys {
     // record of what happens when a reset takes a subset.
     this.wheelie = 0;
     this.airY = 0; this.airVY = 0; this.airborne = false; this.airTime = 0;
+    this.backT = 0; this.backV = 0;
     this.lastRoadY = null;
     this.boost = 0; this.boostCool = 0; this.swerveT = 0; this.swerveCool = 0;
     this.nitro = PHYS.NITRO_START;
@@ -898,7 +899,12 @@ export class BikePhys {
     const f = (v) => (Number.isFinite(v) && v > 0 ? v : 1);
     // agility: lean-steer and swerve response; brake: stopping force; both 1 on
     // every two-wheeler, and only the one-wheeler departs from them
-    this.machine = { power: f(m.power), grip: f(m.grip), mass: f(m.mass), agility: f(m.agility), brake: f(m.brake) };
+    // mono: ONE wheel -- there is no front tyre to lift or bury, so no wheelie
+    // or stoppie (its balance pitch is drawn by player.js instead)
+    this.machine = { power: f(m.power), grip: f(m.grip), mass: f(m.mass), agility: f(m.agility), brake: f(m.brake), mono: m.id === 'mono' || !!m.mono,
+      // heft: how hard it is to SHOVE (contact, traffic, blows), separate from
+      // `mass`, which is how hard it is to accelerate
+      heft: f(m.heft) };
     return this;
   }
 
@@ -1074,6 +1080,19 @@ export class BikePhys {
     this.speed += a * h;
     if (this.speed < 0) this.speed = 0;
 
+    // BACKING UP. A motorbike has no reverse gear: stopped, a rider paddles it
+    // back with his feet. Held brake at a standstill (0.35 s, so a stop is not
+    // a reverse) rolls it back at walking pace; the one-wheeler's hub motor
+    // backs it up a little faster. Kept OUT of `speed`, which the whole game
+    // reads as >= 0 (progress, camera, pack, traffic, audio): a separate
+    // backward velocity integrated in step 5. Only a body that opts in
+    // (`canReverse`, the player) does it -- a rival waiting behind a stopped
+    // car must not drift backwards.
+    const wantBack = this.canReverse && brake > 0.5 && !throttle && this.speed < 0.3 && !this.airborne;
+    this.backT = wantBack ? (this.backT || 0) + h : 0;
+    this.backV = this.backT > 0.35 ? (this.machine.mono ? 3.2 : 1.8) * Math.min(1, (this.backT - 0.35) / 0.4) : 0;
+    if (this.backV > 0) this.speed = 0;
+
     // ---- 1b. weight transfer and suspension -------------------------------
     // The longitudinal acceleration computed above is what shifts the load. A
     // bike under braking puts its weight on the front tyre and lifts the rear,
@@ -1123,7 +1142,7 @@ export class BikePhys {
     // ground there is nothing to steer with, so authority collapses to
     // WHEELIE_STEER. That is the cost that makes it a decision.
     let wheelieTarget = 0;
-    if (this.onRoad && !this.airborne) {
+    if (this.onRoad && !this.airborne && !this.machine.mono) {
       if (this.loadFracFront < PHYS.WHEELIE_LOAD && this.speed > 4) {
         const over = (PHYS.WHEELIE_LOAD - this.loadFracFront) / PHYS.WHEELIE_LOAD;
         wheelieTarget = Math.min(PHYS.WHEELIE_MAX, over * PHYS.WHEELIE_MAX * 1.6);
@@ -1904,6 +1923,14 @@ export class BikePhys {
     const along = Math.cos(this.yawOffset);
     this.s += Math.max(0, this.speed * along) * h;
     this.wheelSpin += (this.speed / PHYS.WHEEL_R) * h;
+    if (this.backV > 0) {
+      this.s = Math.max(0, this.s - this.backV * along * h);
+      // +yawOffset carries a forward bike toward +lateral, so backing up takes
+      // it the other way; bars turned while reversing swing the nose opposite
+      this.lateral -= Math.sin(this.yawOffset) * this.backV * h;
+      this.yawOffset = Math.max(-0.6, Math.min(0.6, this.yawOffset - (steer || 0) * this.backV * 0.35 * h));
+      this.wheelSpin -= (this.backV / PHYS.WHEEL_R) * h;
+    }
 
     const roadYawBefore = this.roadYaw;
     this.sync();
@@ -2032,6 +2059,7 @@ export class BikePhys {
   }
 
   applyHit(push, opts = {}) {
+    push /= this.machine.heft || 1;          // a heavy machine takes a blow without going far
     const along = (opts.along ?? 0) * (opts.dir ?? 1);
     const side = (opts.side ?? (opts.sign ?? 1)) * push;
 
@@ -2135,10 +2163,14 @@ export class BikePhys {
     // Push out of the overlap. Immediate positional separation prevents the
     // jitter you get from trying to fix interpenetration over several frames.
     // Split evenly so neither body teleports.
-    this.lateral += nl * overlap * 0.5;
-    this.s += nx * overlap * 0.5;
-    if (other.lateral !== undefined) other.lateral -= nl * overlap * 0.5;
-    if (other.s !== undefined) other.s -= nx * overlap * 0.5;
+    // SPLIT BY HEFT: equal bikes share it evenly; the heavy one-wheeler barely
+    // moves and the rider who hit it bounces off
+    const ma = (this.machine && this.machine.heft) || 1, mb = (other.machine && other.machine.heft) || 1;
+    const ka = 2 * mb / (ma + mb), kb = 2 * ma / (ma + mb);
+    this.lateral += nl * overlap * 0.5 * ka;
+    this.s += nx * overlap * 0.5 * ka;
+    if (other.lateral !== undefined) other.lateral -= nl * overlap * 0.5 * kb;
+    if (other.s !== undefined) other.s -= nx * overlap * 0.5 * kb;
 
     // Impulse: reflect the closing velocity, scaled by restitution, plus a push
     // so riders are flung apart rather than gently nudged. CAPPED, because an
@@ -2185,16 +2217,16 @@ export class BikePhys {
       return at !== 0 && Math.sign(push) === at;
     };
 
-    if (blocked(this, nl * j)) this.speed *= 0.97; else this.lateralV += nl * j;
-    this.speed += nx * j * 0.55;
+    if (blocked(this, nl * j)) this.speed *= 0.97; else this.lateralV += nl * j * ka;
+    this.speed += nx * j * 0.55 * ka;
     if (other.lateralV !== undefined) {
-      if (blocked(other, -nl * j)) other.speed *= 0.97; else other.lateralV -= nl * j;
+      if (blocked(other, -nl * j)) other.speed *= 0.97; else other.lateralV -= nl * j * kb;
     }
-    if (other.speed !== undefined) other.speed -= nx * j * 0.55;
+    if (other.speed !== undefined) other.speed -= nx * j * 0.55 * kb;
 
     // Contact unsettles the bike: a shove at the bars yaws it, and the yaw
     // scales with how hard the hit was.
-    const yawKick = Math.min(1.2, approach * 0.16);
+    const yawKick = Math.min(1.2, approach * 0.16) * ka;
     this.yawRate += (dl >= 0 ? -1 : 1) * yawKick;
     if (other.yawRate !== undefined) other.yawRate -= (dl >= 0 ? -1 : 1) * yawKick;
 

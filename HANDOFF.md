@@ -214,6 +214,25 @@ one that decides what you are allowed to build:
   the rider lies almost flat on the spine pad. Past the family's 0.9 rad crouch
   poseSeated lifts the neck back by most of the extra lean, so the head looks
   ahead into the HUD rather than at the road under the wheel.
+- **The one-wheeler is HEAVY (`heft` 2.2, career.js).** `heft` is a machine
+  stat separate from `mass` (acceleration): bike-to-bike contact splits the
+  impulse and the overlap push by heft (physics.contact), a hard contact only
+  topples it above CONTACT_WRECK * sqrt(heft) (else the lighter rider goes down),
+  traffic and parked-car wipeout thresholds scale by sqrt(heft) and the shove /
+  scrub by 1/heft (traffic.applyTrafficHit), combat shoves divide by heft
+  (applyHit), the wrecked machine slides less, and the remount is 1.7x longer with
+  a heave that sags before it comes up (dismount.js). No wheelie or stoppie on
+  one wheel (physics `machine.mono`). Its rider's body lean (into the throttle,
+  back on the brakes) goes into the torso via `joints.__leanExtra`, not the whole
+  rig -- pitching the rig about its feet took a laid-flat rider's hands 0.8 m off
+  the bars.
+- **Backing up.** No bike has a reverse gear, so none is faked into `speed`
+  (which the whole game reads as >= 0). The player (`phys.canReverse`) holding
+  brake at a standstill for 0.35 s paddles back at 1.8 m/s (3.2 on the
+  one-wheeler's hub motor), steering while reversing, via a separate `backV`.
+- **The chase camera does not sit inside traffic.** unoccludeCamera (main.js)
+  samples the rider->camera line against each nearby vehicle's padded box and
+  pulls the camera in and up short of the first hit.
 - **The one-wheeler rides differently.** It is balanced, not braked: under throttle
   the nose dips and the tail rises and the rider leans in (player.js, pivoting on
   `userData.bike.hubZ`); braking tips it back. Stamp on the brakes above ~70 mph

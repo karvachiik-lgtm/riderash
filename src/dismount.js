@@ -571,11 +571,14 @@ export class Dismount {
       // rider's left; the FAR leg is the one that swings over.
       this._mSide = rider.position.x >= 0 ? 1 : -1;
     }
+    // A HEAVY MACHINE (the one-wheeler, heft > 1) takes longer to haul up
+    this._heavy = Math.max(0, Math.min(1, (((p.machine && p.machine.heft) || 1) - 1) / 1.2));
+    this._mountTime = DIS.MOUNT_TIME * (1 + 0.7 * this._heavy);
     this._enter(ST.MOUNTING);
   }
 
   _stepMounting(d) {
-    if (this.t >= DIS.MOUNT_TIME) this._finishMount();
+    if (this.t >= (this._mountTime || DIS.MOUNT_TIME)) this._finishMount();
   }
 
   // -------------------------------------------------------------------------
@@ -595,8 +598,10 @@ export class Dismount {
     w.bikeRoll += w.bikeRollV * d;
     if (Math.abs(w.bikeRoll) > 1.45) { w.bikeRoll = Math.sign(w.bikeRoll) * 1.45; w.bikeRollV *= -0.3; }
     if (w.bikeStopped) return;
-    w.bikeSpeed -= Math.sign(w.bikeSpeed) * Math.min(Math.abs(w.bikeSpeed), DIS.BIKE_FRICTION * d);
-    w.bikeLateralV -= Math.sign(w.bikeLateralV) * Math.min(Math.abs(w.bikeLateralV), DIS.BIKE_SIDE_FRICTION * d);
+    // a heavy machine digs in: it grinds to a halt sooner and is not flung as far
+    const hf = Math.sqrt((this.player.phys && this.player.phys.machine && this.player.phys.machine.heft) || 1);
+    w.bikeSpeed -= Math.sign(w.bikeSpeed) * Math.min(Math.abs(w.bikeSpeed), DIS.BIKE_FRICTION * hf * d);
+    w.bikeLateralV -= Math.sign(w.bikeLateralV) * Math.min(Math.abs(w.bikeLateralV), DIS.BIKE_SIDE_FRICTION * hf * d);
     w.bikeYawRate *= (1 - d * DIS.BIKE_SPIN_DAMP);
     w.bikeYawOffset += w.bikeYawRate * d;
     w.bikeS += w.bikeSpeed * d;
@@ -870,10 +875,16 @@ export class Dismount {
   // the saddle while the bike righted itself with nobody holding it.
   _renderMounting() {
     const player = this.player;
-    const k = clamp(this.t / DIS.MOUNT_TIME, 0, 1);
+    const k = clamp(this.t / (this._mountTime || DIS.MOUNT_TIME), 0, 1);
     const bike = player.bike, rider = player.rider;
     const seg = (a, b) => easeInOut((k - a) / (b - a));
-    const kStep = seg(0.0, 0.25), kLift = seg(0.25, 0.55), kOver = seg(0.55, 0.85), kSettle = seg(0.85, 1.0);
+    // heavy: a short step in, a LONG heave (0.18-0.66) that stalls halfway --
+    // he takes the weight, it sags back, he drives it up -- then a quicker leg over
+    const H = this._heavy || 0;
+    const kStep = seg(0.0, 0.25 - 0.07 * H);
+    let kLift = seg(0.25 - 0.07 * H, 0.55 + 0.11 * H);
+    if (H > 0 && kLift > 0 && kLift < 1) kLift = Math.max(0, kLift - H * 0.16 * Math.sin(kLift * Math.PI * 2) * (kLift < 0.5 ? 1 : 0.4));
+    const kOver = seg(0.55 + 0.11 * H, 0.85 + 0.05 * H), kSettle = seg(0.85 + 0.05 * H, 1.0);
     const side = this._mSide || 1;
 
     if (bike && this._mBikeQ) {
@@ -893,10 +904,16 @@ export class Dismount {
     // the saddle, in the group frame (bike upright at the origin)
     const seat = _p.copy(player.socket ? player.socket.position : _c.set(0, CFG.SEAT_Y, 0)).multiplyScalar(bs);
     // standing spot: beside the saddle on the mount side, a little forward
-    const standX = side * 0.62, standZ = seat.z + 0.10;
+    // A TALL, WIDE MACHINE (the one-wheeler's saddle is `seatLift` higher and
+    // its bars 0.56 m out) needs a stand-off clear of the bars and a leg-over
+    // arc that clears the saddle: the family's 0.28 m hop carried the pelvis
+    // THROUGH its bodywork (MEASURED 0.7 m, saddle at 1.4).
+    const bd = bike && bike.userData && bike.userData.bike;
+    const lift = ((bd && bd.seatLift) || 0) * bs;
+    const standX = side * (0.62 + lift * 0.5), standZ = seat.z + 0.10;
     const rx = THREE.MathUtils.lerp(standX, seat.x, kOver);
     const rz = THREE.MathUtils.lerp(standZ, seat.z, kOver);
-    const ry = THREE.MathUtils.lerp(0, seat.y, kOver) + Math.sin(kOver * Math.PI) * 0.28 - 0.08 * kLift * (1 - kOver);
+    const ry = THREE.MathUtils.lerp(0, seat.y, Math.min(1, kOver * (1 + lift))) + Math.sin(kOver * Math.PI) * (0.28 + lift * 0.6) - 0.08 * kLift * (1 - kOver);
     // step in from wherever the walk ended
     rider.position.set(
       THREE.MathUtils.lerp(this._mRiderP.x, rx, kStep),

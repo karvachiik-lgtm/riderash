@@ -29,6 +29,7 @@ function seatLiftOf(bike) {
 export class Player {
   constructor(scene, assets) {
     this.phys = new BikePhys({ startS: 0, lateral: 0, speed: 8, arcade: true });
+    this.phys.canReverse = true;        // held brake at a standstill backs it up (physics.js)
     this.fighter = new Fighter(this.phys, { hp: CFG.HP_MAX, hasWeapon: true });
 
     this.group = new THREE.Group();
@@ -611,8 +612,13 @@ export class Player {
           this.rider.position.set(0, 0, 0);
           // (on the one-wheeler the rider's body drives it: he leans INTO the
           // throttle and sits back on the brakes, on top of the machine's tilt)
+          // That lean goes into the TORSO (poseSeated reads __leanExtra), not the
+          // whole rider: the rider's origin is at his feet, so pitching the rig
+          // there swung a laid-flat rider's shoulders 0.8 m off the bars under
+          // braking (MEASURED, hands 0.81-0.96 m from the grips).
           const onMono = !!(this.bike && this.bike.userData && this.bike.userData.bike && this.bike.userData.bike.mono);
-          this.rider.rotation.set(onMono ? ((this._monoPitch || 0) - (this.monoBack || 0)) * 0.9 : 0, 0, this.bikeLean * 0.18);
+          j.__leanExtra = onMono ? ((this._monoPitch || 0) - (this.monoBack || 0)) * 0.9 : 0;
+          this.rider.rotation.set(0, 0, this.bikeLean * 0.18);
           this.poseRider(j, f);
         }
       }

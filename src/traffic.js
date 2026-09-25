@@ -566,25 +566,28 @@ export function applyTrafficHit(p, hit, invuln = false) {
     return { wreck: false, severity: 0, dmg: 0, quiet: true };
   }
   if (u.cd) u.cd.set(p, _clock + 0.6);
+  // HEFT: the one-wheeler is heavy -- it bounces less, is shoved less, and takes
+  // a harder hit to put down (physics.setMachine)
+  const heft = (p.machine && p.machine.heft) || 1, hw = Math.sqrt(heft);
   if (hit.kind === 'end') {
     const v = hit.closeAlong;
     p.s = u.s + hit.face * (hit.L + 0.05);
-    if (hit.face < 0) p.speed = Math.max(0, Math.min(p.speed, Math.max(0, hit.carVs)) - v * 0.15);
+    if (hit.face < 0) p.speed = Math.max(0, Math.min(p.speed, Math.max(0, hit.carVs)) - v * 0.15 / heft);
     else p.speed = Math.max(p.speed, Math.max(0, hit.carVs) + 1.5);   // shunted from behind
-    p.lateralV = (p.lateralV || 0) * 0.5 + (Math.random() - 0.5) * 2.0;
+    p.lateralV = (p.lateralV || 0) * 0.5 + (Math.random() - 0.5) * 2.0 / heft;
     u.speed = Math.max(0, u.speed - v * BIKE_MASS / (BIKE_MASS + u.mass));
     // A NUDGE IS NOT A CRASH. Leaning on a stopped car at walking pace used to
     // cost 3+ HP every contact and stun the car in place, which pinned both.
     if (v < 2) return { wreck: false, severity: v, dmg: 0 };
     u.stun = Math.max(u.stun || 0, v > TRAFFIC_WRECK_END ? 2.5 : 0.8);
-    const wreck = !invuln && v > TRAFFIC_WRECK_END;
+    const wreck = !invuln && v > TRAFFIC_WRECK_END * hw;
     return { wreck, severity: v, dmg: wreck ? 28 + v * 0.9 : 3 + v * 1.4 };
   }
   const vl = hit.closeLat;
   p.lateral = Math.max(-lim, Math.min(lim, u.at + hit.side * (hit.W + 0.03)));
-  p.lateralV = hit.side * (1.5 + vl * 0.5);
-  p.speed *= 1 - Math.min(0.25, 0.04 + hit.relAlong / 400);
-  const wreck = !invuln && vl > TRAFFIC_WRECK_SIDE;
+  p.lateralV = hit.side * (1.5 + vl * 0.5) / heft;
+  p.speed *= 1 - Math.min(0.25, 0.04 + hit.relAlong / 400) / heft;
+  const wreck = !invuln && vl > TRAFFIC_WRECK_SIDE * hw;
   const soft = vl < 1.5 && Math.abs(hit.relAlong || 0) < 3;
   return { wreck, severity: Math.max(vl, hit.relAlong * 0.08), dmg: soft ? 0 : 4 + vl * 2.5 };
 }

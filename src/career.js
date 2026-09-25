@@ -126,9 +126,10 @@ export const BIKES = [
   // THE EASTER EGG: a sport bike's bodywork on ONE fat wheel (assets/bike_mono.js).
   // The fastest thing in the garage and the hardest to ride: more top end than
   // the superbike, a lane change like a thought, but less grip in the bends,
-  // softer brakes, and so light a punch puts you on the floor. Not for sale
+  // softer brakes, and 2.2x the heft of any bike: it shrugs off
+  // shoves, traffic and rammers, and is slow to haul back up after a wreck. Not for sale
   // until Level 4 -- anyone can take it for a TEST RIDE.
-  { id: 'mono', name: 'ONE-WHEELER', price: 90000, power: 1.64, grip: 0.9, mass: 0.82, agility: 1.35, brake: 0.8, frail: 1.3,
+  { id: 'mono', name: 'ONE-WHEELER', price: 90000, power: 1.64, grip: 0.9, mass: 1.15, heft: 2.2, agility: 1.35, brake: 0.8, frail: 1.0,
     colour: 0xe0501c, unlockLevel: 4, isNew: true,
     blurb: 'One wheel. No brakes worth mentioning. No regrets.' },
 ];

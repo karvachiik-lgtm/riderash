@@ -63,9 +63,9 @@ const RULES = [
   [/LOST YOUR CHAIN|DISARMED|SLIPPED THE GRIP/, 'warn', 'fist'],
   [/WANTS HIS PLACE BACK/, 'warn', 'fist'],
   [/RIVAL (HIT TRAFFIC|T-BONED)/, 'info', 'hit'],
-  [/COP DOWN|LOST THE COP/, 'good', 'cop'],
+  [/COP DOWN|LOST THE COP|COP TAKEDOWN/, 'good', 'cop'],
   [/TOOK OUT|THROWN!|GOT HIS CHAIN|GRABBED HIM|BROKE FREE|LOST HIS GRIP/, 'good', 'fist'],
-  [/NEAR MISS|LEADING|REMOUNT/, 'good', 'good'],
+  [/NEAR MISS|LEADING|REMOUNT|CLEAN LINE|BIG AIR|OVERTAKE/, 'good', 'good'],
   [/BOOST/, 'info', 'bolt'],
   [/SLIPSTREAM/, 'info', 'wind'],
 ];

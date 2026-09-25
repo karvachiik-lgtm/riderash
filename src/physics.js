@@ -268,7 +268,15 @@ CAMBER_SHARE: 0.45,         // stiffness-set point: realised share at CAMBER_REF
 
   BOOST_FORCE: 3400,          // N while boosting
   BOOST_TIME: 1.6,            // s of boost per charge
-  BOOST_COOL: 6.0,            // s before it is available again
+  BOOST_COOL: 1.2,            // s between charges (no back-to-back chaining)
+  // NITRO: charges are EARNED, not waited for. A rider who only holds the
+  // throttle gets one charge every NITRO_REGEN_T seconds; everything else comes
+  // from riding and fighting well -- a cop taken down, a rival knocked off, time
+  // in a tow, a near miss, a committed clean corner, a landed jump, a pass.
+  // (main.js awardNitro decides what earns what; physics only keeps the tank.)
+  NITRO_MAX: 3,               // charges the tank holds
+  NITRO_START: 1,             // charges at the flag
+  NITRO_REGEN_T: 40,          // s per charge from riding alone
   BOOST_MIN_SPEED: 9,         // m/s -- not a launch tool
   BOOST_CAP: 1.12,            // x top speed: the boost pushes no further
 
@@ -695,6 +703,7 @@ export class BikePhys {
     this.lastRoadY = null;      // for measuring how fast the road drops away
     this.boost = 0;             // s of boost remaining
     this.boostCool = 0;         // s until another charge
+    this.nitro = PHYS.NITRO_START; // charges in the tank (fractional = filling)
     this.slipstream = 0;        // 0..1, how much tow is being had
     this.landHit = 0;           // m/s of the last landing, for FX and audio
     this.contactImpulse = 0;    // m/s of push applied this step, for FX
@@ -787,6 +796,7 @@ export class BikePhys {
     this.airY = 0; this.airVY = 0; this.airborne = false; this.airTime = 0;
     this.lastRoadY = null;
     this.boost = 0; this.boostCool = 0; this.swerveT = 0; this.swerveCool = 0;
+    this.nitro = PHYS.NITRO_START;
     this.slipstream = 0; this.landHit = 0;
     this.sync();
     this.prevPos.copy(this.pos);
@@ -1038,6 +1048,7 @@ export class BikePhys {
     } else if (this.boostCool > 0) {
       this.boostCool = Math.max(0, this.boostCool - h);
     }
+    if (this.nitro < PHYS.NITRO_MAX) this.nitro = Math.min(PHYS.NITRO_MAX, this.nitro + h / PHYS.NITRO_REGEN_T);
 
     // drag: F = 1/2 rho Cd A v^2, opposing motion.
     //
@@ -1961,6 +1972,7 @@ export class BikePhys {
       landHit: this.landHit,
       boost: this.boost,
       boostCool: this.boostCool,
+      nitro: this.nitro,
       slipstream: this.slipstream,
     };
   }
@@ -2000,10 +2012,19 @@ export class BikePhys {
 
   /** Fire a boost charge. Returns true if it actually engaged. */
   tryBoost() {
-    if (this.boost > 0 || this.boostCool > 0) return false;
+    if (this.boost > 0 || this.boostCool > 0 || this.nitro < 1) return false;
     if (this.speed < PHYS.BOOST_MIN_SPEED) return false;
+    this.nitro -= 1;
     this.boost = PHYS.BOOST_TIME;
     return true;
+  }
+
+  /** Add earned nitro (charges; fractional amounts fill the next one). Returns what was added. */
+  earnNitro(n) {
+    if (!(n > 0)) return 0;
+    const before = this.nitro;
+    this.nitro = Math.min(PHYS.NITRO_MAX, this.nitro + n);
+    return this.nitro - before;
   }
 
   applyHit(push, opts = {}) {

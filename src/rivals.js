@@ -29,7 +29,7 @@ import { Dismount } from './dismount.js';
 
 const _rivShift = new THREE.Vector3();
 import { packKit, bikeSource, paintBike, dressRider } from './kit.js';
-import { centreAt, headAt } from './level.js';
+import { centreAt, headAt, roadProfile } from './level.js';
 import { gridFor, ROSTER_SIZE } from './roster.js';
 
 // The personas, in the order they are dealt to the pack when no roster entry is
@@ -453,6 +453,7 @@ export class Rival {
     // +lateral": offset of the centreline LOOK m ahead, projected on the road
     // normal here, gives curvature = 2*offset/LOOK^2.
     const curv = roadCurvature(p.s);
+    const cornerV = this._cornerV = cornerSpeed(this, p.s, dt);
 
     // Was this rider hit since the last frame? contactImpulse is reset by the
     // caller after it reads it, so a non-zero value here is this frame's hit.
@@ -479,7 +480,7 @@ export class Rival {
       lead: world && world.player && world.player.phys ? p.s - world.player.phys.s : 0,
       // (the nearer edge where the road is lopsided: a brain that thinks the
       // road is symmetric must not steer off the narrow side)
-      road: { halfWidth: halfAt(p.s), curvature: curv },
+      road: { halfWidth: halfAt(p.s), curvature: curv, cornerV },
       contact,
       // Vehicles within 5 m behind .. 110 m ahead, as plain numbers (traffic.js
       // trafficNear). The brain steers round them -- see npc.js _avoidTraffic.
@@ -555,6 +556,13 @@ export class Rival {
     // full throttle straight into his back wheel, and over-pace was held by
     // braking WITH the throttle open. A duty cycle turns the analog request into
     // the right average force: 0.45 is on 45% of frames.
+    // THE BEND AHEAD OVERRULES EVERY MODE (hunting, fleeing, drafting all ask
+    // for full throttle): see cornerSpeed.
+    if (p.speed > (this._cornerV ?? Infinity)) {
+      const over = p.speed - this._cornerV;
+      intent.throttle = over > 1 ? 0 : Math.min(intent.throttle, 0.3);
+      intent.brake = Math.max(intent.brake || 0, Math.min(1, over * 0.18));
+    }
     this._thrDuty = (this._thrDuty || 0) + intent.throttle;
     const thrOn = this._thrDuty >= 1;
     if (thrOn) this._thrDuty -= 1;
@@ -675,6 +683,9 @@ export class Rival {
       }
     }
 
+    // the same braking for the bends ahead as the full brain (cornerSpeed)
+    this._cornerV = cornerSpeed(this, p.s, dt);
+    if (p.speed > this._cornerV) { control.throttle = false; control.brake = p.speed > this._cornerV + 0.8; }
     this._aiBoost(dt, world, control);
     p.advance(dt, control);
     f.update(dt, world.fightersExcept(this), hooks);
@@ -703,8 +714,15 @@ export class Rival {
     const answered = pl && gap > -8 && gap <= 2 && pl.boost > 0;
     const defending = pl && gap <= 2 && gap > -60;
     const contender = (this.paceRank ?? 0) >= 0.86;
-    const rate = (passing || answered || contender ? 1.4 : defending ? 0.9 : 0.12) * (0.5 + (this.skill ?? 0.7) * 0.5);
-    if (Math.random() < dt * rate) p.tryBoost();
+    // NITRO IS EARNED (physics.js), so a charge is worth spending well: a
+    // skilled rider keeps it for a pass, an answer or a defence, and only burns
+    // one idly when the tank is about to overflow. A weak one fires at random.
+    if (p.nitro < 1) return;
+    if ((this._cornerV ?? Infinity) < p.speed + 10) return;       // never into a bend
+    const sk = this.skill ?? 0.7;
+    const full = p.nitro >= 2.7;
+    const rate = passing || answered ? 1.4 : defending ? 0.9 : full ? 0.6 : contender ? 0.25 * (1 - sk) + 0.05 : 0.12 * (1 - sk);
+    if (Math.random() < dt * rate * (0.5 + sk * 0.5)) p.tryBoost();
   }
 
   applyVisual(dt) {
@@ -825,6 +843,33 @@ export class Rival {
     // attacks, grab, hold, chain -- the SAME layer as the player
     poseCombat(j, f, this.phys, this._animT || 0, ATTACKS);
   }
+}
+
+// THE SPEED FOR THE BENDS AHEAD. On a cliff course (level.js profile with a
+// cliff) the bends are tight enough -- down to ~40 m radius in the swirls --
+// that a rider who only lifts the throttle runs wide into the rail or through
+// a gap. So the pack brakes: for each point up to 140 m ahead, the fastest this
+// rider can take the bend there (sqrt(a_lat / k)) plus what braking over the
+// distance buys (v^2 = vc^2 + 2 a d); the lowest wins. a_lat is where SKILL
+// shows: a good rider carries ~25% more lateral g than a weak one, and every
+// rider misjudges each bend by a few percent (re-rolled every couple of
+// seconds) -- the weak ones by more, which is how they end up in the rail.
+// Other courses: Infinity (their gentle roads were balanced without it).
+const CORNER = { LOOK: [0, 12, 25, 40, 60, 85, 110, 140], BRAKE: 7.5, ALAT: [6.6, 8.6], JIT: [0.12, 0.04], REROLL: 2.2 };
+function cornerSpeed(r, s, dt) {
+  if (!roadProfile().cliff) return Infinity;
+  const sk = r.skill ?? 0.7;
+  r._cjT = (r._cjT || 0) - (dt || 0);
+  if (r._cjT <= 0) { r._cjT = CORNER.REROLL * (0.7 + Math.random() * 0.6); const j = CORNER.JIT[0] + (CORNER.JIT[1] - CORNER.JIT[0]) * sk; r._cj = 1 + (Math.random() * 2 - 1) * j; }
+  const aLat = (CORNER.ALAT[0] + (CORNER.ALAT[1] - CORNER.ALAT[0]) * sk) * (r._cj || 1);
+  let v = Infinity;
+  for (const d of CORNER.LOOK) {
+    const k = Math.abs(roadCurvature(s + d, 16));
+    if (k < 1e-4) continue;
+    const vc = Math.sqrt(aLat / k);
+    v = Math.min(v, Math.sqrt(vc * vc + 2 * CORNER.BRAKE * d));
+  }
+  return v;
 }
 
 // Signed curvature of the road LOOK m ahead of `s`, in the rider's lateral

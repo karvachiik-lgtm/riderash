@@ -48,6 +48,7 @@ import { TouchPad, isTouchDevice } from './touchpad.js';
 import { Tilt } from './tilt.js';
 import { Gamepads } from './gamepad.js';
 import { Cop } from './cops.js';
+import { PHYS } from './physics.js';
 import { BIKE_FOR_TIER, bikeSource } from './kit.js';
 
 const canvas = document.getElementById('c');
@@ -947,7 +948,7 @@ const warnQueue = [];
 // the combat hooks instead, with the rider it concerns.
 const WARN_EVENTS = [
   [/WIPEOUT|^DOWN$|WENT DOWN|T-BONED$|^HIT A |PARKED CAR/, 'crash', 4],
-  [/^TOOK OUT/, 'crash', 4.5],
+  [/^TOOK OUT|^COP TAKEDOWN/, 'crash', 4.5],
   [/THROWN!|YOU GOT THROWN/, 'grab', 3],
   [/COLLARED|^GRABBED/, 'grab', 2.5],
   [/^COPS!|COP DOWN|BUSTED/, 'cop', 3],
@@ -1262,6 +1263,70 @@ function updateCameraIdle(dt) {
 // ---- RACE STATS -------------------------------------------------------------
 // Everything the results screen reports beyond place and time. Accumulated per
 // frame from state that already exists; nothing here feeds back into the race.
+// ---- NITRO BONUSES ---------------------------------------------------------
+// physics.js keeps the tank; this decides what EARNS it. Holding the throttle
+// alone refills one charge every ~40 s -- everything else is skill: taking a
+// cop or a rival down, sitting in a tow, threading traffic, committing to a
+// corner at speed and staying on the tarmac, landing a jump clean, passing.
+// The pack earns by the same rules (takedowns, tows), so a rival that rides
+// and fights well has more boost to answer you with.
+const NITRO = { COP: 1.0, KO: 0.5, EDGE: 0.75, NEAR: 0.2, PASS: 0.15, SLIP_RATE: 0.04, LINE: 0.3, LINE_T: 1.0, AIR: 0.25 };
+function awardNitro(phys, n, why) {
+  if (!phys || typeof phys.earnNitro !== 'function') return 0;
+  const got = phys.earnNitro(n);
+  if (phys === player.phys) {
+    const st = state.stats || (state.stats = freshStats());
+    st.nitroEarned = (st.nitroEarned || 0) + got;
+    if (why && got > 0) (st.nitroWhy || (st.nitroWhy = {}))[why] = ((st.nitroWhy || {})[why] || 0) + 1;
+    if (why) state.warn = got > 0.01 ? `${why} — +NITRO` : why;
+  }
+  return got;
+}
+function trackSkill(dt) {
+  const p = player.phys, f = player.fighter;
+  if (!state.running || state.countdown > 0 || player.onFoot || f.down) { state._lineT = 0; return; }
+  // the tow: nitro trickles in while you hold a rider's wake
+  if (p.slipstream > 0.35 && p.speed > 22) awardNitro(p, NITRO.SLIP_RATE * p.slipstream * dt);
+  // CLEAN LINE: past ~55% of full lean, above ~72% of top speed, on the
+  // tarmac, untouched, for a whole second -- awarded on the way out
+  const committed = Math.abs(p.lean) > PHYS.LEAN_MAX * 0.55 && p.speed > p.topSpeed * 0.72;
+  const scraped = p.railHit > 0 || p.wallHit > 0;
+  if (scraped) {
+    // the cliff course's rail and rock wall (physics.js) report the hit once;
+    // make it heard and seen, then consume it
+    const v = Math.max(p.railHit, p.wallHit);
+    if (v > 1.5) { audio.oneShot('impact', Math.min(1, 0.25 + v * 0.08), p.railHit ? 1.5 : 0.8); fx.dust(p.pos, 4, p.railHit ? 0xb0b0b0 : 0x8a7560); state.shake = Math.min(1, state.shake + v * 0.04); }
+    p.railHit = 0; p.wallHit = 0;
+  }
+  if (!p.onRoad || scraped || p.contactImpulse > 0.5) state._lineT = -0.6;
+  else if (committed) state._lineT = (state._lineT || 0) + dt;
+  else {
+    if ((state._lineT || 0) > NITRO.LINE_T) awardNitro(p, NITRO.LINE, 'CLEAN LINE');
+    state._lineT = Math.min(0, (state._lineT || 0) + dt);
+  }
+  // OVERTAKE: a rival you pass on the road (not one lying in it)
+  for (const r of rivals) {
+    if (!r.phys || r.out) continue;
+    const ahead = r.phys.s > p.s;
+    if (r._pAhead && !ahead && !r.fighter.down && Math.abs(r.phys.s - p.s) < 12) awardNitro(p, NITRO.PASS, 'OVERTAKE');
+    r._pAhead = ahead;
+  }
+  // the pack's tows: the same trickle for a rival sitting in anyone's wake
+  for (const r of rivals) {
+    const q = r.phys;
+    if (!q || r.out || r.fighter.down) continue;
+    let tow = 0;
+    for (const o of rivals) {
+      if (o === r || !o.phys || o.fighter.down) continue;
+      const d = o.phys.s - q.s;
+      if (d > 1.5 && d < 14 && Math.abs(o.phys.lateral - q.lateral) < 1.3) tow = Math.max(tow, 1 - d / 14);
+    }
+    const d = p.s - q.s;
+    if (d > 1.5 && d < 14 && Math.abs(p.lateral - q.lateral) < 1.3) tow = Math.max(tow, 1 - d / 14);
+    if (tow > 0.35 && q.speed > 22) q.earnNitro(NITRO.SLIP_RATE * tow * dt);
+  }
+}
+
 function freshStats() {
   return { top: 0, dist: 0, rideT: 0, footT: 0, crashes: 0, nearMiss: 0,
     trafficSamples: 0, trafficSum: 0, copChases: 0, copKOs: 0, copEscapes: 0 };
@@ -1286,7 +1351,7 @@ function trackStats(dt) {
       // 1.2 m of it. Counted once per pass (latched until the car is behind).
       const lat = Math.abs(p.lateral - (u.at ?? u.lane)) - (u.halfW || 1) - 0.45;
       if (Math.abs(ds) < (u.halfL || 2.5) && lat > 0 && lat < 1.2 && p.speed > 18 && !player.onFoot) {
-        if (!u._nearLatch) { u._nearLatch = true; st.nearMiss++; state.warn = 'NEAR MISS'; }
+        if (!u._nearLatch) { u._nearLatch = true; st.nearMiss++; awardNitro(p, NITRO.NEAR, 'NEAR MISS'); }
       } else if (Math.abs(ds) > 30) u._nearLatch = false;
     }
     st.trafficSamples++; st.trafficSum += n;
@@ -1314,6 +1379,7 @@ function statsTable() {
     ['Traffic', `${tl.label} (${tl.avg.toFixed(1)} cars / 2 km)`],
     ['Traffic hits / wrecks', `${state.trafficHits || 0} / ${(state.wrecksBy && state.wrecksBy.player) || 0}`],
     ['Near misses', `${st.nearMiss}`],
+    ['Nitro earned', `${(st.nitroEarned || 0).toFixed(1)} charges`],
     ['Hits landed / riders out', `${state.hits} / ${state.knockDowns}`],
     ['Times down', `${st.crashes}`],
     ['On foot', t(st.footT)],
@@ -1351,7 +1417,7 @@ function updateGaps(dt) {
 
 function stepGame(dt) {
   state.time += dt;
-  if (state.countdown <= 0) trackStats(dt);
+  if (state.countdown <= 0) { trackStats(dt); trackSkill(dt); }
   if (flagger) flagger.update(dt, state.countdown, player ? player.phys.s : 0);
   if (state.shake > 0) state.shake = Math.max(0, state.shake - dt * 2.6);
   if (state.swapped > 0) state.swapped -= dt;
@@ -1441,10 +1507,14 @@ function stepGame(dt) {
         target === player.fighter ? 1.0 : 1.12);
       fx.spark(target.owner.pos.clone().setY(target.owner.pos.y + 0.8), target.owner.forward, 22, 1.6);
       fx.dust(target.owner.pos, 8, 0x8a8070);
+      // NITRO for the takedown (awardNitro): a cop is worth a full charge, a
+      // rider half of one -- whoever did it, the pack included.
+      // (the cop's is paid on its 'down' event, the one place every cop KO reports)
+      if (attacker && attacker !== target && !(cop && target === cop.fighter)) awardNitro(attacker.owner, NITRO.KO);
       if (attacker === player.fighter) {
         state.score += CFG.PTS_PER_KNOCKDOWN;
         const pos = world.positionOf(target.owner);
-        state.warn = `TOOK OUT ${target === player.fighter ? '' : 'RIVAL'}`;
+        if (!(cop && target === cop.fighter)) state.warn = 'TOOK OUT RIVAL — +NITRO';
       } else if (target === player.fighter) {
         state.warn = 'YOU WENT DOWN';
       }
@@ -1535,7 +1605,12 @@ function stepGame(dt) {
     else if (!cop.active && inList) world.fighters.splice(world.fighters.indexOf(cop.fighter), 1);
     if (cop.phys.overEdge && cop.state === 'chase') { cop._leave(); state.warn = 'THE COP WENT OVER THE EDGE'; }
     if (ev === 'arrived') state.warn = 'COPS!';
-    else if (ev === 'down') state.warn = 'COP DOWN!';
+    else if (ev === 'down') {
+      // A COP TAKEN DOWN IS A FULL NITRO CHARGE, for whoever did it
+      const by = cop.fighter.lastHitBy;
+      if (by && by.owner) awardNitro(by.owner, NITRO.COP);
+      state.warn = by === player.fighter ? 'COP TAKEDOWN — +1 NITRO' : 'COP DOWN!';
+    }
     else if (ev === 'gone') state.warn = cop.fighter.down ? '' : 'LOST THE COP';
     else if (ev === 'busted' && !state.raceOver) { state.raceOver = true; bustRace(); }
     const flag = document.getElementById('copflag');
@@ -1687,10 +1762,13 @@ function stepGame(dt) {
       audio.oneShot(hard ? 'crash' : 'impact', hard ? 0.85 : 0.45, hard ? 1.1 : 1.35);
       fx.dust(p.pos, hard ? 10 : 5, 0x8a8070);
       if (hard) { state.shake = Math.min(1.2, state.shake + 0.45); state.warn = 'HARD LANDING'; }
+      else if ((state._airMax || 0) > 0.45 && !player.fighter.down) awardNitro(p, NITRO.AIR, 'BIG AIR');
+      state._airMax = 0;
       p.landHit = 0;                               // consumed; one sound per landing
     }
     if (p.boost > 0 && !state.wasBoosting) { audio.oneShot(audio.buffers.boost ? 'boost' : 'swing', 0.7, 1.0); state.warn = 'BOOST'; }
     state.wasBoosting = p.boost > 0;
+    if (p.airborne) state._airMax = Math.max(state._airMax || 0, p.airTime);
     if (p.airborne && p.airTime > 0.45) state.warn = 'AIRBORNE';
     else if (p.wheelie > 0.30) state.warn = 'WHEELIE';
     else if (p.slipstream > 0.55) state.warn = 'SLIPSTREAM';
@@ -2007,6 +2085,7 @@ function startRivalPlunge(r) {
     n: new THREE.Vector3(_pt.z * side, 0, -_pt.x * side), f: headAt(-p.s, new THREE.Vector3()) };
   const byPlayer = f.lastHitBy === player.fighter;
   if (byPlayer) { state.knockDowns++; state.score += 500; }
+  if (f.lastHitBy && f.lastHitBy !== f) awardNitro(f.lastHitBy.owner, NITRO.EDGE);
   if (Math.abs(p.s - player.phys.s) < 150) {
     state.warn = byPlayer ? `YOU PUT ${r.name || 'HIM'} OVER THE EDGE` : `${r.name || 'A RIVAL'} WENT OVER THE EDGE`;
     audio.oneShot('crash', Math.max(0.2, 1 - Math.abs(p.s - player.phys.s) / 150), 0.75);
@@ -2472,6 +2551,7 @@ function publishState() {
   g.airY = player.phys.airY;
   g.boost = player.phys.boost;
   g.boostCool = player.phys.boostCool;
+  g.nitro = player.phys.nitro;
   g.slipstream = player.phys.slipstream;
   g.score = state.score;
   g.over = state.raceOver;

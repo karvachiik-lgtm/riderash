@@ -795,6 +795,7 @@ export class NpcBrain {
       lead,
       halfWidth: num(road.halfWidth, this.roadHalf),
       curvature: num(road.curvature, 0),
+      cornerV: Number.isFinite(road.cornerV) ? road.cornerV : Infinity,
       ahead, aheadD: Number.isFinite(aheadD) ? aheadD : Infinity,
       nearest, nearestD: Number.isFinite(nearestD) ? nearestD : Infinity,
       victim,
@@ -1009,6 +1010,13 @@ export class NpcBrain {
     // through the rider in front of it -- those are competence, not a leash.
     if (facts.curvature && Math.abs(facts.curvature) > NPC.CORNER_CUT) {
       throttle = Math.min(throttle, NPC.CORNER_THROTTLE);
+    }
+    // ...and BRAKES for one it cannot hold at this speed (rivals.js cornerSpeed:
+    // look-ahead, skill-scaled; Infinity where the road never asks for it)
+    if (facts.speed > facts.cornerV) {
+      const over = facts.speed - facts.cornerV;
+      throttle = over > 1 ? 0 : Math.min(throttle, 0.3);
+      brake = Math.max(brake, Math.min(1, over * 0.18));
     }
 
     return { throttle, brake, target };

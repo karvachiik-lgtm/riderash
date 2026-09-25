@@ -254,9 +254,10 @@ class Speedo {
       gear = this._gear = k;
     }
     const boosting = !!g.boost;
-    const ready = !boosting && !g.boostCool;
+    const nitro = Number.isFinite(g.nitro) ? g.nitro : (g.boostCool ? 0 : 1);
+    const ready = !boosting && !g.boostCool && nitro >= 1;
     const pulse = boosting ? Math.floor(performance.now() / 90) & 1 : 0;
-    const key = `${this.shown.toFixed(1)}|${Math.round(mph)}|${gear}|${boosting}|${ready}|${pulse}`;
+    const key = `${this.shown.toFixed(1)}|${Math.round(mph)}|${gear}|${boosting}|${ready}|${pulse}|${nitro.toFixed(2)}`;
     if (key === this._key) return;
     this._key = key;
 
@@ -302,10 +303,24 @@ class Speedo {
     c.fillStyle = '#8b9097';
     c.fillText('MPH', cx + r * 0.06, cy + r * 0.76);
 
-    // nitro lamp, beside MPH: green = a charge is ready, blue = burning
-    const lx = cx - r * 0.30, ly = cy + r * 0.76, lr = Math.max(2.5, s * 0.03);
-    c.fillStyle = boosting ? (pulse ? '#8fd0ff' : '#3d7dff') : ready ? '#6fcf5a' : '#2c3036';
-    c.beginPath(); c.arc(lx, ly, lr, 0, Math.PI * 2); c.fill();
+    // NITRO: three charge pips across the bottom of the face (earned -- see
+    // main.js awardNitro). A full pip is a charge in the tank; the next one
+    // fills as a ring around its pip; blue while one burns.
+    {
+      const lr = Math.max(2.6, s * 0.032), gap = lr * 2.9, ly = cy + r * 0.93;
+      for (let i = 0; i < 3; i++) {
+        const lx = cx + (i - 1) * gap, fillK = Math.max(0, Math.min(1, nitro - i));
+        c.fillStyle = '#2c3036';
+        c.beginPath(); c.arc(lx, ly, lr, 0, Math.PI * 2); c.fill();
+        if (fillK >= 1) {
+          c.fillStyle = boosting ? (pulse ? '#8fd0ff' : '#3d7dff') : ready ? '#6fcf5a' : '#4f8f45';
+          c.beginPath(); c.arc(lx, ly, lr, 0, Math.PI * 2); c.fill();
+        } else if (fillK > 0) {
+          c.strokeStyle = '#6fcf5a'; c.lineWidth = Math.max(1.2, lr * 0.45);
+          c.beginPath(); c.arc(lx, ly, lr * 1.05, -Math.PI / 2, -Math.PI / 2 + fillK * Math.PI * 2); c.stroke();
+        }
+      }
+    }
 
     // needle: tail through the hub, tapered, amber like the position readout
     const ca = Math.cos(an), sa = Math.sin(an), nx = -sa, ny = ca;

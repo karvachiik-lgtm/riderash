@@ -950,6 +950,21 @@
 #tips .tip-b { border-radius: 0 !important; border: 2px solid #ece6d9 !important; color: #ece6d9 !important; background: #0b0b0c; transform: rotate(-3deg); }
 #tips .tip-b + .tip-b { transform: rotate(4deg); }
 #tips .tip-b:hover { background: #ece6d9; color: #0b0b0c !important; }
+/* ---- FREE RIDE picker ------------------------------------------------------- */
+#freescreen { --bone: #ece6d9; --acc: #e3b93c; }
+#freescreen h2 { font-family: var(--display); font-size: clamp(40px, 7vh, 72px); color: var(--bone); letter-spacing: .08em; transform: skewX(-8deg); }
+#freescreen .maps { flex-wrap: wrap; gap: 10px; max-width: 1000px; }
+#freescreen .map { width: 150px; padding: 12px 10px 10px; border: 1px solid transparent; background: rgba(12,13,15,.7); color: #8f959b; }
+#freescreen .map .nm { font-family: var(--display); font-weight: 400; font-size: 18px; letter-spacing: .05em; }
+#freescreen .map .sw { height: 6px; margin: 0; }
+#freescreen .map:hover { color: var(--bone); }
+#freescreen .map.sel { border-color: rgba(236,230,217,.55); color: var(--bone); box-shadow: inset 0 2px 0 var(--acc); }
+#freelevels { gap: 8px; }
+#freelevels .fl { display: flex; flex-direction: column; align-items: center; padding: 10px 16px; font-size: 14px; }
+#freelevels .fl small { font-size: 10px; letter-spacing: .12em; color: #8f959b; margin-top: 3px; }
+#freelevels .fl.sel { border-color: var(--bone); color: var(--bone); box-shadow: inset 0 2px 0 var(--acc); }
+#freego { background: var(--bone); color: #0b0b0c; border: 0; font-family: var(--display); font-size: 26px; padding: 9px 48px 7px; box-shadow: 5px 5px 0 #000; }
+#freego:hover, #freego:focus { background: #fff; color: #0b0b0c; }
 </style>
 </head>
 <body>
@@ -1040,6 +1055,7 @@
 
   <div class="row" id="titleactions">
     <button class="btn pe" id="start">RIDE</button>
+    <button class="btn pe" id="freeride">FREE RIDE</button>
     <button class="btn pe" id="design" style="opacity:.85">BUILD RIDER</button>
     <button class="btn pe" id="opensettings" style="opacity:.75">SETTINGS</button>
     <button class="btn pe" id="resetcareer" style="opacity:.55">RESET CAREER</button>
@@ -1053,6 +1069,13 @@
   <div id="tips" role="note"></div>
 </div>
 
+<div class="screen" id="freescreen">
+  <h2>FREE RIDE</h2>
+  <p>Any road, any level. No prize, no fines, no repair bills: nothing counts but the ride.</p>
+  <div id="freemaps" class="maps"></div>
+  <div class="row" id="freelevels"></div>
+  <div class="row"><button class="btn pe" id="freego">RIDE</button><button class="btn pe" id="freeback">BACK</button></div>
+</div>
 <div class="screen" id="over">
   <h2 id="overh">WIPED OUT</h2>
   <p id="overp"></p>

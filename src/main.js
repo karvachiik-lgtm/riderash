@@ -2194,7 +2194,8 @@ function stepGame(dt) {
     const live = rivals.filter((r) => !r.out);
     radar.update(dt, player, cop && cop.present ? [...live, cop] : live,
       [...(world.traffic && world.traffic.userData ? world.traffic.userData.cars : []),
-       ...(crossTraffic ? crossTraffic.cars : [])]);
+       ...(crossTraffic ? crossTraffic.cars : [])],
+      { active: radarActive(live), finishS: state.finishS });
   } catch (e) { /* the radar must never take the frame down */ }
   updateGaps(dt);
 
@@ -2310,9 +2311,9 @@ function plungeCamera() {
 function eliminateRace() {
   if (replay) { replay.event('crash', 'OVER THE EDGE', player.fighter, 6); replay.stop(); }
   document.getElementById('copflag')?.classList.remove('on');
-  const ev = career.event;
+  const ev = raceEvent();
   const damage = (player.damage || 0) + PLUNGE.BILL;
-  const res = career.bust(0, damage);
+  const res = freeEvent ? freeResult() : career.bust(0, damage);
   const lines = [
     `<b>${ev.name}</b> &nbsp;·&nbsp; <b>Level ${ev.level}/5</b> — you went through a gap in the rail.`,
     `Recovering the bike from the valley: <b>-$${res.bill}</b>`,
@@ -2320,6 +2321,7 @@ function eliminateRace() {
     res.over ? '<b>BROKE AND AT THE BOTTOM OF A CLIFF.</b> Career over.' : 'Eliminated: no placing, no prize. Ride it again.',
   ];
   audio.siren(0);
+  if (freeEvent) lines.splice(1, lines.length - 1, FREE_LINE);
   hud.ended(res.over ? "YOU'RE OUT OF THE GAME" : 'OVER THE EDGE', lines.join('<br>') + statsTable());
   pinPhoto(res);
   state.running = false;
@@ -2330,7 +2332,7 @@ function eliminateRace() {
   soundtrack?.play('bust', { music: true, duck: true });
   refreshTitle();
   const ag = document.getElementById('again');
-  if (ag && !res.over) ag.textContent = 'RIDE AGAIN';
+  if (ag && !res.over) ag.textContent = res.free ? 'RIDE IT AGAIN' : 'RIDE AGAIN';
   lastResult = res;
 }
 
@@ -2416,6 +2418,20 @@ function skipEnding() {
 addEventListener('keydown', skipEnding);
 addEventListener('pointerdown', skipEnding);
 
+// IS ANYTHING HAPPENING? The radar holds its close sweep while it is, and tips
+// back into the far cruise view once it has been quiet a while (radar.js).
+// Island callouts count, except the ones that ARE cruising (boost, tow, lead).
+const CRUISE_OK = /BOOST|NITRO|SLIPSTREAM|LEADING|CLEAN LINE|OVERTAKE|^GO$/;
+function radarActive(live) {
+  const f = player.fighter, ps = player.phys;
+  if (f.busy || f.down || f.hold || f.heldBy || state.shake > 0.25) return true;
+  if (warnQueue.some((w) => !CRUISE_OK.test(w))) return true;
+  const near = (o) => o && o.phys && Math.abs(o.phys.s - ps.s) < 14 && Math.abs(o.phys.lateral - ps.lateral) < 6;
+  if (live.some((r) => !r.fighter.down && near(r))) return true;
+  if (cop && cop.present && cop.state === 'chase' && Math.abs(cop.phys.s - ps.s) < 40) return true;
+  return false;
+}
+
 function freeGroupBuffers(root) {
   const drop = (a) => { if (a && a.onUpload) a.onUpload(function () { this.array = null; }); };
   root.traverse((o) => {
@@ -2440,7 +2456,7 @@ window.__ENDINGS__ = { bust: () => { state.raceOver = true; startPlayerArrest();
 const END = { SNAP: 2.4, get HOLD() { return window.__END_HOLD__ ?? (navigator.webdriver ? 0.4 : 3.4); } };
 let snapNext = false, photoReq = null;
 function endCtx(pos) {
-  const ev = career.event;
+  const ev = raceEvent();
   return {
     name: (career.state && career.state.riderName) || 'A. NONYMOUS',
     course: ev ? ev.name : '',
@@ -2532,10 +2548,10 @@ const _endCam = new THREE.Vector3();
 function bustRace() {
   if (replay) { replay.event('cop', 'BUSTED', player.fighter, 5); replay.stop(); }
   document.getElementById('copflag')?.classList.remove('on');
-  const ev = career.event;
+  const ev = raceEvent();
   const fine = Cop.fine(ev);
   const damage = player.damage || 0;
-  const res = career.bust(fine, damage);
+  const res = freeEvent ? freeResult() : career.bust(fine, damage);
   const lines = [
     `<b>${ev.name}</b> &nbsp;·&nbsp; <b>Level ${ev.level}/5</b> — you went down with a cop on your tail.`,
     `Fine: <b>-$${res.fine}</b>`,
@@ -2545,6 +2561,7 @@ function bustRace() {
   lines.push(res.over ? "<b>CAN'T PAY THE FINE.</b> Career over." : 'No placing, no prize. Ride it again.');
   audio.siren(0);
   audio.oneShot('horn', 0.6, 0.8);
+  if (freeEvent) lines.splice(1, lines.length - 1, FREE_LINE);
   hud.ended(res.over ? "YOU'RE OUT OF THE GAME" : 'BUSTED!', lines.join('<br>') + statsTable());
   pinPhoto(res);
   state.running = false;
@@ -2557,10 +2574,22 @@ function bustRace() {
   // advance is the NEXT race -- labelled "RIDE AGAIN", so a winner had no idea
   // the career moved on (and no way to the garage to spend the prize).
   const ag = document.getElementById('again');
-  if (ag && !res.over) ag.textContent = res.complete ? 'NEW CAREER' : res.advanced ? `NEXT RACE: ${career.event.name}` : 'RIDE AGAIN';
+  if (ag && !res.over) ag.textContent = res.free ? 'RIDE IT AGAIN' : res.complete ? 'NEW CAREER' : res.advanced ? `NEXT RACE: ${career.event.name}` : 'RIDE AGAIN';
   lastResult = res;
 }
 let lastResult = null;
+
+// ---- FREE RIDE ------------------------------------------------------------------
+// Any course at any level, off the books: the race is the career event's race
+// (length, pack, cop, traffic), but nothing is settled -- no prize, no fine, no
+// repair bill, no progress. `freeEvent` is set by the Free Ride picker and
+// cleared on the way back to the menu.
+let freeEvent = null;
+function raceEvent() { return freeEvent || career.event; }
+function freeResult() {
+  return { fine: 0, bill: 0, paid: 0, cash: career.state.cash, over: false, advanced: false, complete: false, free: true };
+}
+const FREE_LINE = '<b>FREE RIDE</b> — nothing won, nothing lost, nothing on the bill. Just the road.';
 
 function endRace(pos) {
   if (replay) { replay.event('finish', pos === 1 ? 'THE WIN' : 'FINISH', player.fighter, pos === 1 ? 3 : 1.5); replay.stop(); }
@@ -2572,15 +2601,15 @@ function endRace(pos) {
 
   // The career is settled HERE, not on the title screen, so a result counts the
   // moment it happens and closing the tab cannot lose a win.
-  const ev = career.event;
+  const ev = raceEvent();
   // THE BILL IS COMPUTED FROM THE RACE'S ACCRUED DAMAGE and passed in, so the
   // result -- including the career ending -- is settled in one place.
   const damage = player.damage || 0;
-  const res = career.finish(pos, world.parts.length, state.time, damage);
+  const res = freeEvent ? freeResult() : career.finish(pos, world.parts.length, state.time, damage);
   // Result sting: a win gets the rock stinger and the crowd, a qualifying
   // finish (4th or better) the crowd, anything else -- or going broke -- the
   // sour brass.
-  audio.finish(res.over ? 'fail' : pos === 1 ? 'win' : res.advanced ? 'qualify' : 'fail');
+  audio.finish(res.over ? 'fail' : pos === 1 ? 'win' : (res.advanced || (res.free && pos <= 4)) ? 'qualify' : 'fail');
 
   let title = pos === 1 ? 'YOU WIN' : pos <= 3 ? 'ON THE PODIUM' : 'RACE OVER';
   if (res.over) title = "YOU'RE OUT OF THE GAME";
@@ -2615,6 +2644,7 @@ function endRace(pos) {
     return `<tr class="${me ? 'me' : ''}"><td>${names[i] || i + 1}</td><td>${nm}${down}</td></tr>`;
   }).join('');
   const table = `<table class="board">${board}</table>`;
+  if (freeEvent) lines.splice(2, lines.length - 2, FREE_LINE);
   hud.ended(title, lines.join('<br>') + table + statsTable());
   pinPhoto(res);
   if (touchpad) touchpad.reset();
@@ -2626,7 +2656,7 @@ function endRace(pos) {
   soundtrack?.play(pos <= 4 ? 'win' : 'bust', { music: true, duck: true });
   refreshTitle();
   const ag = document.getElementById('again');
-  if (ag && !res.over) ag.textContent = res.complete ? 'NEW CAREER' : res.advanced ? `NEXT RACE: ${career.event.name}` : 'RIDE AGAIN';
+  if (ag && !res.over) ag.textContent = res.free ? 'RIDE IT AGAIN' : res.complete ? 'NEW CAREER' : res.advanced ? `NEXT RACE: ${career.event.name}` : 'RIDE AGAIN';
   lastResult = res;
 }
 
@@ -2634,7 +2664,7 @@ function endRace(pos) {
 window.__READY__ = false;
 window.__START__ = () => {
   // Out of the game: the next ride is race 1 of a NEW career.
-  if (career.over) { career.reset(); refreshTitle(); }
+  if (career.over && !freeEvent) { career.reset(); refreshTitle(); }
   // DROP FOCUS FROM WHATEVER STARTED THE RACE. A focused <button> is activated
   // by Space and Enter, so with the RIDE button still focused the boost key
   // re-fired it and restarted the race mid-lap -- measured as a top speed of
@@ -2648,7 +2678,7 @@ window.__START__ = () => {
   // the same five tracks, and higher levels run them LONGER (`lenMul`). The
   // finish line is a property of that decision, so it is set here, per race,
   // rather than at load -- a race always ends where its own level says.
-  const ev = career.event;
+  const ev = raceEvent();
   spine.setMap(ev.map, ev.lenMul);
   // THE LANES ARE PER COURSE (lanes.js): a different layout means a different
   // deck, markings, kerbs and rails, so the road is rebuilt when it changes.
@@ -2711,7 +2741,7 @@ window.__START__ = () => {
   // RIDE button, so this is that gesture. If it is called from a test harness
   // there is no gesture and the context stays suspended, which is fine.
   audio.init().catch(() => {});
-  initSoundtrack().pickRace(`${career.event.map}:${career.state.race || 0}`);
+  initSoundtrack().pickRace(`${raceEvent().map}:${career.state.race || 0}`);
   audio.playMusic('race');
   audioExt.init().catch(() => {});   // ADDITIVE: extra beds/beeps, after the base mix exists
   state.paused = false;
@@ -2850,12 +2880,12 @@ function resetRace() {
   // all five entries come from one consistent draw of the roster.
   // [npc-persona] seeded per race (window.__SEED__ / ?seed=): who enters, grid
   // order, moods and every brain's mid-race draws differ race to race.
-  packForThisRace = gridFor(career.event, CFG.RIVAL_COUNT, { seed: takeRaceSeed() }).map((e) => ({
+  packForThisRace = gridFor(raceEvent(), CFG.RIVAL_COUNT, { seed: takeRaceSeed() }).map((e) => ({
     ...e,
     // Damped, not raw -- see aggroFactorFor. A raw 0.70/1.35 on a persona whose
     // base aggression is already 1.45 produced a race-one brawl once rival
     // attacks started landing.
-    aggroScale: aggroFactorFor(career.event),
+    aggroScale: aggroFactorFor(raceEvent()),
   }));
   // The on-foot machine is per-race state too. A race that ends while the
   // player is walking would otherwise leak FALLING/DOWN/WALKING into the next
@@ -2865,7 +2895,7 @@ function resetRace() {
   player.reset();
   // No police in the career's very first race: that one teaches the ride and
   // the fight. Every race after it can have a cop.
-  if (cop) cop.reset(career.event.level, career.state.race > 0 || career.state.wins > 0);
+  if (cop) cop.reset(raceEvent().level, career.state.race > 0 || career.state.wins > 0);
   // ...and out of the fight list now, not when the countdown ends: through the
   // whole grid a stale cop from the last race was a fighter anyone could hit
   if (cop) { const k = world.fighters.indexOf(cop.fighter); if (k >= 0) world.fighters.splice(k, 1); }
@@ -2938,7 +2968,7 @@ function resetRace() {
       slot: i });
   });
   // Traffic is per-race state too -- see resetTraffic for the leak this closes.
-  if (world && world.traffic) resetTraffic(world.traffic, 0, CFG.TRAFFIC_BY_LEVEL[(career.event.level || 1) - 1] ?? 1);
+  if (world && world.traffic) resetTraffic(world.traffic, 0, CFG.TRAFFIC_BY_LEVEL[(raceEvent().level || 1) - 1] ?? 1);
   hud.show(true);
 }
 
@@ -2988,8 +3018,8 @@ function publishState() {
   g.damage = player.damage || 0;
   g.repairBill = career.repairBill(player.damage || 0);
   g.careerOver = career.over;
-  g.level = career.event.level;
-  g.course = career.event.name;
+  g.level = raceEvent().level;
+  g.course = raceEvent().name;
   g.raceIndex = career.raceIndex;
   // World-spine state: which map, which sector, which biome, how much rain.
   // This is what makes a visual regression diagnosable — "the road turned grey"
@@ -3170,6 +3200,48 @@ function refreshTitle() {
 buildMapPicker();
 refreshTitle();
 
+// THE FREE RIDE PICKER: every course, every level, nothing locked.
+const freePick = { map: COURSES_UI[0].map, level: 1 };
+function buildFreePicker() {
+  const host = document.getElementById('freemaps'), lv = document.getElementById('freelevels');
+  if (!host || !lv) return;
+  host.innerHTML = '';
+  COURSES_UI.forEach((c) => {
+    const m = MAPS[c.map], b0 = BIOMES[m.sectors[0][0]], b1 = BIOMES[m.sectors[m.sectors.length - 1][0]];
+    const el = document.createElement('button');
+    el.className = 'map pe' + (c.map === freePick.map ? ' sel' : '');
+    el.innerHTML = `<span class="nm">${m.label}</span><span class="sw">` +
+      [b0.roadTint, b0.vergeTint, b1.roadTint, b1.vergeTint].map((t) => `<i style="background:#${new THREE.Color(t).getHexString()}"></i>`).join('') + '</span>';
+    el.addEventListener('click', () => { freePick.map = c.map; buildFreePicker(); });
+    host.appendChild(el);
+  });
+  lv.innerHTML = '';
+  for (let l = 1; l <= 5; l++) {
+    const ev = SERIES[(l - 1) * COURSE_COUNT];
+    const el = document.createElement('button');
+    el.className = 'btn pe fl' + (l === freePick.level ? ' sel' : '');
+    el.innerHTML = `LEVEL ${l}<small>${ev.lenMul.toFixed(2)}× length</small>`;
+    el.addEventListener('click', () => { freePick.level = l; buildFreePicker(); });
+    lv.appendChild(el);
+  }
+}
+document.getElementById('freeride').addEventListener('click', () => {
+  buildFreePicker();
+  document.getElementById('title').classList.remove('on');
+  document.getElementById('freescreen').classList.add('on');
+});
+document.getElementById('freeback').addEventListener('click', () => {
+  document.getElementById('freescreen').classList.remove('on');
+  document.getElementById('title').classList.add('on');
+});
+document.getElementById('freego').addEventListener('click', () => {
+  const i = COURSES_UI.findIndex((c) => c.map === freePick.map);
+  freeEvent = { ...SERIES[(freePick.level - 1) * COURSE_COUNT + Math.max(0, i)], free: true };
+  document.getElementById('freescreen').classList.remove('on');
+  window.__START__();
+});
+window.__FREERIDE__ = (map, level = 1) => { freePick.map = map; freePick.level = level; document.getElementById('freego').click(); };   // harness
+
 // ---- DEVELOPER MODE: the game's side of the Settings panel (devmode.js) ----
 let devReadEl = null, devReadT = 0;
 function devReadout(rdt) {
@@ -3211,7 +3283,7 @@ const devUi = initDevMode({
     window.__TRAFFIC_OFF__ = off;
     if (!off && world.traffic) {
       world.traffic.visible = true;
-      resetTraffic(world.traffic, player ? player.phys.s : 0, CFG.TRAFFIC_BY_LEVEL[(career.event.level || 1) - 1] ?? 1);
+      resetTraffic(world.traffic, player ? player.phys.s : 0, CFG.TRAFFIC_BY_LEVEL[(raceEvent().level || 1) - 1] ?? 1);
     }
   },
   readout: (on) => {
@@ -3335,6 +3407,7 @@ document.getElementById('again').addEventListener('click', () => {
 // prize money is actually spent.
 document.getElementById('tomenu').addEventListener('click', () => {
   lastResult = null;
+  freeEvent = null;                     // the menu is the career again
   document.getElementById('over').classList.remove('on');
   quitToTitle();
 });
@@ -3348,6 +3421,7 @@ function canKeyStart() {
   if (state.running || !state.ready) return false;
   if (showroom && showroom.isOpen) return false;
   if (document.getElementById('settingsscreen').classList.contains('on')) return false;
+  if (document.getElementById('freescreen').classList.contains('on')) return false;
   if (document.getElementById('fatal').classList.contains('on')) return false;
   if (performance.now() - state.endedAt < 1200) return false;
   return document.getElementById('title').classList.contains('on')

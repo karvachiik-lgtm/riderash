@@ -12,6 +12,7 @@ import { TunnelDress, setCourseTunnels, tunnelK } from './tunnels.js';
 import { Arrest } from './arrest.js';
 import { Landmarks } from './landmarks.js';
 import { Feel } from './feel.js';
+import { Soundtrack } from './soundtrack.js';
 import { buildTraffic, updateTraffic, trafficHit, resetTraffic } from './world.js';
 import { buildFinish, placeFinish } from './finishline.js';
 import { TrackDress } from './trackdress.js';
@@ -2277,6 +2278,7 @@ function eliminateRace() {
   state.plunge = null;
   audio.idle();
   audio.playMusic('menu');
+  soundtrack?.play('bust', { music: true, duck: true });
   refreshTitle();
   const ag = document.getElementById('again');
   if (ag && !res.over) ag.textContent = 'RIDE AGAIN';
@@ -2393,6 +2395,7 @@ function bustRace() {
   state.endedAt = performance.now();
   audio.idle();
   audio.playMusic('menu');
+  soundtrack?.play('bust', { music: true, duck: true });
   refreshTitle();
   // SAY WHAT THE BUTTON DOES. It always started career.event, which after an
   // advance is the NEXT race -- labelled "RIDE AGAIN", so a winner had no idea
@@ -2463,6 +2466,7 @@ function endRace(pos) {
   state.endedAt = performance.now();
   audio.idle();
   audio.playMusic('menu');
+  soundtrack?.play(pos <= 4 ? 'win' : 'bust', { music: true, duck: true });
   refreshTitle();
   const ag = document.getElementById('again');
   if (ag && !res.over) ag.textContent = res.complete ? 'NEW CAREER' : res.advanced ? `NEXT RACE: ${career.event.name}` : 'RIDE AGAIN';
@@ -2550,6 +2554,7 @@ window.__START__ = () => {
   // RIDE button, so this is that gesture. If it is called from a test harness
   // there is no gesture and the context stays suspended, which is fine.
   audio.init().catch(() => {});
+  initSoundtrack().pickRace(`${career.event.map}:${career.state.race || 0}`);
   audio.playMusic('race');
   audioExt.init().catch(() => {});   // ADDITIVE: extra beds/beeps, after the base mix exists
   state.paused = false;
@@ -3434,9 +3439,19 @@ setInterval(publishState, 50);
 // Chromium suspends an AudioContext created without a gesture. Arm the first
 // real interaction as a fallback, so a player who starts by pressing a key
 // rather than clicking also gets sound.
+// THE SOUNDTRACK (soundtrack.js): the recorded band, loaded once audio is up
+let soundtrack = null;
+function initSoundtrack() {
+  if (soundtrack) return soundtrack;
+  soundtrack = new Soundtrack(audio, audioExt);
+  soundtrack.bindUI();
+  audio.init().then(() => soundtrack.init()).catch((e) => console.warn('[soundtrack]', e));
+  return soundtrack;
+}
 for (const ev of ['pointerdown', 'keydown', 'touchstart']) {
   addEventListener(ev, () => {
     audio.init().catch(() => {});
+    initSoundtrack();
     if (!state.running) audio.playMusic('menu');
     audioExt.init().catch(() => {});   // ADDITIVE: extra beds/beeps
   }, { once: true });

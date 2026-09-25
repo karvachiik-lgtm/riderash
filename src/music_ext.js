@@ -245,13 +245,56 @@ function renderTone(sr, freq, dur, shape = 'square') {
   return ctx.startRendering();
 }
 
+// COUNTDOWN HITS. These were pure sines at 880 / 1320 Hz -- a hospital
+// monitor, and the first thing every race said. Now the band counts you in:
+// 3-2-1 are palm-muted power-chord stabs on a kick; GO is the whole band --
+// an open overdriven chord, a kick and a cymbal crash, ringing out.
+async function renderHit(sr, roots, dur, open) {
+  const n = Math.ceil(dur * sr);
+  const ctx = new OfflineAudioContext(1, n, sr);
+  const out = ctx.createGain(); out.gain.value = open ? 0.6 : 0.72; out.connect(ctx.destination);   // (peaks under 0.9: no clipping)
+  // guitar: detuned saws per chord tone -> drive -> cab (lowpass) -> envelope
+  const drive = ctx.createWaveShaper();
+  const k = 30, N = 2048, curve = new Float32Array(N);
+  for (let i = 0; i < N; i++) { const x = (i / (N - 1)) * 2 - 1; curve[i] = ((1 + k) * x) / (1 + k * Math.abs(x)); }
+  drive.curve = curve;
+  const cab = ctx.createBiquadFilter(); cab.type = 'lowpass'; cab.frequency.value = open ? 3600 : 1900; cab.Q.value = 0.9;
+  const env = ctx.createGain();
+  env.gain.setValueAtTime(0.0001, 0);
+  env.gain.linearRampToValueAtTime(0.5, 0.006);
+  env.gain.exponentialRampToValueAtTime(open ? 0.22 : 0.05, open ? 0.5 : 0.16);
+  env.gain.exponentialRampToValueAtTime(0.0001, dur);
+  const pre = ctx.createGain(); pre.gain.value = 0.35;
+  for (const hz of roots) for (const det of [-6, 5]) {
+    const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = hz; o.detune.value = det;
+    o.connect(pre); o.start(0); o.stop(dur);
+  }
+  pre.connect(drive).connect(cab).connect(env).connect(out);
+  // kick: a pitch-dropping sine thump
+  const kick = ctx.createOscillator(), kg = ctx.createGain();
+  kick.frequency.setValueAtTime(140, 0); kick.frequency.exponentialRampToValueAtTime(45, 0.12);
+  kg.gain.setValueAtTime(0.9, 0); kg.gain.exponentialRampToValueAtTime(0.0001, 0.28);
+  kick.connect(kg).connect(out); kick.start(0); kick.stop(0.3);
+  // pick / crash: filtered noise (a short tick for the stabs, a long wash for GO)
+  const nb = ctx.createBuffer(1, n, sr), d = nb.getChannelData(0);
+  let h = 0x51ed27;
+  for (let i = 0; i < n; i++) { h ^= h << 13; h ^= h >>> 17; h ^= h << 5; d[i] = ((h >>> 0) / 4294967295) * 2 - 1; }
+  const ns = ctx.createBufferSource(); ns.buffer = nb;
+  const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = open ? 5200 : 2500;
+  const ng = ctx.createGain();
+  ng.gain.setValueAtTime(open ? 0.32 : 0.12, 0);
+  ng.gain.exponentialRampToValueAtTime(0.0001, open ? dur : 0.05);
+  ns.connect(hp).connect(ng).connect(out); ns.start(0);
+  return ctx.startRendering();
+}
 export async function renderBeeps(sampleRate = 44100) {
   const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
   if (!OAC) return null;
   const sr = Math.min(sampleRate, 44100);
+  const E2 = 82.41, B2 = 123.47, E3 = 164.81, B3 = 246.94, E4 = 329.63;
   const [beep, beepGo] = await Promise.all([
-    renderTone(sr, 880, 0.30),
-    renderTone(sr, 1320, 0.52),
+    renderHit(sr, [E2, B2], 0.34, false),              // 3, 2, 1: chug
+    renderHit(sr, [E2, B2, E3, B3, E4], 1.6, true),    // GO: the whole band
   ]);
   return { beep, beepGo };
 }

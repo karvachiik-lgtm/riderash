@@ -1028,8 +1028,8 @@ export class Showroom {
       if (t < 1.0) applyAction(j, 'knockdown', t);
     }
     // the monotonic clock, not the looping `t`: the chain sim steps on its delta
-    // The showroom's Chain panel edits the chain: keep it out on display (the
-    // race stows it between swings -- see riderpose.poseCombat).
+    // The showroom's Chain panel edits the chain: keep it out on display
+    // (wrapped round the fist between swings -- see chainweapon.js).
     j.__chainAlwaysOut = true;
     poseCombat(j, fighter, phys, this._clock, ATTACKS);
     if (kind === 'chain') {

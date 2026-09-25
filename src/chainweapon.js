@@ -19,9 +19,17 @@
 //   * the crack: the fist whips forward and stops, the wave runs down the chain
 //     and the TIP overtakes the hand (MEASURED below, `tipPeak`);
 //   * follow-through: the momentum carries it round, low and across;
-//   * riding: it hangs from the grip and streams back in the 40 m/s airflow,
-//     swings forward when the bike brakes, out when it leans -- none of that is
+//   * riding: the short free tail streams back in the 40 m/s airflow, swings
+//     forward when the bike brakes, out when it leans -- none of that is
 //     authored, it is the bike's own acceleration seen by a free body.
+//
+// HANDLED LIKE A WEAPON. A free rope alone read as a toy being waved about. On
+// top of the sim, two kinematic targets are blended onto the particles (see
+// "HANDLED, NOT DANGLED" in step()): carried, most of the chain is WRAPPED
+// round the fist; the wind-up unwinds it; for the strike it is SHOT OUT
+// straight to full length, out to the target's side and sweeping forward
+// through the hit; then it is yanked back and wrapped again. main.js throws
+// the hit sparks from the chain's tip.
 //
 // FIXED STEP. The sim sub-steps at 240 Hz whatever the frame rate, and the
 // pinned fist is INTERPOLATED across the sub-steps from last frame's position to
@@ -192,7 +200,7 @@ function build(joints, cfg) {
     key: `${N}|${cfg.length}|${cfg.material}`, N, pitch, mesh,
     p: new Float64Array((N + 1) * 3), o: new Float64Array((N + 1) * 3),
     anchor: new THREE.Vector3(), rootPos: new THREE.Vector3(), rootV: new THREE.Vector3(),
-    t: null, ready: false, tipSpeed: 0, tipRel: 0, tipPeak: 0, root: riderRoot(joints), resets: 0,
+    t: null, ready: false, sdir: new THREE.Vector3(0, 0, 1), aimed: false, side: 1, shot: 0, tipSpeed: 0, tipRel: 0, tipPeak: 0, root: riderRoot(joints), resets: 0,
   };
   joints.__chainSim = sim;
   return sim;
@@ -256,6 +264,33 @@ export function driveChain(joints, f, ph, time) {
 }
 
 const _wind = new THREE.Vector3();
+const _ax = new THREE.Vector3(), _ay = new THREE.Vector3(), _az = new THREE.Vector3();
+const _rx = new THREE.Vector3(), _rz = new THREE.Vector3(), _hp = new THREE.Vector3();
+const smooth = (x) => { x = Math.max(0, Math.min(1, x)); return x * x * (3 - 2 * x); };
+// THE WRAP: round the wrist at radius COIL_R, rising up the forearm a wire's
+// width per turn, at most COIL_TURNS turns and always a short tail left free
+const COIL_R = 0.05, COIL_RISE = 0.016, COIL_TURNS = 2.2, TAIL = 3;
+function coilMax(sim) {
+  const dth = 2 * Math.asin(Math.min(0.99, sim.pitch / (2 * COIL_R)));
+  return Math.max(0, Math.min(sim.N - TAIL, Math.floor(COIL_TURNS * 2 * Math.PI / dth)));
+}
+/** Links wrapped at attack phase `ph`: all when carried, unwound on the wind-up, rewrapped after. */
+function coilCount(sim, ph) {
+  const M = coilMax(sim);
+  if (ph < 0) return M;
+  if (ph < 0.3) return M * (1 - smooth(ph / 0.3));
+  if (ph < 0.66) return 0;
+  return M * smooth((ph - 0.66) / 0.26);
+}
+/** Particle i of the wrap, round the fist's forearm axis through the pin. */
+function helix(sim, i, px, py, pz, out) {
+  const dth = 2 * Math.asin(Math.min(0.99, sim.pitch / (2 * COIL_R)));
+  const th = i * dth, y = (th / (2 * Math.PI)) * COIL_RISE + 0.012 * Math.min(1, i);
+  // the pin sits ON the circle: the circle's centre is COIL_R across the fist
+  const c = COIL_R * (1 - Math.cos(th)), sn = COIL_R * Math.sin(th);
+  out.set(px, py, pz).addScaledVector(_ax, c).addScaledVector(_az, sn).addScaledVector(_ay, y);
+  return out;
+}
 const _sph = [new THREE.Vector4(), new THREE.Vector4(), new THREE.Vector4()];
 function step(sim, joints, cfg, dt, anchorNow, ph) {
   const { p, o, N, pitch } = sim;
@@ -305,6 +340,45 @@ function step(sim, joints, cfg, dt, anchorNow, ph) {
       if (hl > 0.5) { const A = 850 * env * env / hl; fx = hx * A; fy = hy * A; fz = hz * A; }
     }
   }
+  // ---- HANDLED, NOT DANGLED ------------------------------------------------
+  // A rider who knows the chain does not let it hang: it is WRAPPED round the
+  // fist (a coil of up to COIL_TURNS turns round the wrist, a short tail
+  // free), it is UNWOUND on the wind-up, SHOT OUT straight and rigid along the
+  // swing for the hit -- a whip-crack, not a rope -- then yanked back and
+  // wrapped again. The coil and the shot are kinematic targets blended onto the
+  // Verlet particles, so the chain still carries the swing's momentum in and
+  // out of them.
+  // wrapping is quick but never instant: a swing cut short re-coils in 0.18 s
+  const Kw = coilCount(sim, ph);
+  if (sim.kCur == null || Kw < sim.kCur) sim.kCur = Kw;
+  else sim.kCur = Math.min(Kw, sim.kCur + dt * coilMax(sim) / 0.18);
+  const K = sim.kCur;
+  const cf = joints.chain.matrixWorld.elements;
+  _ax.set(cf[0], cf[1], cf[2]).normalize();          // across the fist
+  _ay.set(cf[4], cf[5], cf[6]).normalize();          // up the forearm
+  _az.set(cf[8], cf[9], cf[10]).normalize();
+  let shot = 0;
+  if (ph >= 0) {
+    shot = ph < 0.33 ? 0 : ph < 0.43 ? smooth((ph - 0.33) / 0.1) : ph < 0.57 ? 1 : ph < 0.66 ? 1 - smooth((ph - 0.57) / 0.09) : 0;
+    // THE SHOT'S LINE: out to the side the fist is on (where the target is --
+    // combat.js swings with the hand on the target's side), level, SWEEPING
+    // from a little behind square to well forward across the strike, so the
+    // straight chain lashes through the target like a blade, tip first
+    const R = sim.root ? sim.root.matrixWorld.elements : null;
+    if (R) {
+      _rx.set(R[0], 0, R[2]).normalize(); _rz.set(R[8], 0, R[10]).normalize();
+      if (ph < 0.12 || !sim.aimed) {
+        const S = ns > 0 ? _sph[0] : null;
+        const lx = S ? (anchorNow.x - S.x) * _rx.x + (anchorNow.z - S.z) * _rx.z : 1;
+        sim.side = lx >= 0 ? 1 : -1;
+        sim.aimed = true;
+      }
+      const sw = -0.45 + 1.25 * smooth((ph - 0.33) / 0.33);
+      sim.sdir.copy(_rx).multiplyScalar(sim.side * Math.cos(sw)).addScaledVector(_rz, Math.sin(sw));
+      sim.sdir.y = 0.06; sim.sdir.normalize();
+    }
+  } else sim.aimed = false;
+  sim.shot = shot;
   const iters = 3;
   for (let s = 1; s <= n; s++) {
     const k = s / n;
@@ -360,7 +434,30 @@ function step(sim, joints, cfg, dt, anchorNow, ph) {
         o[j] += (p[j] - o[j]) * 0.25; o[j + 2] += (p[j + 2] - o[j + 2]) * 0.25;
       }
     }
-    for (let i = 0; i < N; i++) {
+    // THE SHOT: every free link pulled onto the straight line out of the fist
+    if (shot > 0 && sim.aimed) {
+      const g = 1 - Math.exp(-70 * shot * h), D = sim.sdir;
+      for (let i = 1; i <= N; i++) {
+        const j = i * 3, r = i * pitch;
+        p[j] += (px + D.x * r - p[j]) * g; p[j + 1] += (py + D.y * r - p[j + 1]) * g; p[j + 2] += (pz + D.z * r - p[j + 2]) * g;
+      }
+    }
+    // THE COIL: the first K links wrapped round the wrist, riding with the fist
+    const K0 = Math.ceil(K);
+    for (let i = 1; i <= K0 && i <= N; i++) {
+      const w = Math.min(1, K - i + 1);
+      if (w <= 0) break;
+      helix(sim, i, px, py, pz, _hp);
+      const j = i * 3;
+      const ox = p[j] - o[j], oy = p[j + 1] - o[j + 1], oz = p[j + 2] - o[j + 2];
+      p[j] += (_hp.x - p[j]) * w; p[j + 1] += (_hp.y - p[j + 1]) * w; p[j + 2] += (_hp.z - p[j + 2]) * w;
+      if (w >= 1) {
+        // wrapped: it moves with the fist and carries the fist's velocity
+        o[j] = p[j] - (px - (s > 1 ? sim._px : ax0)); o[j + 1] = p[j + 1] - (py - (s > 1 ? sim._py : ay0)); o[j + 2] = p[j + 2] - (pz - (s > 1 ? sim._pz : az0));
+      } else { o[j] = p[j] - ox; o[j + 1] = p[j + 1] - oy; o[j + 2] = p[j + 2] - oz; }
+    }
+    sim._px = px; sim._py = py; sim._pz = pz;
+    for (let i = Math.max(0, Math.floor(K)); i < N; i++) {
       const a = i * 3, b = a + 3;
       const dx = p[b] - p[a], dy = p[b + 1] - p[a + 1], dz = p[b + 2] - p[a + 2];
       const d = Math.sqrt(dx * dx + dy * dy + dz * dz);
@@ -417,6 +514,7 @@ export function chainState(joints) {
     links: s.N, pitch: s.pitch, tipSpeed: s.tipSpeed, tipRel: s.tipRel, tipPeak: s.tipPeak, resets: s.resets,
     tip: [s.p[t], s.p[t + 1], s.p[t + 2]], anchor: s.anchor.toArray(),
     finite: Array.prototype.every.call(s.p, Number.isFinite),
+    shot: s.shot || 0, coiled: s.ph >= 0 ? coilCount(s, s.ph) : coilMax(s),
     span: Math.hypot(s.p[t] - s.p[0], s.p[t + 1] - s.p[1], s.p[t + 2] - s.p[2]),
   };
 }

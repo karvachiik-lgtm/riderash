@@ -1652,6 +1652,11 @@ function stepGame(dt) {
       const dir = target.owner.forward.clone().multiplyScalar(a.along >= 0 ? 0.6 : -0.6);
       dir.x += side * 0.5; dir.y = 0.5;
       fx.spark(at, dir, n, a.name === 'chain' ? 1.7 : 1.0);
+      // the chain's TIP is what hurts: a second, hotter burst where it landed
+      if (a.name === 'chain') {
+        const cs = chainState(player.rider && player.rider.userData && player.rider.userData.joints);
+        if (cs && cs.finite) fx.spark(new THREE.Vector3(cs.tip[0], cs.tip[1], cs.tip[2]), dir, 14, 2.1);
+      }
       audio.impact(a.name === 'chain' ? 1.3 : a.name === 'kick' ? 1.0 : 0.7, a.name);
       if (a.name === 'chain') audio.oneShot('swing', 0.8, 1.0);
     },

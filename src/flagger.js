@@ -91,6 +91,12 @@ export const FLAG_OUTFITS = {
     look: { top: 'vest', bottom: 'shorts', hair: 'long', hairColor: 0x6a1a1a, tattoo: 'sleeve', inkColor: 0x121212,
             glasses: 'shades', scarf: 'bandana', scarfColor: 0xb3261e, chain: 'silver', earring: true,
             gloves: 'fingerless', gloveColor: 0x121314, shoes: 'boots', bootColor: 0x121314 } },
+  // the title screen's rider: black leathers, jeans, boots, keys round her finger
+  Leathers: { height: 1.74, skin: 0xe0ac87, pose: 'rowdy', seat: 1.5,
+    colors: { jacket: 0x151517, pants: 0x2e3b52, accent: 0x9a9ea3 },
+    look: { top: 'leather', bottom: 'jeans', hair: 'long', hairColor: 0x2a1a14, glasses: 'shades',
+            chain: 'silver', earring: true, gloves: 'fingerless', gloveColor: 0x151517,
+            shoes: 'boots', bootColor: 0x151517 } },
 };
 // Race to race, alternate the looks so two races in a row never feel alike.
 export const FLAG_OUTFIT_ORDER = ['Sundress', 'Rowdy', 'Stars & Stripes', 'Grid Queen', 'Cowgirl', 'Summer Denim',
@@ -113,7 +119,7 @@ const MOOD_OF = {
   Sundress: 'sway', Riviera: 'sway', 'Beach Day': 'sway', Tropical: 'sway',
   'Grid Queen': 'bold', 'Stars & Stripes': 'bold', 'Rock Chick': 'bold',
   'Summer Denim': 'playful', 'Polka Dot': 'playful', Cowgirl: 'playful', 'Denim Days': 'playful',
-  Rowdy: 'rowdy',
+  Rowdy: 'rowdy', Leathers: 'rowdy',
 };
 // Free-hand (left arm) targets, in the torso frame: +x her left, +y up, +z front.
 const GESTURES = {
@@ -123,6 +129,8 @@ const GESTURES = {
   point: { dir: [0.2, 0.15, 1], hint: [0, 1, 0], flex: 0.08, rate: 10 },
   hat:   { dir: [0.55, 0.45, 0.6], hint: [-0.4, 0.9, 0], flex: 1.95, rate: 6 },     // fingers to the brim
 };
+
+const _tv = new THREE.Vector3(), _tl = new THREE.Vector3();
 
 /** An arm that EASES to its target pose instead of snapping (armAim is absolute). */
 class ArmEase {
@@ -486,6 +494,44 @@ export class Flagger {
       j.neck.rotation.z += M.headTilt * (this._g === 'hair' ? 1.8 : 1) * Math.sign(this._w || 1);
     }
     if (M.nod && j.head) j.head.rotation.x += 0.05 * Math.sin(this._swayPh * 2);
+  }
+
+  /**
+   * THE TITLE SCREEN: she stands on the road in the left foreground of the
+   * menu shot, facing the lens, hip cocked, keys going round her finger.
+   * `at` is where her feet are (main.js picks it per shot, from the camera);
+   * `on` false hides her (racing, the intro, a portrait phone).
+   */
+  titleUpdate(dt, on, at, eye) {
+    if (!on || !at) { if (this._title) { this._title = false; this.group.visible = false; } return; }
+    if (!this._title) {
+      this.dress('Leathers');
+      this._initMotion();
+      this.body.traverse((n) => { if (n.isMesh) n.castShadow = false; });
+      this._title = true;
+    }
+    this.group.visible = true;
+    this.t += dt;
+    const j = this.joints, b = this.body, t = this.t;
+    restoreRest(b);
+    b.position.set(0, 0, 0);
+    poseStanding(j, 0, 0);
+    this._body(dt, 1, -1);
+    // elbow at her side, forearm up by the shoulder, the chain whirling
+    // round her finger where the camera can see it
+    this._arm.right.to([-0.25, -0.8, 0.35], [0.3, -0.2, 1], 2.05 + 0.06 * Math.sin(t * 13), 0);
+    if (this.keys) this.keys.userData.arm.rotation.x = -t * 13;
+    this._g = 'hip';                                   // the free hand stays on the hip
+    this._gesture(dt, -1);
+    this._arm.right.apply(j, 'right', dt);
+    this._arm.left.apply(j, 'left', dt);
+    this._look(dt, -1);
+    // facing the lens, turned a touch towards the middle of the frame
+    const g = this.group;
+    g.position.copy(at);
+    _tl.set(eye.x, at.y, eye.z);
+    g.lookAt(_tl);
+    g.rotateY(0.45);
   }
 
   /**

@@ -1305,7 +1305,7 @@ let idleAngle = 0;
 // camera tours the course -- a slow reveal of each landmark (landmarks.js
 // shots) from the road beside it, alternating with low glides along the
 // tarmac. Hard cuts between shots, each ~6.5 s, looping.
-const ATTRACT = { SHOT: 6.5 };
+const ATTRACT = { SHOT: 6.5, HERO: 22 };
 let attractT = 0, attractI = -1, attractShot = null;
 function pickAttractShot(i) {
   const shots = (landmarks && landmarks.shots) || [];
@@ -1318,19 +1318,43 @@ function pickAttractShot(i) {
     return { kind: 'reveal', name: sh.name, s0: Math.max(0, best - Math.max(260, sh.r * 1.4)), target: sh.centre.clone(), r: sh.r };
   }
   const s0 = 200 + ((i * 1237) % Math.max(400, L - 600));
+  // THE MENU (the intro is over): a held shot on the road with the rider in
+  // the leathers standing in it -- a moving camera would slide her along
+  if (!document.body.classList.contains('attract')) return { kind: 'hero', name: null, s0: straightAt(s0, L) };
   return { kind: 'glide', name: null, s0 };
 }
+// a stretch that is straight for the next ~40 m (the hero shot looks down it)
+function straightAt(s0, L) {
+  for (let k = 0; k < 40; k++) {
+    const s = 200 + ((s0 - 200 + k * 97) % Math.max(400, L - 600));
+    const a = centreTangent(-s), b = centreTangent(-(s + 40));
+    if (a.x * b.x + a.z * b.z > 0.985) return s;
+  }
+  return s0;
+}
+const _heroV = new THREE.Vector3();
+let titleGirl = null;
+function updateTitleGirl(dt, S) {
+  const title = document.getElementById('title');
+  const on = !!(S && S.kind === 'hero' && S.girl && !state.running && title && title.classList.contains('on')
+    && !document.body.classList.contains('attract') && camera.aspect > 0.9);
+  if (on && !titleGirl) { try { titleGirl = new Flagger(scene); window.__TITLEGIRL__ = titleGirl; } catch (e) { console.warn('[riderash] title rider:', e); titleGirl = false; } }
+  if (titleGirl) titleGirl.titleUpdate(dt, on, S && S.girl, camera.position);
+}
+
 function updateCameraIdle(dt) {
-  if (state.running) return;
+  if (state.running) { updateTitleGirl(dt, null); return; }
   attractT += dt;
-  if (!attractShot || attractT > ATTRACT.SHOT) {
+  const menu = !document.body.classList.contains('attract');
+  const dur = attractShot && attractShot.kind === 'hero' ? ATTRACT.HERO : ATTRACT.SHOT;
+  if (!attractShot || attractT > dur || (menu && attractShot.kind !== 'hero')) {
     attractT = 0; attractI++;
     if (attractI >= 3 && attractDone) { attractDone(); attractDone = null; }
     attractShot = pickAttractShot(attractI);
     const sub = document.getElementById('introsub');
     if (sub) { sub.style.opacity = attractShot.name ? 1 : 0; if (attractShot.name) sub.textContent = attractShot.name + '  ·  ' + ((MAPS[career.event.map]) || {}).label; }
   }
-  const S = attractShot, u = attractT / ATTRACT.SHOT;
+  const S = attractShot, u = attractT / (S.kind === 'hero' ? ATTRACT.HERO : ATTRACT.SHOT);
   if (S.kind === 'reveal') {
     // dolly along the road, rising, the landmark held in frame
     const s = S.s0 + u * Math.max(120, S.r * 0.7);
@@ -1340,6 +1364,21 @@ function updateCameraIdle(dt) {
     const out = roadProfile().cliff ? 30 : -8, up = roadProfile().cliff ? 42 : 3;
     camera.position.set(c.x + toT.x * out, c.y + up + u * 16, c.z + toT.z * out);
     camera.lookAt(S.target.x, S.target.y + S.r * 0.15, S.target.z);
+  } else if (S.kind === 'hero') {
+    // held, eye height, a slow breath of a push-in down the road
+    const s = S.s0 + u * 2.5;
+    const c = centreAt(-s), a = centreAt(-(s + 30)), t = centreTangent(-s);
+    camera.position.set(c.x + t.z * 1.4, c.y + 1.3 + Math.sin(attractT * 0.6) * 0.03, c.z - t.x * 1.4);
+    camera.lookAt(a.x, a.y + 1.75, a.z);
+    if (!S.girl) {
+      // her spot: 5 m out, 78% of the way to the left edge of the frame --
+      // clear of the menu column, about a third of the screen tall
+      camera.updateMatrixWorld();
+      const D = 5.0, halfW = D * Math.tan(camera.fov * Math.PI / 360) * camera.aspect;
+      _heroV.set(-halfW * 0.78, 0, -D).applyQuaternion(camera.quaternion);
+      const gx = camera.position.x + _heroV.x, gz = camera.position.z + _heroV.z;
+      S.girl = new THREE.Vector3(gx, centreAt(-(S.s0 + D)).y, gz);
+    }
   } else {
     // a low, fast glide along the tarmac, looking down the road
     const s = S.s0 + u * 150;
@@ -1350,6 +1389,7 @@ function updateCameraIdle(dt) {
     camera.rotateZ(Math.sin(u * Math.PI) * 0.05);
   }
   if (Math.abs(camera.fov - 50) > 0.1) { camera.fov = 50; camera.updateProjectionMatrix(); }
+  updateTitleGirl(dt, S);
 }
 // THE INTRO: once a session, the flythrough runs letterboxed with the title,
 // the menu hidden; any key or tap (or ~20 s) hands over to the menu.

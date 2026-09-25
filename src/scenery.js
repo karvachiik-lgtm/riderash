@@ -37,7 +37,7 @@
 //   6. Rebuilt when the course changes (`setCourse`), deterministic per map id.
 import * as THREE from 'three';
 import { CFG } from './config.js';
-import { centreAt, centreTangent } from './level.js';
+import { centreAt, centreTangent, roadProfile } from './level.js';
 import { edgeAt, crossingNear, crossings } from './lanes.js';
 import { BIOMES } from './worldspine.js';
 import { texMaterial } from './textures.js';
@@ -137,6 +137,16 @@ const THEMES = {
     fence: null, pole: 0, farms: 0, biz: 0, billboards: 1.6, animals: null, vines: 0, street: true,
     ground: 0x5f6a4a, terrain: { ampL: 6, ampR: 6, bump: 1 },
     ridge: { col: 0x6a7280, h: [140, 300], snow: false, mesa: false },
+  },
+  // the ghat: the terrain here is the cliff itself (see reliefAt's cliff mode);
+  // trees cling to the wall side, nothing stands on the drop side
+  ghat: {
+    trees: [['tree_oak:1', 3], ['tree_pine:1', 2], ['tree_redwood:1', 1]],
+    near: 0.5, far: 36, farMax: 300, shrubs: 1.4, shrubKeys: [['shrub:0', 3], ['shrub:1', 1]],
+    rocks: 0.9, rockTint: [0.82, 0.62, 0.52], boulder: [0.8, 3.2],
+    fence: null, pole: 0, farms: 0, biz: 0, billboards: 0.05, animals: null, vines: 0.3,
+    ground: 0x4f6a3a, terrain: { ampL: 60, ampR: 60, bump: 5, steep: true },
+    ridge: { col: 0x5f7a6a, h: [300, 700], snow: false, mesa: false },
   },
   canyon: {
     trees: [['cactus_saguaro:0', 2], ['joshua_tree:0', 1]],
@@ -412,7 +422,29 @@ export class Scenery {
 
     // Terrain relief relative to the road deck at this z. Analytic, so props
     // beyond the verge can be seated on exactly the surface the skirt draws.
+    // A CLIFF COURSE (level.js road profile): the terrain starts at the
+    // shoulder, not 35 m out -- it IS the cliff face on one side and the rock
+    // wall on the other. Scenery lat + is the rider's LEFT, the profile's
+    // cliff.side + is the rider's RIGHT.
+    const CL = roadProfile().cliff;
+    const CT0 = CL ? edgeAt(0, 1) + CFG.KERB_W + 2.2 : T0;
+    const dropSign = CL ? -CL.side : 0;
+    const cliffRelief = (s, lat) => {
+      const a = Math.abs(lat);
+      if (a <= CT0) return 0;
+      const ph = lat > 0 ? 1.7 : 4.1;
+      const n = Math.sin(s * 0.0093 + a * 0.011 + ph) * 0.5 + Math.sin(s * 0.023 - a * 0.031 + ph * 2) * 0.3 + Math.sin(s * 0.0041 + ph * 3) * 0.4;
+      const ledge = Math.sin(s * 0.061 + a * 0.4) * 0.8 + Math.sin(s * 0.17) * 0.5;       // broken rock, not a smooth fillet
+      if (Math.sign(lat) === dropSign) {
+        // sheer within ~16 m, then the scree runs out to the valley floor
+        const u = Math.pow(smooth(CT0, CT0 + 16, a), 0.5);
+        return -CL.drop * u * (0.9 + 0.1 * n) - 12 * smooth(CT0 + 40, 420, a) + ledge * (1 - u) * 2;
+      }
+      // the wall: up at once, then the mountainside keeps climbing
+      return CL.wall * Math.pow(smooth(CT0, CT0 + 7, a), 0.6) * (0.85 + 0.25 * n) + 90 * smooth(CT0 + 15, 260, a) + ledge * 1.5;
+    };
     const reliefAt = (s, lat, tb) => {
+      if (CL) return cliffRelief(s, lat);
       const a = Math.abs(lat);
       if (a <= T0) return 0;
       const L = lat > 0;
@@ -435,7 +467,7 @@ export class Scenery {
 
     const _c = new THREE.Vector3(), _t = new THREE.Vector3();
     const frame = (s) => { centreAt(-s, _c); centreTangent(-s, _t); return { cx: _c.x, cy: _c.y, cz: _c.z, tx: _t.x, tz: _t.z, nx: -_t.z, nz: _t.x }; };
-    const groundY = (s, lat, tb, f) => f.cy - 0.06 + (Math.abs(lat) > T0 ? reliefAt(s, lat, tb) - 0.04 : 0);
+    const groundY = (s, lat, tb, f) => f.cy - 0.06 + (Math.abs(lat) > CT0 ? reliefAt(s, lat, tb) - 0.04 : 0);
 
     // Occupancy: building footprints, so trees do not grow through barns.
     const reserved = [];
@@ -462,6 +494,7 @@ export class Scenery {
       // the cross road at a crossroads stays clear for its length
       if (Math.abs(lat) < 230 && crossingNear(s, 24)) return;
       if (Math.abs(lat) < KERB + 2.2 && !o.allowNear) return;    // never on the road or shoulder
+      if (CL && Math.sign(lat) === dropSign) return;               // nothing stands over the drop
       const tb = o.tb || themeAt(s);
       const f = frame(s);
       const y = (o.y !== undefined ? o.y : groundY(s, lat, tb, f)) - (o.sink || 0);
@@ -741,7 +774,10 @@ export class Scenery {
       }
     }
 
-    // ---- 9. Terrain skirt, per chunk.
+    // ---- 9. Terrain skirt, per chunk. (A cliff course packs its columns at the
+    // road, where the face and the wall are.)
+    const COLS = CL ? [CT0, CT0 + 1.5, CT0 + 3.5, CT0 + 6, CT0 + 9, CT0 + 13, CT0 + 18, CT0 + 26, 40, 60, 90, 140, 220, 330, 480, 650] : TCOLS;
+    const ROCK = new THREE.Color(0x7a624e), ROCK2 = new THREE.Color(0x6e5c4e);
     const terrainGeos = [];
     for (let ci = 0; ci < nChunks; ci++) {
       const s0 = -PRE + ci * CHUNK, s1 = Math.min(sEnd + 40, s0 + CHUNK);
@@ -760,20 +796,29 @@ export class Scenery {
           // -150 m) there is no verge either, so the skirt's inner column runs
           // to the centreline and the look-back camera sees ground, not the
           // beach plane.
-          for (const a0 of TCOLS) {
-            const a = (a0 === T0 && s < -165) ? 0.01 : a0;
+          for (const a0 of COLS) {
+            const a = (a0 === CT0 && s < -165) ? 0.01 : a0;
             const lat = side * a;
             const h = reliefAt(s, lat, tb);
             pos.push(f.cx + f.nx * lat, f.cy - 0.1 + h, f.cz + f.nz * lat);
-            const u = smooth(T0, 160, a);
+            const u = smooth(CT0, 160, a);
             const n = 0.5 + 0.5 * Math.sin(s * 0.017 + a * 0.05) * Math.sin(s * 0.0061 - a * 0.013 + side);
             cc.copy(cv).lerp(cg, u).multiplyScalar(0.88 + n * 0.22);
             if (tb.cur.ridge.snow && h > 34) cc.lerp(new THREE.Color(0xd8dde2), smooth(34, 48, h));
+            if (CL) {
+              // bare rock where it is steep: the drop's face and the cut wall
+              const face = Math.sign(lat) === dropSign ? 0.85 * (1 - smooth(CT0 + 18, CT0 + 60, a)) : 0.8 * (1 - smooth(CT0 + 8, CT0 + 30, a));
+              cc.lerp(Math.sign(lat) === dropSign ? ROCK2 : ROCK, face);
+              // strata: horizontal bands down the face, not vertical streaks
+              cc.multiplyScalar(1 - face * (0.12 + 0.1 * Math.sin(h * 0.45 + s * 0.004)));
+            }
             col.push(cc.r, cc.g, cc.b);
-            uv.push(lat * 0.037, -s * 0.018);
+            // on a cliff face the lateral barely changes while the height does:
+            // tile by the distance down the face, or the texture streaks
+            uv.push((CL ? side * (a + Math.abs(h)) : lat) * 0.037, -s * 0.018);
           }
         }
-        const W = TCOLS.length;
+        const W = COLS.length;
         for (let r = 0; r < rows; r++) for (let k = 0; k < W - 1; k++) {
           const a = base + r * W + k, b = a + 1, c2 = a + W, d = c2 + 1;
           // winding so the upward face is front-facing on both sides

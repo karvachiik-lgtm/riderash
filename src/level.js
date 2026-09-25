@@ -145,13 +145,55 @@ const mat = (c, r, m) => {
 // The envelope is zero at z = 0, so every race still starts on a straight.
 // Height is untouched, so ROAD_Y_MIN below does not change.
 export const TWIST = { AMP: 14, FREQ: 0.0125, ENV: 0.0009 };
-export function centreAt(z, out = new THREE.Vector3()) {
+// ---- ROAD PROFILES: each course may have its own road --------------------------
+//
+// Every course used to share this one road; only the dressing differed. A
+// profile is the centreline's x(z) and y(z), the lowest the deck can go (for
+// the backdrop), and the course's CLIFF, if it has one. `default` is the road
+// above, unchanged to the digit. setRoadProfile() is called per race (main.js,
+// beside setLanePlan) and returns true when the road must be rebuilt.
+function xDefault(z) {
   const env = Math.sin(z * TWIST.ENV);
-  const x = Math.sin(z * 0.0067) * 18 + Math.sin(z * 0.0024 + 1.7) * 58
-          + env * env * TWIST.AMP * Math.sin(z * TWIST.FREQ + 0.6);
-  const y = Math.sin(z * 0.0016 + 0.4) * 2.6 + Math.sin(z * 0.0043) * 0.9
-          + Math.sin(z * 0.011 + 2.1) * 2.3 + Math.sin(z * 0.042 + 1.3) * 0.55;
-  return out.set(x, y, z);
+  return Math.sin(z * 0.0067) * 18 + Math.sin(z * 0.0024 + 1.7) * 58
+       + env * env * TWIST.AMP * Math.sin(z * TWIST.FREQ + 0.6);
+}
+function yDefault(z) {
+  return Math.sin(z * 0.0016 + 0.4) * 2.6 + Math.sin(z * 0.0043) * 0.9
+       + Math.sin(z * 0.011 + 2.1) * 2.3 + Math.sin(z * 0.042 + 1.3) * 0.55;
+}
+// THE GHAT: a road cut into a mountainside. MEASURED shape (tools: ghatshape):
+// tightest bend R 110 m (~31 m/s at 0.9 g, against R ~460 m on the other
+// courses), headings to 31 deg off the valley axis, 7.2% grades, +/-32 m of
+// climb and descent. A straight grid (the bends ease in over 80-700 m). A true
+// switchback cannot be drawn -- the road is x as a function of z -- so the
+// drama is the tight S-bends and what is beside them: rock wall on one side,
+// a sheer drop on the other.
+function xGhat(z) {
+  const env = 0.75 + 0.25 * Math.sin(z * 0.0011 + 0.4);
+  const u = Math.min(1, Math.max(0, (z - 80) / 620)), ramp = u * u * (3 - 2 * u);
+  return ramp * (env * 34 * Math.sin(z * 0.0158 + 0.3) + 26 * Math.sin(z * 0.0037 + 1.1));
+}
+function yGhat(z) { return 30 * Math.sin(z * 0.00165 - 1.2) + 2.2 * Math.sin(z * 0.011); }
+
+export const ROAD_PROFILES = {
+  default: { id: 'default', x: xDefault, y: yDefault, yMin: -(2.6 + 0.9 + 2.3 + 0.55), cliff: null },
+  // cliff.side: +1 drops on the rider's right. verge: metres of shoulder before
+  // the drop / the rock face. drop: how far the valley floor is below the deck.
+  ghat: { id: 'ghat', x: xGhat, y: yGhat, yMin: -(30 + 2.2),
+    cliff: { side: 1, verge: 1.6, wallVerge: 1.4, drop: 140, wall: 34 } },
+};
+let PROF = ROAD_PROFILES.default;
+/** Pick the road for a course. Returns true when it changed (rebuild the road). */
+export function setRoadProfile(id) {
+  const next = ROAD_PROFILES[id] || ROAD_PROFILES.default;
+  if (next === PROF) return false;
+  PROF = next;
+  return true;
+}
+export function roadProfile() { return PROF; }
+
+export function centreAt(z, out = new THREE.Vector3()) {
+  return out.set(PROF.x(z), PROF.y(z), z);
 }
 
 export function centreTangent(z, out = new THREE.Vector3()) {
@@ -613,12 +655,15 @@ export function buildRoad() {
     const lo = (a) => (x) => s * (a + sOff(x, s));
     const inS = shoulderOff - shoulderW / 2, outS = shoulderOff + shoulderW / 2;
     const inV = vergeOff - vergeW / 2, outV = vergeOff + vergeW / 2;
+    // a cliff course has no verge: past the shoulder is the drop, or the rock
+    // (scenery.js draws both from the shoulder's outer edge)
+    const withVerge = !PROF.cliff;
     if (s > 0) {
       g.add(buildF(lo(inS), lo(outS), shoulder, -0.02, 0.090));
-      g.add(buildF(lo(inV), lo(outV), verge, -0.06, 0.018));
+      if (withVerge) g.add(buildF(lo(inV), lo(outV), verge, -0.06, 0.018));
     } else {
       g.add(buildF(lo(outS), lo(inS), shoulder, -0.02, 0.090));
-      g.add(buildF(lo(outV), lo(inV), verge, -0.06, 0.018));
+      if (withVerge) g.add(buildF(lo(outV), lo(inV), verge, -0.06, 0.018));
     }
   }
 
@@ -658,6 +703,7 @@ export function buildRoadside(seed = 7) {
     const c = centreAt(z), t = centreTangent(z);
     const nx = -t.z, nz = t.x;
     if (crossings().some((cs) => Math.abs(-z - cs) < CROSS_HALF + 3)) continue;   // open at a crossroads
+    if (PROF.cliff) continue;          // a cliff road's rail (with its gaps) is ghat.js's
     const off = s * (edgeAt(Math.max(0, -z), -s) + CFG.KERB_W + 0.55);
     p.set(c.x + nx * off, c.y + 0.37, c.z + nz * off);
     q.setFromEuler(new THREE.Euler(0, Math.atan2(t.x, t.z), 0));
@@ -720,10 +766,12 @@ export function buildRoadside(seed = 7) {
     // of how many boards there are -- rather than 6 per board.
     const sites = [];
     for (let z = -40; z > -N * SEG; z -= 130) {
-      const s = r() > 0.5 ? -1 : 1;
+      const rs = r() > 0.5 ? -1 : 1;            // (drawn either way: the default road stays identical)
+      // a cliff road's chevrons stand at the drop, on the rail line
+      const s = PROF.cliff ? -PROF.cliff.side : rs;
       const c = centreAt(z), t = centreTangent(z);
       const nx = -t.z, nz = t.x;
-      const off = s * (edgeAt(Math.max(0, -z), -s) + CFG.KERB_W + 2.3);
+      const off = s * (edgeAt(Math.max(0, -z), -s) + CFG.KERB_W + (PROF.cliff ? 1.25 : 2.3));
       sites.push({
         x: c.x + nx * off, y: c.y, z: c.z + nz * off,
         ry: Math.atan2(t.x, t.z) + Math.PI / 2 * s,
@@ -822,6 +870,7 @@ export function buildRoadside(seed = 7) {
 // ---- distant scenery: the coast. Silhouette only, and it must read as
 // DISTANCE, not as a wall. Every trap here is the same one: an object big
 // enough to fill the frame is a wall, however you name it.
+const BEACH_Y_SEA = (P) => P.yMin - P.cliff.drop - 6;   // under the valley floor: no sea on a mountain
 export function buildBackdrop(seed = 11) {
   const r = rng(seed);
   const g = new THREE.Group();
@@ -842,7 +891,7 @@ export function buildBackdrop(seed = 11) {
   // horizon rather than a surface you stand on ---
   const seaMesh = new THREE.Mesh(new THREE.PlaneGeometry(12000, 12000, 1, 1), sea);
   seaMesh.rotation.x = -Math.PI / 2;
-  seaMesh.position.set(0, -18, -CFG.ROAD_SEGS * CFG.SEG / 2);
+  seaMesh.position.set(0, PROF.cliff ? BEACH_Y_SEA(PROF) : -18, -CFG.ROAD_SEGS * CFG.SEG / 2);
   g.add(seaMesh);
 
   // --- the coast: a low band of beach either side, so the road is not a
@@ -870,8 +919,9 @@ export function buildBackdrop(seed = 11) {
   // road's LOWEST POSSIBLE point rather than at a number that happened to work
   // at z = 0. Derived from the amplitudes rather than measured off one frame,
   // so changing the road's shape cannot quietly re-bury it.
-  const ROAD_Y_MIN = -(2.6 + 0.9 + 2.3 + 0.55);  // centreAt's worst case, by construction
-  const BEACH_Y = ROAD_Y_MIN - 0.35;        // clear of the verge, which rides 0.06 below the deck
+  const ROAD_Y_MIN = PROF.yMin;              // centreAt's worst case, by construction (per road profile)
+  // a cliff course: the far ground is the valley floor, far below the deck
+  const BEACH_Y = ROAD_Y_MIN - 0.35 - (PROF.cliff ? PROF.cliff.drop : 0);
   for (const s of [-1, 1]) {
     const strip = new THREE.Mesh(new THREE.PlaneGeometry(600, CFG.ROAD_SEGS * CFG.SEG + 600), beach);
     strip.rotation.x = -Math.PI / 2;

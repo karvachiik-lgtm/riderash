@@ -46,6 +46,7 @@ const COURSES = [
   { map: 'valley',    name: 'NAPA VALLEY' },
   { map: 'peninsula', name: 'PENINSULA' },
   { map: 'desert',    name: 'PALM DESERT' },
+  { map: 'ghat',      name: 'GHAT ROAD' },     // the finale of every level: a cliff road
 ];
 
 // `reference` is the ABSOLUTE pace the field is built around at this level: the

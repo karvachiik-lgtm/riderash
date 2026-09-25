@@ -25,7 +25,8 @@
 
 import * as THREE from 'three';
 import { CFG } from './config.js';
-import { centreAt, centreTangent, headAt } from './level.js';
+import { centreAt, centreTangent, headAt, roadProfile } from './level.js';
+import { cliffGapAt } from './ghat.js';
 
 const CFG_ROAD_W_HALF = CFG.ROAD_W / 2;
 // THE EDGE MOVES (lanes.js): the tarmac edge on the side a body is on, at its
@@ -747,6 +748,7 @@ export class BikePhys {
    */
   reset(opts = {}) {
     this._kappa = 0;
+    this.overEdge = false; this.railHit = 0; this.wallHit = 0;
     this.s = opts.s ?? 0;
     this.lateral = opts.lateral ?? 0;
     this.speed = opts.speed ?? 0;
@@ -1741,6 +1743,35 @@ export class BikePhys {
     // so this is a no-op at the default and a one-line tuning surface after.
     this.lateralV *= (1 - h * (PHYS.LATERAL_DAMP * grip));
 
+    // ---- THE CLIFF ROAD (level.js profile with a cliff; ghat.js) ----------
+    // The drop side has a guard rail on the shoulder -- a hard stop that
+    // scrapes speed and throws you back -- except through its GAPS, where past
+    // the shoulder's edge there is only air: `overEdge`, and main.js does the
+    // rest. The other side is the cut rock face, a hard wall. Every bike obeys
+    // it: the pack, the cop, and you.
+    const CLF = roadProfile().cliff;
+    if (CLF && !this.overEdge) {
+      const sd = Math.sign(this.lateral) || 1;
+      const e = edgeAt(Math.max(0, this.s), sd);
+      if (sd === CLF.side) {
+        if (!cliffGapAt(this.s)) {
+          const rail = e + CFG.KERB_W + 0.55 - 0.32;          // the bike's half-width inside the beam
+          if (this.lateral * sd > rail) {
+            const v = this.lateralV * sd;
+            this.lateral = sd * rail;
+            if (v > 0) { this.lateralV = -sd * v * 0.25; this.railHit = Math.max(this.railHit, v); this.speed *= 1 - Math.min(0.25, v * 0.02); }
+          }
+        } else if (this.lateral * sd > e + CFG.KERB_W + 2.0) this.overEdge = true;   // centre past the lip (terrain drops at +2.2)
+      } else {
+        const wall = e + CFG.KERB_W + 2.2 - 0.35;
+        if (this.lateral * sd > wall) {
+          const v = this.lateralV * sd;
+          this.lateral = sd * wall;
+          if (v > 0) { this.lateralV = -sd * v * 0.2; this.wallHit = Math.max(this.wallHit, v); this.speed *= 1 - Math.min(0.35, v * 0.03); }
+        }
+      }
+    }
+
     // ---- 4. surfaces ------------------------------------------------------
     const halfRoad = edgeFor(this.s, this.lateral);
     const wasOnRoad = this.onRoad;
@@ -1784,7 +1815,11 @@ export class BikePhys {
     // which is why scraping a wall at a shallow angle is survivable and hitting
     // it square is not.
     const wall = halfRoad + CFG_KERB_W + 0.9;
-    let railHit = this.hitRail(wall);
+    // (on a cliff course, through a gap in the rail on the drop side there is
+    // no wall at all -- that is the point of the gap; see THE CLIFF ROAD above)
+    const CLG = roadProfile().cliff;
+    const inGap = CLG && Math.sign(this.lateral) === CLG.side && cliffGapAt(this.s);
+    let railHit = inGap ? 0 : this.hitRail(wall);
     // THE MEDIAN (lanes.js): a divided section's barrier is a wall on the
     // centreline. The side a body is kept on is the one it was last on, so it
     // meets the barrier from its own carriageway rather than teleporting.

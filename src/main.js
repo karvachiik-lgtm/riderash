@@ -5,7 +5,8 @@ import { makeSpec } from './bodyspec.js';
 import { RIDING } from './reach.js';
 import { Showroom } from './showroom.js';
 import { PLAYER_CHAIN, chainState } from './chainweapon.js';   // [chain agent]
-import { buildRoad, buildRoadside, buildBackdrop, centreAt, centreTangent, headAt } from './level.js';
+import { buildRoad, buildRoadside, buildBackdrop, centreAt, centreTangent, headAt, setRoadProfile, roadProfile } from './level.js';
+import { GhatDress } from './ghat.js';
 import { buildTraffic, updateTraffic, trafficHit, resetTraffic } from './world.js';
 import { buildFinish, placeFinish } from './finishline.js';
 import { TrackDress } from './trackdress.js';
@@ -177,6 +178,7 @@ let hazardView = null;     // oil slicks and gravel on the deck
 let animals = null;        // cows and deer on the rural roads
 let parked = null;         // cars at the kerb in town
 let crestShadows = null;   // a car's shadow shows over a blind crest before the car does
+let backdropGroup = null, ghatDress = null;     // per-course road profile (level.js) dressing
 let roadGroup = null, roadsideGroup = null;   // rebuilt when a course's lane layout differs (lanes.js)
 let raceCounter = 0;       // races started this session, so a replayed event gets a new outfit
 
@@ -224,7 +226,8 @@ const world = {
 
   // who is winning, by distance travelled
   standings() {
-    return [...this.parts].sort((a, b) => b.phys.s - a.phys.s);
+    // a rider who went over the edge is out: last, whatever his distance
+    return [...this.parts].sort((a, b) => ((a.out ? 1 : 0) - (b.out ? 1 : 0)) || (b.phys.s - a.phys.s));
   },
 
   positionOf(p) {
@@ -460,10 +463,10 @@ async function init() {
     if (need > CFG.ROAD_SEGS) CFG.ROAD_SEGS = need;
   }
   // the lane layout of the first course, so the boot road is already right
-  { const ev0 = career.event; setLanePlan(ev0.map, ev0.lenMul); }
+  { const ev0 = career.event; setRoadProfile(ev0.map); setLanePlan(ev0.map, ev0.lenMul); }
   const road = roadGroup = buildRoad();
   const side = roadsideGroup = buildRoadside();
-  const back = buildBackdrop();
+  const back = backdropGroup = buildBackdrop();
   // THE ROADSIDE WORLD (scenery.js) replaces world.js's buildTown/buildHills/
   // buildClutter. It is dressed PER COURSE from the spine's biomes, so it is
   // built here for the course the career will run first (a throwaway spine,
@@ -487,6 +490,7 @@ async function init() {
   try { hazardView = new HazardView(scene); } catch (e) { console.warn('[riderash] hazards:', e); }
   try { crestShadows = new CrestShadows(scene); window.__CREST__ = crestShadows; } catch (e) { console.warn('[riderash] crest shadows:', e); }
   try { parked = new Parked(scene); window.__PARKED__ = parked; } catch (e) { console.warn('[riderash] parked:', e); }
+  try { ghatDress = new GhatDress(scene); } catch (e) { console.warn('[riderash] ghat:', e); ghatDress = null; }
   try { animals = new Animals(scene); window.__ANIMALS__ = animals; } catch (e) { console.warn('[riderash] animals:', e); }
   try { crossTraffic = new CrossTraffic(scene); window.__CROSS__ = crossTraffic; } catch (e) { console.warn('[riderash] cross traffic:', e); crossTraffic = null; }
   // INSTANT REPLAY (replay.js): records the race as it is drawn
@@ -1164,7 +1168,7 @@ function frameBody(dt) {
   // while the player drove away: measured 302 m of separation, which is why the
   // hero read as a tiny speck and then left the frame entirely.
   if (state.running) {
-    updateCamera(dt, state);
+    if (state.plunge) plungeCamera(); else updateCamera(dt, state);
   } else {
     updateCameraIdle(dt);
   }
@@ -1466,7 +1470,11 @@ function stepGame(dt) {
     ? { throttle: 0, brake: 0.35, steer: 0, tuck: false,
         attackPressed: () => false, pressed: {} }
     : input;
-  player.update(dt, gridInput, world, hooks);
+  if (state.plunge) stepPlunge(dt);
+  else {
+    player.update(dt, gridInput, world, hooks);
+    if (player.phys.overEdge && !state.raceOver) startPlunge();
+  }
   // SLIDE DUST. A thrown body scrubbing along the tarmac kicks up grit, and the
   // trail dying away with its speed is half of what reads as "he slid".
   {
@@ -1508,7 +1516,14 @@ function stepGame(dt) {
     if (Number.isFinite(tow)) p.slipstream += (tow - p.slipstream) * Math.min(1, dt * 3.0);
   }
 
-  if (state.countdown <= 0) { for (const r of rivals) r.update(dt, world, hooks); defendPositions(dt); }
+  if (state.countdown <= 0) {
+    for (const r of rivals) {
+      if (r.out) { stepRivalPlunge(r, dt); continue; }          // over the edge: out of the race
+      r.update(dt, world, hooks);
+      if (r.phys.overEdge) startRivalPlunge(r);
+    }
+    defendPositions(dt);
+  }
   // THE POLICE. After the pack, so a bust is judged on this frame's crash.
   if (cop && state.countdown <= 0) {
     const ev = cop.update(dt, player, state.running && !state.raceOver, world.traffic, hooks, state.finishS);
@@ -1518,6 +1533,7 @@ function stepGame(dt) {
     const inList = world.fighters.includes(cop.fighter);
     if (cop.active && !inList) world.fighters.push(cop.fighter);
     else if (!cop.active && inList) world.fighters.splice(world.fighters.indexOf(cop.fighter), 1);
+    if (cop.phys.overEdge && cop.state === 'chase') { cop._leave(); state.warn = 'THE COP WENT OVER THE EDGE'; }
     if (ev === 'arrived') state.warn = 'COPS!';
     else if (ev === 'down') state.warn = 'COP DOWN!';
     else if (ev === 'gone') state.warn = cop.fighter.down ? '' : 'LOST THE COP';
@@ -1919,7 +1935,8 @@ function stepGame(dt) {
   try {
     // The cop is on the radar from the moment he takes up his spot, not only
     // once he is chasing: the ambush is something you should see coming.
-    radar.update(dt, player, cop && cop.present ? [...rivals, cop] : rivals,
+    const live = rivals.filter((r) => !r.out);
+    radar.update(dt, player, cop && cop.present ? [...live, cop] : live,
       [...(world.traffic && world.traffic.userData ? world.traffic.userData.cars : []),
        ...(crossTraffic ? crossTraffic.cars : [])]);
   } catch (e) { /* the radar must never take the frame down */ }
@@ -1973,6 +1990,91 @@ const ORDINALS = (() => {
 })();
 
 // BUSTED: a wreck with a cop in reach. The race is void and the fine is due.
+// OVER THE EDGE (a cliff course: ghat.js gaps, physics overEdge). Road Rash
+// (1994)'s Pacific Coast put you straight out of the race; so does this. The
+// bike and rider leave the road through the gap and fall away from a camera
+// left standing at the edge; then the race is void -- no placing, no prize,
+// and a heavy repair bill.
+const PLUNGE = { TIME: 2.6, OUT: 6, UP: 2.5, G: 9.8, SPIN: 1.6, BILL: 2.5 };
+const _pn = new THREE.Vector3(), _pt = new THREE.Vector3();
+function startRivalPlunge(r) {
+  const p = r.phys, side = (roadProfile().cliff || { side: 1 }).side, f = r.fighter;
+  if ((f.hold || f.heldBy) && f._endHold) f._endHold('break', hooks);
+  r.out = true;
+  f.down = true; f.downTimer = 1e9; f.active = null;
+  centreTangent(-p.s, _pt);
+  r._pl = { t: 0, vx: Math.max(PLUNGE.OUT, Math.abs(p.lateralV || 0)), vy: PLUNGE.UP, v: p.speed * 0.6,
+    n: new THREE.Vector3(_pt.z * side, 0, -_pt.x * side), f: headAt(-p.s, new THREE.Vector3()) };
+  const byPlayer = f.lastHitBy === player.fighter;
+  if (byPlayer) { state.knockDowns++; state.score += 500; }
+  if (Math.abs(p.s - player.phys.s) < 150) {
+    state.warn = byPlayer ? `YOU PUT ${r.name || 'HIM'} OVER THE EDGE` : `${r.name || 'A RIVAL'} WENT OVER THE EDGE`;
+    audio.oneShot('crash', Math.max(0.2, 1 - Math.abs(p.s - player.phys.s) / 150), 0.75);
+  }
+  if (replay) replay.event('crash', 'OVER THE EDGE', f, byPlayer ? 6 : 4);
+}
+function stepRivalPlunge(r, dt) {
+  const P = r._pl, g = r.group;
+  if (!P || !g) return;
+  if (P.t > 3.5) { g.visible = false; return; }
+  P.t += dt; P.vy -= PLUNGE.G * dt; P.v *= Math.max(0, 1 - dt * 0.8);
+  g.position.addScaledVector(P.n, P.vx * dt).addScaledVector(P.f, P.v * dt);
+  g.position.y += P.vy * dt;
+  g.rotation.x += PLUNGE.SPIN * dt; g.rotation.z += PLUNGE.SPIN * 0.6 * dt;
+}
+function startPlunge() {
+  const p = player.phys, side = (roadProfile().cliff || { side: 1 }).side;
+  centreTangent(-p.s, _pt);
+  state.plunge = {
+    t: 0, vx: Math.max(PLUNGE.OUT, Math.abs(p.lateralV || 0)), vy: PLUNGE.UP, v: p.speed * 0.6,
+    n: new THREE.Vector3(_pt.z * side, 0, -_pt.x * side), f: headAt(-p.s, new THREE.Vector3()),
+    cam: camera.position.clone(),
+  };
+  if ((player.fighter.hold || player.fighter.heldBy) && player.fighter._endHold) player.fighter._endHold('break', hooks);
+  state.warn = 'OVER THE EDGE!';
+  audio.oneShot('crash', 1.0, 0.7);
+  state.shake = Math.min(1.4, state.shake + 0.8);
+}
+function stepPlunge(dt) {
+  const P = state.plunge, g = player.group;
+  P.t += dt;
+  P.vy -= PLUNGE.G * dt;
+  P.v *= Math.max(0, 1 - dt * 0.8);
+  g.position.addScaledVector(P.n, P.vx * dt).addScaledVector(P.f, P.v * dt);
+  g.position.y += P.vy * dt;
+  g.rotation.x += PLUNGE.SPIN * dt; g.rotation.z += PLUNGE.SPIN * 0.6 * dt;
+  if (P.t >= PLUNGE.TIME && !state.raceOver) { state.raceOver = true; eliminateRace(); }
+}
+function plungeCamera() {
+  // the camera stays at the edge and watches you go
+  camera.position.copy(state.plunge.cam);
+  camera.lookAt(player.group.position);
+}
+function eliminateRace() {
+  if (replay) { replay.event('crash', 'OVER THE EDGE', player.fighter, 6); replay.stop(); }
+  document.getElementById('copflag')?.classList.remove('on');
+  const ev = career.event;
+  const damage = (player.damage || 0) + PLUNGE.BILL;
+  const res = career.bust(0, damage);
+  const lines = [
+    `<b>${ev.name}</b> &nbsp;·&nbsp; <b>Level ${ev.level}/5</b> — you went through a gap in the rail.`,
+    `Recovering the bike from the valley: <b>-$${res.bill}</b>`,
+    `Bank <b>$${res.cash}</b>`,
+    res.over ? '<b>BROKE AND AT THE BOTTOM OF A CLIFF.</b> Career over.' : 'Eliminated: no placing, no prize. Ride it again.',
+  ];
+  audio.siren(0);
+  hud.ended(res.over ? "YOU'RE OUT OF THE GAME" : 'OVER THE EDGE', lines.join('<br>') + statsTable());
+  state.running = false;
+  state.endedAt = performance.now();
+  state.plunge = null;
+  audio.idle();
+  audio.playMusic('menu');
+  refreshTitle();
+  const ag = document.getElementById('again');
+  if (ag && !res.over) ag.textContent = 'RIDE AGAIN';
+  lastResult = res;
+}
+
 function bustRace() {
   if (replay) { replay.event('cop', 'BUSTED', player.fighter, 5); replay.stop(); }
   document.getElementById('copflag')?.classList.remove('on');
@@ -2053,7 +2155,7 @@ function endRace(pos) {
   const board = world.standings().map((e, i) => {
     const me = e === player;
     const nm = me ? 'YOU' : (e.name || 'RIDER');
-    const down = e.fighter && e.fighter.down ? ' · down' : '';
+    const down = e.out ? ' · over the edge' : e.fighter && e.fighter.down ? ' · down' : '';
     return `<tr class="${me ? 'me' : ''}"><td>${names[i] || i + 1}</td><td>${nm}${down}</td></tr>`;
   }).join('');
   const table = `<table class="board">${board}</table>`;
@@ -2092,8 +2194,19 @@ window.__START__ = () => {
   spine.setMap(ev.map, ev.lenMul);
   // THE LANES ARE PER COURSE (lanes.js): a different layout means a different
   // deck, markings, kerbs and rails, so the road is rebuilt when it changes.
-  if (setLanePlan(ev.map, ev.lenMul)) {
+  // THE ROAD ITSELF IS PER COURSE TOO (level.js profiles): a cliff course has
+  // its own centreline, its own depth under the deck, and no verge.
+  const profChanged = setRoadProfile(ev.map);
+  if (setLanePlan(ev.map, ev.lenMul) || profChanged) {
     try { rebuildRoad(); } catch (e) { console.warn('[riderash] road rebuild:', e); }
+  }
+  if (profChanged && backdropGroup) {
+    try {
+      scene.remove(backdropGroup);
+      backdropGroup.traverse((n) => { if (n.geometry) n.geometry.dispose(); });
+      backdropGroup = buildBackdrop();
+      scene.add(backdropGroup);
+    } catch (e) { console.warn('[riderash] backdrop:', e); }
   }
   // Re-dress the roadside for this course (no-op when it is already dressed).
   try { if (scenery) scenery.setCourse(spine); } catch (e) { console.warn('[riderash] scenery:', e); }
@@ -2104,6 +2217,7 @@ window.__START__ = () => {
   if (crossTraffic) crossTraffic.reset();
   if (animals) animals.reset();
   try { if (parked) parked.build(spine, state.finishS); } catch (e) { console.warn('[riderash] parked:', e); }
+  try { if (ghatDress) ghatDress.build(state.finishS, (ev.lenMul * 100) | 0); } catch (e) { console.warn('[riderash] ghat:', e); }
   try { window.__HAZARDS__ = placeHazards(spine, state.finishS); if (hazardView) hazardView.build(); } catch (e) { console.warn('[riderash] hazards:', e); }
   if (flagger) {
     flagger.reset(window.__FLAGGER_OUTFIT__ != null ? window.__FLAGGER_OUTFIT__ : (career.state.race || 0) + (career.state.wins || 0) * 3 + raceCounter++);
@@ -2207,7 +2321,7 @@ function defendPositions(dt) {
   const rank = new Map(order.map((e, i) => [e, i]));
   for (const r of rivals) {
     const was = defendRank.get(r);
-    if (was === undefined || was > 1 || r.fighter.down || !r.brain) continue;   // only a rider who was 1st or 2nd
+    if (r.out || was === undefined || was > 1 || r.fighter.down || !r.brain) continue;   // only a rider who was 1st or 2nd
     for (const x of order) {
       if (x === r || x.fighter && x.fighter.down) continue;
       const before = defendRank.get(x), now = rank.get(x);
@@ -2235,6 +2349,7 @@ function resetRace() {
   } catch (e) { console.warn('[riderash] setBike:', e); }
   state.time = 0; state.score = 0; state.hits = 0; state.knockDowns = 0; state.contacts = 0; state.trafficHits = 0; state.trafficWrecks = 0;
   warnQueue.length = 0;                               // menu-time callouts are not race news
+  state.plunge = null;
   defendRank = new Map(); defendPending = []; defendT = 0;
   if (hud && hud.island) hud.island.clear();
   state.raceOver = false; state.shake = 0; state.hitstop = 0; state.wrecksBy = {}; state.stats = freshStats(); state.swapped = 0; state.lastPos = 6;

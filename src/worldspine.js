@@ -77,6 +77,17 @@ export const BIOMES = {
     haze: 0.55, timeOfDay: 0.68,
     scenery: { town: 0.10, trees: 0.22, rocks: 0.34, hoardings: 0.26 },
   },
+  // THE GHAT: a road cut into a mountainside. Warm laterite verge, cool blue
+  // valley haze below, damp forest light -- a Western Ghats road in the monsoon
+  // green, set here as a California mountain pass.
+  ghat: {
+    label: 'ghat',
+    roadTint: 0x202227, roadRough: 0.58, roadMetal: 0.0,
+    vergeTint: 0x7a4a2e, vergeRough: 0.95,        // red laterite shoulder
+    fog: 0x8fa9b8, fogDensity: 0.00046,
+    haze: 0.52, timeOfDay: 0.5,
+    scenery: { town: 0.0, trees: 0.7, rocks: 0.5, hoardings: 0.02 },
+  },
   forest: {
     label: 'forest',
     roadTint: 0x1e2026, roadRough: 0.56, roadMetal: 0.0,
@@ -216,6 +227,19 @@ export const MAPS = {
       ['town', 1000],
     ],
   },
+  ghat: {
+    label: 'GHAT ROAD',
+    blurb: 'rock on one side, nothing on the other',
+    sky: { day: 0.2, dusk: 0.6 },
+    // the finale of each level: S-bends on a cliff, one mistake from the valley
+    sectors: [
+      ['ghat', 1500],
+      ['forest', 600],
+      ['ghat', 1800],
+      ['forest', 500],
+      ['ghat', 1400],
+    ],
+  },
   desert: {
     label: 'PALM DESERT',
     blurb: 'the long, hot one',
@@ -234,7 +258,7 @@ export const MAPS = {
 
 // Length is part of the difficulty curve, exactly as in the original: the short
 // opener is L1's track, the three-minute desert is the last thing you face.
-export const MAP_ORDER = ['sierra', 'coastal', 'valley', 'peninsula', 'desert'];
+export const MAP_ORDER = ['sierra', 'coastal', 'valley', 'peninsula', 'desert', 'ghat'];
 
 // ---------------------------------------------------------------------------
 // WorldSpine

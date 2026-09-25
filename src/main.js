@@ -3445,6 +3445,7 @@ function initSoundtrack() {
   if (soundtrack) return soundtrack;
   soundtrack = new Soundtrack(audio, audioExt);
   soundtrack.bindUI();
+  window.__SOUNDTRACK__ = soundtrack;   // harness: what loaded
   audio.init().then(() => soundtrack.init()).catch((e) => console.warn('[soundtrack]', e));
   return soundtrack;
 }

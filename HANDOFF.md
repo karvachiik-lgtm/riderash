@@ -981,6 +981,19 @@ Road Rash thing that happens on this road and it used to be silent.
 `audio.oneShot(name, amp, rate)` is the path for anything new. A missing buffer
 is a silent no-op, never a throw.
 
+**The soundtrack (`src/soundtrack.js`, `assets/audio/music/`, 2.3 MB).** The
+synthesised menu/race loops in `music.js` are replaced, when the files load, by
+ORIGINAL instrumentals generated in the Atlas project "RideRash Audio"
+(MiniMax Music for `title`, `race1..3`, `win`, `bust`; ElevenLabs SFX for
+`rev`, `select`, `move`). The briefs are in `_refs/audio_briefs.md`: the 90s
+bike-combat register (grunge / alt-metal, fuzz rock, biker blues-rock, 16-bit
+metal) with no artist, song or game named or imitated. Each loop is trimmed,
+given a 1.2 s crossfade seam and normalised to a 0.89 peak. If any file fails,
+the synthesised music stays in charge. Race tracks are short (13-32 s loops) and
+the seams are not beat-aligned, so regenerate longer takes when credits allow.
+The tracks have not been checked for stray vocals (the transcription run ran out
+of credits), so listen before shipping.
+
 ---
 
 ## 14. `_trace.mjs` — the instrument for anything that MOVES

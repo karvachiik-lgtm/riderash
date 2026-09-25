@@ -401,6 +401,25 @@ export class Animals {
   }
 
   /**
+   * Developer mode: put an animal of `kind` in the road at s. A cow or moose
+   * stands in the given lane; a deer bolts across from the right-hand verge.
+   */
+  spawnAt(kind, s, lat) {
+    const a = this.pool.find((x) => !x.userData.active && x.userData.kind === kind);
+    if (!a) return false;
+    const u = a.userData, deer = kind === 'deer';
+    Object.assign(u, {
+      active: true, s, t: 0, hit: false, stagger: 0, cyc: Math.random(),
+      dir: deer ? -1 : 1,
+      lat: deer ? edgeAt(s, 1) + 4 : lat,
+      speed: deer ? 7 : kind === 'moose' ? 1.3 : ANIMALS.COW_SPEED,
+      stopAt: deer ? null : lat, stopT: deer ? 0 : 8,
+    });
+    a.visible = true;
+    return true;
+  }
+
+  /**
    * As road obstacles for the AI's look (traffic.setTrafficExtras). The animal
    * stands side-on: its length runs ACROSS the road.
    */

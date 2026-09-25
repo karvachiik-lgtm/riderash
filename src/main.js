@@ -12,6 +12,7 @@ import { TrackDress } from './trackdress.js';
 import { setLanePlan } from './lanes.js';
 import { CrossTraffic } from './crosstraffic.js';
 import { setTrafficExtras } from './traffic.js';
+import { DEV, initDevMode } from './devmode.js';
 import { placeHazards, HazardView } from './hazards.js';
 import { Animals, ANIMALS } from './animals.js';
 import { Parked } from './parked.js';
@@ -1028,7 +1029,7 @@ function frame(now) {
     autoQuality(fps);
   }
 
-  const dt = Math.min(0.05, rawDt);
+  const dt = Math.min(0.05, rawDt * (DEV.timeScale || 1));   // developer time scale (devmode.js)
 
   // HITSTOP. Run the world at 12% speed for a short beat after a wreck, then
   // release. The timer runs on RAW time (not the scaled dt) or it would never
@@ -1842,6 +1843,13 @@ function stepGame(dt) {
   // score from distance
   state.score += player.phys.speed * dt * CFG.PTS_PER_METER;
 
+  // DEVELOPER MODE (devmode.js): god mode, no cops, the live readout
+  if (DEV.on) {
+    if (DEV.god) { player.fighter.hp = player.fighter.maxHp; player.damage = 0; }
+    if (DEV.noCops && cop && cop.state !== 'off') cop._leave();
+    if (DEV.readout) devReadout(dt);
+  }
+
   // race end
   const pos = world.positionOf(player.phys);
   if (pos !== state.lastPos) { state.lastPos = pos; if (pos === 1) state.warn = 'LEADING'; }
@@ -2426,6 +2434,60 @@ function refreshTitle() {
 buildMapPicker();
 refreshTitle();
 
+// ---- DEVELOPER MODE: the game's side of the Settings panel (devmode.js) ----
+let devReadEl = null, devReadT = 0;
+function devReadout(rdt) {
+  if (!devReadEl) return;
+  devReadT -= rdt;
+  if (devReadT > 0) return;
+  devReadT = 0.2;
+  const p = player.phys, f = player.fighter;
+  const lead = world.standings().slice(0, 3).map((e) => `${e === player ? 'YOU' : e.name} ${Math.round(e.phys.s - p.s)}`).join('  ');
+  devReadEl.textContent =
+    `v ${p.speed.toFixed(1)} m/s (${Math.round(p.speed * 2.237)} mph)  top ${p.topSpeed.toFixed(1)}\n` +
+    `s ${Math.round(p.s)} / ${Math.round(state.finishS)}  lat ${p.lateral.toFixed(2)}  pos ${world.positionOf(p)}\n` +
+    `hp ${Math.round(f.hp)}  stam ${Math.round(f.stamina)}  dmg ${(player.damage || 0).toFixed(2)}  boost ${p.boost > 0 ? 'ON' : (p.boostCool || 0).toFixed(1)}\n` +
+    `cop ${cop ? cop.state : '-'}  fps ${Math.round(fps)}  x${DEV.timeScale}\n${lead}`;
+}
+const devUi = initDevMode({
+  career, series: SERIES,
+  setCash: (n) => { career.devSet({ cash: n, over: false }); refreshTitle(); },
+  addCash: (n) => { career.devSet({ cash: career.state.cash + n, over: false }); refreshTitle(); },
+  setRace: (i) => { career.devSet({ race: Math.max(0, Math.min(SERIES.length - 1, i)), over: false, finished: false }); refreshTitle(); },
+  ownAll: () => { career.devSet({ owned: BIKES.map((b) => b.id) }); refreshTitle(); },
+  resetCareer: () => { career.reset(); refreshTitle(); },
+  inRace: () => state.running && !state.raceOver,
+  spawnCop: () => {
+    if (!cop) return false;
+    const p = player.phys;
+    cop.enabled = true;
+    cop.fighter.down = false; cop.fighter.hp = cop.fighter.maxHp; cop.fighter.active = null;
+    cop.phys.reset({ s: p.s - 60, lateral: p.lateral + 2, speed: p.speed });
+    cop.phys.sync();
+    cop.state = 'parked'; cop.group.visible = true;
+    cop._startChase();
+    state.warn = 'COPS!';
+    return true;
+  },
+  spawnAnimal: (kind) => animals ? animals.spawnAt(kind, player.phys.s + 140, player.phys.lateral) : false,
+  winNow: () => { const p = player.phys; p.s = state.finishS - 3; p.speed = Math.max(p.speed, 25); p.sync(); },
+  setTraffic: (off) => {
+    window.__TRAFFIC_OFF__ = off;
+    if (!off && world.traffic) {
+      world.traffic.visible = true;
+      resetTraffic(world.traffic, player ? player.phys.s : 0, CFG.TRAFFIC_BY_LEVEL[(career.event.level || 1) - 1] ?? 1);
+    }
+  },
+  readout: (on) => {
+    if (on && !devReadEl) {
+      devReadEl = document.createElement('pre');
+      devReadEl.id = 'devread';
+      document.body.appendChild(devReadEl);
+    }
+    if (devReadEl) devReadEl.style.display = on ? '' : 'none';
+  },
+});
+
 document.getElementById('resetcareer').addEventListener('click', () => {
   if (state.running) return;
   career.reset();
@@ -2651,6 +2713,7 @@ function openSettings(from) {
   $('set-fps').checked = settings.showFps;
   $('set-touch').value = settings.touch;
   $('set-tilt').checked = tilt.active;
+  if (devUi) devUi.refresh();
   $(from === 'pause' ? 'pause' : 'title').classList.remove('on');
   $('settingsscreen').classList.add('on');
   $('set-done').focus({ preventScroll: true });

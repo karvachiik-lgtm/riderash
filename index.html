@@ -69,6 +69,17 @@
   .map .bl { display:block; font-size:9px; letter-spacing:.10em; color:#6d737a; }
   .map.sel .bl { color:#9d8b64; }
   .row { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; }
+  /* developer mode (src/devmode.js) */
+  #devsec .setg { grid-template-columns:110px 1fr auto; }
+  #devsec .setg select { grid-column:auto; }
+  #settingsscreen.on { overflow-y:auto; justify-content:flex-start; padding:24px 16px; }
+  #settingsscreen #settings.on { margin:auto 0; }
+  #devsec { margin-top:14px; border-top:1px solid rgba(232,228,220,.15); padding-top:10px; }
+  #devsec .btn.small { padding:6px 10px; font-size:11px; letter-spacing:.1em; }
+  #devsec input[type=password], #devsec input[type=number] { background:rgba(0,0,0,.35); color:#e8e4dc; border:1px solid rgba(232,228,220,.3);
+    padding:6px 8px; font:inherit; font-size:13px; min-width:0; width:100%; }
+  #devread { position:fixed; left:8px; bottom:8px; z-index:60; margin:0; padding:6px 8px; background:rgba(0,0,0,.6);
+    color:#9fe870; font:11px/1.35 ui-monospace,Menlo,Consolas,monospace; pointer-events:none; white-space:pre; }
   kbd { border:1px solid #40454b; padding:1px 6px; border-radius:2px; color:#b9bec4; font-size:11px; }
   .pick { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
   .pick button { padding:10px 16px; border:1px solid #3c4147; background:rgba(18,20,23,.9);
@@ -724,6 +735,8 @@
       <span>Tilt steer</span><label class="ck"><input type="checkbox" id="set-tilt"> steer by tilting the phone</label>
       <span></span><span id="tiltnote" class="hint" style="grid-column:2 / 4;text-transform:none"></span>
     </div>
+    <!-- developer mode (src/devmode.js): passcode-gated debug panel -->
+    <div id="devsec"></div>
     <button class="btn pe" id="set-done">BACK</button>
   </div>
 </div>

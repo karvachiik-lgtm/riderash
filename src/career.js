@@ -382,6 +382,13 @@ export class Career {
 
   // Deep enough to matter: a shallow copy would share FRESH's `owned` array and
   // `best` object, so the first purchase after a reset would edit FRESH itself.
+  /** Developer mode only (devmode.js): patch the saved state directly. */
+  devSet(patch) {
+    Object.assign(this.state, patch);
+    write(this.state);
+    return this.state;
+  }
+
   reset() {
     this.state = { ...FRESH, owned: [...FRESH.owned], best: {} };
     write(this.state);

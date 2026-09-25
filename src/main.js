@@ -435,6 +435,9 @@ function fallbackRider() {
 
 // ---------- build the game ----------
 async function init() {
+  // the faces must be in before anything paints text into a texture (finish
+  // banner, trackside boards) -- capped, so a slow disk never holds the load
+  try { await Promise.race([Promise.all(['92px Anton', '700 20px Rajdhani', '600 20px Rajdhani'].map((f) => document.fonts.load(f))), new Promise((r) => setTimeout(r, 2000))]); } catch (e) { /* system fonts */ }
   progress(0.02, 'textures');
   // Textures FIRST: the level builds its materials from them, so loading after
   // the world exists would mean every surface silently kept its flat colour.

@@ -33,7 +33,7 @@ function textTexture(text) {
   const g = c.getContext('2d');
   g.fillStyle = '#b3121b'; g.fillRect(0, 0, c.width, c.height);
   g.fillStyle = '#fff';
-  g.font = 'bold 92px Impact, "Arial Black", sans-serif';
+  g.font = '400 96px Anton, Impact, "Arial Black", sans-serif';
   g.textAlign = 'center'; g.textBaseline = 'middle';
   g.fillText(text, c.width / 2, c.height / 2 + 4);
   const t = new THREE.CanvasTexture(c);

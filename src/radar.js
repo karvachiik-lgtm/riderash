@@ -267,11 +267,11 @@ export class Radar {
     g.fillStyle = 'rgba(0,0,0,0.45)';
     g.fillRect(0, S * 0.80, S, S * 0.2);
     g.fillStyle = 'rgba(232,228,220,0.9)';
-    g.font = `${Math.round(S * 0.13)}px sans-serif`;
+    g.font = `700 ${Math.round(S * 0.14)}px Rajdhani, system-ui, sans-serif`;
     g.textAlign = 'center'; g.textBaseline = 'middle';
     g.fillText('\u2212', S * 0.30, S * 0.89);
     g.fillText('+', S * 0.70, S * 0.89);
-    g.font = `${Math.round(S * 0.075)}px sans-serif`;
+    g.font = `700 ${Math.round(S * 0.085)}px Rajdhani, system-ui, sans-serif`;
     g.fillStyle = this.auto ? 'rgba(255,190,90,0.95)' : 'rgba(232,228,220,0.6)';
     g.fillText(`${Math.round(this.range)}m`, S * 0.5, S * 0.89);
     g.restore();

@@ -186,6 +186,13 @@ one that decides what you are allowed to build:
   the sun's direction out of the image, and no procedural generator here can
   produce that. Two files, sky only, nothing structural. Everything else that was
   in `assets/tex/` has been retired to `~/riderash-atlas-backup/tex/`.
+- **Second declared deviation: `assets/fonts/` (UI type only).** Anton (display) and
+  Rajdhani (UI), SIL OFL 1.1 (licences alongside), ~65 KB of woff2, loaded by
+  `@font-face` from inside the game folder -- no font service at runtime. They are
+  UI chrome (menus, HUD, callouts); the in-world "no glyphs" rule is unchanged, and
+  the only world text remains the pre-existing finish banner and trackside boards.
+  (The startup intro VIDEO that briefly lived in `assets/video/` was removed: the
+  intro is now rendered live by the game, see main.js `runAttract`.)
 - **Atlas's role follows from this.** It cannot supply meshes (forbidden) and
   should not supply surface files (against the thesis). What it is *for* is
   everything upstream of the code: reference images — which `404.md` explicitly

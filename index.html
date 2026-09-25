@@ -21,11 +21,21 @@
 } }
 </script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%230a0b0c'/%3E%3Ccircle cx='18' cy='42' r='10' fill='none' stroke='%23ffb45a' stroke-width='5'/%3E%3Ccircle cx='46' cy='42' r='10' fill='none' stroke='%23ffb45a' stroke-width='5'/%3E%3Cpath d='M18 42 L30 26 L40 26 L46 42' fill='none' stroke='%23d8d2c4' stroke-width='5' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preload" href="assets/fonts/anton-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="assets/fonts/rajdhani-600.woff2" as="font" type="font/woff2" crossorigin>
 <style>
-  :root { --amber:#ffb45a; --red:#d8342a; --bone:#d8d2c4; }
+  /* TYPE. Anton (display: titles, big numbers, callouts) and Rajdhani (UI),
+     both SIL OFL, shipped in assets/fonts (~65 KB) -- no font service at runtime. */
+  @font-face { font-family:'Anton'; src:url('assets/fonts/anton-400.woff2') format('woff2'); font-weight:400; font-display:swap; }
+  @font-face { font-family:'Rajdhani'; src:url('assets/fonts/rajdhani-500.woff2') format('woff2'); font-weight:500; font-display:swap; }
+  @font-face { font-family:'Rajdhani'; src:url('assets/fonts/rajdhani-600.woff2') format('woff2'); font-weight:600; font-display:swap; }
+  @font-face { font-family:'Rajdhani'; src:url('assets/fonts/rajdhani-700.woff2') format('woff2'); font-weight:700; font-display:swap; }
+  :root { --amber:#ffb45a; --red:#d8342a; --bone:#d8d2c4;
+          --display:'Anton', Impact, 'Arial Black', sans-serif;
+          --ui:'Rajdhani', 'Segoe UI', system-ui, sans-serif; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html,body { margin:0; padding:0; height:100%; overflow:hidden; background:#000;
-              font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; color:#e8e4dc;
+              font-family: var(--ui); font-weight:600; color:#e8e4dc;
               /* Phones: no pull-to-refresh from a swipe on the road, no
                  double-tap zoom (iOS ignores user-scalable=no), no grey tap
                  flash on every button, no font inflation in landscape. */
@@ -707,6 +717,47 @@
   @keyframes introIn { from { opacity: 0; transform: translateY(16px); letter-spacing: .5em; } to { opacity: 1; transform: none; } }
   #introskip { position: absolute; right: 18px; top: calc(11vh + 12px); pointer-events: auto; background: rgba(0,0,0,.45); color: #fff; border: 1px solid rgba(255,255,255,.35); border-radius: 999px; padding: 8px 16px; font: 600 12px ui-monospace, monospace; letter-spacing: .12em; cursor: pointer; }
   body.attract #title, body.attract #load { display: none !important; }
+
+  /* ---- TYPE: the game's voice ------------------------------------------------ */
+  /* the mark: heavy, condensed, leaning forward, hot metal with a cast shadow */
+  #load h1, #title > h2, #overh, #introtitle {
+    font-family:var(--display); font-weight:400; letter-spacing:.06em; text-indent:.06em;
+    font-style:normal; transform:skewX(-9deg);
+    background:linear-gradient(180deg, #fff6e6 0%, #ffd08a 48%, #ff8a2e 72%, #d8342a 100%);
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    filter:drop-shadow(0 3px 0 #5a140c) drop-shadow(0 10px 22px rgba(0,0,0,.55)); }
+  #title > h2 { font-size:clamp(46px,9vw,104px); line-height:.95; }
+  #load h1 { font-size:clamp(46px,10vw,110px); line-height:.95; }
+  #overh { font-size:clamp(40px,8vw,92px); line-height:1; }
+  #introtitle { font-size:clamp(56px,11vw,140px); }
+  .screen h2, #showtitle h2 { font-family:var(--display); font-weight:400; letter-spacing:.1em; text-indent:.1em; }
+  .screen p { font-size:15px; font-weight:500; letter-spacing:.04em; line-height:1.7; }
+  #load .sub, #loadmsg { font-weight:700; }
+  /* HUD: numbers in the display face, labels tracked out */
+  .val { font-family:var(--display); font-weight:400; letter-spacing:.04em; }
+  .val small { font-family:var(--ui); font-weight:700; }
+  .lab { font-weight:700; letter-spacing:.24em; font-size:11px; }
+  #warn { font-family:var(--display); font-weight:400; letter-spacing:.08em; }
+  #island .is-t { font-family:var(--display); font-weight:400; font-size:20px; letter-spacing:.07em; }
+  #island.m-s .is-t { font-size:15px; }
+  #island.m-c .is-t { font-size:56px; }
+  #island .is-s { font-weight:700; font-size:12px; }
+  #career b, #target .nm, #replay .rp-name { font-family:var(--display); font-weight:400; letter-spacing:.06em; }
+  #career b { font-size:19px; }
+  #replay .rp-clip, #replay .rp-tag { font-family:var(--display); font-weight:400; letter-spacing:.06em; }
+  /* controls */
+  .btn { font-weight:700; font-size:15px; letter-spacing:.22em; }
+  .map, .bike, .setg, .board, .hint, .stabs button, .pgrid button, .scn button, .bd, .pre button { font-weight:700; }
+  .map .bl, .bike .pr { font-size:10px; }
+  .setg { font-size:12px; }
+  .board { font-size:13px; }
+  kbd { font-family:ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-weight:400; }
+  /* a tall screen on a short window scrolls instead of losing its top (the logo) */
+  .screen.on { overflow-y:auto; justify-content:safe center; }
+  @media (max-height:780px) {
+    #title > h2, #overh { font-size:clamp(34px, 8.5vh, 80px); }
+    #title { gap:12px; padding:14px 0; }
+  }
 </style>
 </head>
 <body>

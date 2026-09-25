@@ -60,7 +60,7 @@ function textBoard(text, bg = '#1e5aa8', fg = '#fff', w = 256, h = 128, font = 7
   return canvasTex(w, h, (g) => {
     g.fillStyle = bg; g.fillRect(0, 0, w, h);
     g.strokeStyle = fg; g.lineWidth = 6; g.strokeRect(6, 6, w - 12, h - 12);
-    g.fillStyle = fg; g.font = `bold ${font}px Impact, "Arial Black", sans-serif`;
+    g.fillStyle = fg; g.font = `400 ${font}px Anton, Impact, "Arial Black", sans-serif`;
     g.textAlign = 'center'; g.textBaseline = 'middle';
     g.fillText(text, w / 2, h / 2 + 3);
   });

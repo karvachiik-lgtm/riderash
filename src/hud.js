@@ -183,7 +183,16 @@ class Speedo {
     else addEventListener('resize', () => this._resize());
   }
 
+  // the canvas keeps whatever font was ready when it drew: redraw once the
+  // game's faces have loaded (index.html @font-face)
+  _watchFonts() {
+    if (this._fontsWatched || !document.fonts) return;
+    this._fontsWatched = true;
+    document.fonts.ready.then(() => { this.size = 0; this._resize(); });
+  }
+
   _resize() {
+    this._watchFonts();
     const s = Math.round(this.cv.clientWidth);
     if (!s) return;                          // HUD hidden; next observe fires on show
     const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -228,7 +237,7 @@ class Speedo {
     }
     // numerals: every 20 on a big dial, every 40 on a small one (9 px floor)
     const step = s >= 120 ? 20 : 40;
-    c.font = `600 ${Math.max(9, Math.round(s * 0.085))}px ui-monospace, "SF Mono", Menlo, Consolas, monospace`;
+    c.font = `700 ${Math.max(10, Math.round(s * 0.1))}px Rajdhani, system-ui, sans-serif`;
     c.textAlign = 'center'; c.textBaseline = 'middle';
     for (let m = 0; m <= this.maxMph; m += step) {
       const a = this._ang(m), rr = r * 0.60;
@@ -285,7 +294,7 @@ class Speedo {
 
     // gear: a boxed digit above the hub, printed on the face (under the needle)
     const gs = Math.round(s * 0.13);
-    c.font = `700 ${gs}px ui-monospace, "SF Mono", Menlo, Consolas, monospace`;
+    c.font = `400 ${gs}px Anton, Impact, sans-serif`;
     c.textAlign = 'center'; c.textBaseline = 'middle';
     c.strokeStyle = 'rgba(232,228,220,.35)'; c.lineWidth = 1;
     c.strokeRect(cx - gs * 0.55, cy - r * 0.32 - gs * 0.6, gs * 1.1, gs * 1.2);
@@ -294,12 +303,12 @@ class Speedo {
 
     // digits in the open bottom sector
     const ds = Math.round(s * 0.2);
-    c.font = `700 ${ds}px ui-monospace, "SF Mono", Menlo, Consolas, monospace`;
+    c.font = `400 ${Math.round(ds * 1.12)}px Anton, Impact, sans-serif`;
     c.fillStyle = boosting ? '#8fd0ff' : '#e8e4dc';
     c.shadowColor = 'rgba(0,0,0,.9)'; c.shadowBlur = 3;
     c.fillText(String(Math.round(mph)), cx, cy + r * 0.50);
     c.shadowBlur = 0;
-    c.font = `600 ${Math.max(8, Math.round(s * 0.075))}px ui-monospace, "SF Mono", Menlo, Consolas, monospace`;
+    c.font = `700 ${Math.max(9, Math.round(s * 0.085))}px Rajdhani, system-ui, sans-serif`;
     c.fillStyle = '#8b9097';
     c.fillText('MPH', cx + r * 0.06, cy + r * 0.76);
 

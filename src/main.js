@@ -11,6 +11,7 @@ import { ValleyDress } from './valley.js';
 import { TunnelDress, setCourseTunnels, tunnelK } from './tunnels.js';
 import { Arrest } from './arrest.js';
 import { Landmarks } from './landmarks.js';
+import { Feel } from './feel.js';
 import { buildTraffic, updateTraffic, trafficHit, resetTraffic } from './world.js';
 import { buildFinish, placeFinish } from './finishline.js';
 import { TrackDress } from './trackdress.js';
@@ -115,6 +116,7 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight, false);
 
 const settings = loadSettings();
+const feel = new Feel(settings);       // shake, haptics, post-effect drive (feel.js)
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(CFG.CAM_FOV, innerWidth / innerHeight, 0.12, 6000);
@@ -494,6 +496,8 @@ async function init() {
     const ev0 = career.event;
     scenery.setCourse(new WorldSpine(ev0.map).setMap(ev0.map, ev0.lenMul));
     window.__SCENERY__ = scenery;   // harness: chunk stats, rebuild timing
+    // the title screen's flythrough needs the boot course's landmarks
+    try { const sp0 = new WorldSpine(ev0.map).setMap(ev0.map, ev0.lenMul); landmarks = landmarks || new Landmarks(scene); landmarks._key = null; landmarks.build(ev0.map, sp0.totalLength, null, settings.quality === 'low'); } catch (e) { console.warn('[riderash] landmarks boot:', e); }
   } catch (e) { console.warn('[riderash] scenery:', e); }
   const traffic = buildTraffic();
   scene.add(road, side, back, traffic);
@@ -508,7 +512,7 @@ async function init() {
   try { ghatDress = new GhatDress(scene); } catch (e) { console.warn('[riderash] ghat:', e); ghatDress = null; }
   try { valleyDress = new ValleyDress(scene); } catch (e) { console.warn('[riderash] valley:', e); valleyDress = null; }
   try { tunnelDress = new TunnelDress(scene); } catch (e) { console.warn('[riderash] tunnels:', e); tunnelDress = null; }
-  try { landmarks = new Landmarks(scene); } catch (e) { console.warn('[riderash] landmarks:', e); landmarks = null; }
+  try { landmarks = landmarks || new Landmarks(scene); } catch (e) { console.warn('[riderash] landmarks:', e); landmarks = null; }
   try { animals = new Animals(scene); window.__ANIMALS__ = animals; } catch (e) { console.warn('[riderash] animals:', e); }
   try { crossTraffic = new CrossTraffic(scene); window.__CROSS__ = crossTraffic; } catch (e) { console.warn('[riderash] cross traffic:', e); crossTraffic = null; }
   // INSTANT REPLAY (replay.js): records the race as it is drawn
@@ -606,6 +610,7 @@ async function init() {
   rain = new Rain(scene);
 
   postfx = new PostFX(renderer, scene, camera);
+  Object.defineProperty(postfx, 'feel', { get: () => (state.running ? feel.post() : null) });
 
   // The wet road and the painted bodywork need the environment on the MATERIAL,
   // not just on the scene: three.js 0.169 overrides a material's envMapIntensity
@@ -672,6 +677,7 @@ async function init() {
 
   applyQuality(settings.quality === 'auto' ? autoTier() : settings.quality);
   await prewarm();
+  runAttract();
   progress(1, 'ready');
   document.getElementById('load').style.display = 'none';
 
@@ -885,15 +891,15 @@ function updateCamera(dt, g) {
     return;   // skip the chase-camera math and its shake entirely
   }
 
-  // shake on hits
-  const shake = g.shake;
-  if (shake > 0) {
-    camera.position.x += (Math.random() - 0.5) * shake * 0.35;
-    camera.position.y += (Math.random() - 0.5) * shake * 0.30;
-    camera.position.z += (Math.random() - 0.5) * shake * 0.35;
-  }
+  // SHAKE (feel.js): trauma-squared, smooth noise, translation and rotation
+  const fk = feel.update(dt, {
+    shake: g.shake, speedFrac: Math.min(1, p.speed / CFG.MAX_SPEED), boosting: p.boost > 0,
+    hpFrac: player.fighter.hp / (player.fighter.maxHp || 1), running: state.running && !state.raceOver,
+  });
+  camera.position.x += fk.x; camera.position.y += fk.y; camera.position.z += fk.z;
 
   camera.lookAt(camLook);
+  camera.rotateX(fk.pitch); camera.rotateY(fk.yaw); camera.rotateZ(fk.roll);
   // Portrait pitches the view DOWN by a fixed angle (~10 deg): a tall frame
   // otherwise spends its top 40% on sky and parks the hero under the thumb
   // controls. An angle, not a lower look point -- at drone distance a 1.6 m
@@ -1289,14 +1295,83 @@ function stepTunnelLight(dt) {
 }
 
 let idleAngle = 0;
+// THE ATTRACT CAMERA: behind the menus, and as the letterboxed intro, the
+// camera tours the course -- a slow reveal of each landmark (landmarks.js
+// shots) from the road beside it, alternating with low glides along the
+// tarmac. Hard cuts between shots, each ~6.5 s, looping.
+const ATTRACT = { SHOT: 6.5 };
+let attractT = 0, attractI = -1, attractShot = null;
+function pickAttractShot(i) {
+  const shots = (landmarks && landmarks.shots) || [];
+  const L = (spine && spine.totalLength) || 5000;
+  if (shots.length && i % 2 === 0) {
+    const sh = shots[(i / 2) % shots.length | 0];
+    // the nearest road point to it, and a start a little before
+    let best = 0, bd = Infinity;
+    for (let s = 0; s < L; s += 25) { const c = centreAt(-s); const d = (c.x - sh.centre.x) ** 2 + (c.z - sh.centre.z) ** 2; if (d < bd) { bd = d; best = s; } }
+    return { kind: 'reveal', name: sh.name, s0: Math.max(0, best - Math.max(260, sh.r * 1.4)), target: sh.centre.clone(), r: sh.r };
+  }
+  const s0 = 200 + ((i * 1237) % Math.max(400, L - 600));
+  return { kind: 'glide', name: null, s0 };
+}
 function updateCameraIdle(dt) {
   if (state.running) return;
-  idleAngle += dt * 0.10;
-  const s = 40;
-  const p = centreAt(-s);
-  camera.position.set(p.x + Math.cos(idleAngle) * 9, p.y + 3.4, p.z + Math.sin(idleAngle) * 9);
-  camera.lookAt(p.x, p.y + 1.2, p.z - 20);
+  attractT += dt;
+  if (!attractShot || attractT > ATTRACT.SHOT) {
+    attractT = 0; attractI++;
+    if (attractI >= 3 && attractDone) { attractDone(); attractDone = null; }
+    attractShot = pickAttractShot(attractI);
+    const sub = document.getElementById('introsub');
+    if (sub) { sub.style.opacity = attractShot.name ? 1 : 0; if (attractShot.name) sub.textContent = attractShot.name + '  ·  ' + ((MAPS[career.event.map]) || {}).label; }
+  }
+  const S = attractShot, u = attractT / ATTRACT.SHOT;
+  if (S.kind === 'reveal') {
+    // dolly along the road, rising, the landmark held in frame
+    const s = S.s0 + u * Math.max(120, S.r * 0.7);
+    const c = centreAt(-s), t = centreTangent(-s);
+    const toT = new THREE.Vector3(S.target.x - c.x, 0, S.target.z - c.z).normalize();
+    // (on a cliff course the view is from out over the drop, clear of the rock)
+    const out = roadProfile().cliff ? 30 : -8, up = roadProfile().cliff ? 42 : 3;
+    camera.position.set(c.x + toT.x * out, c.y + up + u * 16, c.z + toT.z * out);
+    camera.lookAt(S.target.x, S.target.y + S.r * 0.15, S.target.z);
+  } else {
+    // a low, fast glide along the tarmac, looking down the road
+    const s = S.s0 + u * 150;
+    const c = centreAt(-s), a = centreAt(-(s + 40));
+    const t = centreTangent(-s);
+    camera.position.set(c.x + t.z * 2.2, c.y + 1.4 + Math.sin(u * 3) * 0.3, c.z - t.x * 2.2);
+    camera.lookAt(a.x, a.y + 1.5, a.z);
+    camera.rotateZ(Math.sin(u * Math.PI) * 0.05);
+  }
+  if (Math.abs(camera.fov - 50) > 0.1) { camera.fov = 50; camera.updateProjectionMatrix(); }
 }
+// THE INTRO: once a session, the flythrough runs letterboxed with the title,
+// the menu hidden; any key or tap (or ~20 s) hands over to the menu.
+function runAttract() {
+  let seen = false;
+  try { seen = sessionStorage.getItem('riderash.intro') === '1'; } catch (e) { /* private mode */ }
+  if (seen || navigator.webdriver) return;
+  const el = document.getElementById('intro');
+  if (!el) return;
+  el.hidden = false;
+  document.body.classList.add('attract');
+  attractShot = null; attractI = -1;
+  const done = (ev) => {
+    if (!document.body.classList.contains('attract')) return;
+    window.__INTRO_END__ = ev ? (ev.type + ':' + (ev.key || ev.target?.id || '')) : 'timer';
+    try { sessionStorage.setItem('riderash.intro', '1'); } catch (e) { /* private mode */ }
+    el.classList.add('out');
+    document.body.classList.remove('attract');
+    setTimeout(() => { el.hidden = true; }, 800);
+    removeEventListener('keydown', done, true); removeEventListener('pointerdown', done, true);
+  };
+  document.getElementById('introskip').addEventListener('click', done);
+  addEventListener('keydown', done, true);
+  addEventListener('pointerdown', done, true);
+  attractDone = done;
+  setTimeout(done, 40000);            // (a safety net; it normally ends on its third shot)
+}
+let attractDone = null;
 
 // ---- RACE STATS -------------------------------------------------------------
 // Everything the results screen reports beyond place and time. Accumulated per
@@ -1317,6 +1392,7 @@ function awardNitro(phys, n, why) {
     st.nitroEarned = (st.nitroEarned || 0) + got;
     if (why && got > 0) (st.nitroWhy || (st.nitroWhy = {}))[why] = ((st.nitroWhy || {})[why] || 0) + 1;
     if (why) state.warn = got > 0.01 ? `${why} — +NITRO` : why;
+    if (why && got > 0.01) feel.pattern([10, 50, 10], 0.25);
   }
   return got;
 }
@@ -1816,7 +1892,7 @@ function stepGame(dt) {
       state._airMax = 0;
       p.landHit = 0;                               // consumed; one sound per landing
     }
-    if (p.boost > 0 && !state.wasBoosting) { audio.oneShot(audio.buffers.boost ? 'boost' : 'swing', 0.7, 1.0); state.warn = 'BOOST'; }
+    if (p.boost > 0 && !state.wasBoosting) { audio.oneShot(audio.buffers.boost ? 'boost' : 'swing', 0.7, 1.0); state.warn = 'BOOST'; feel.pattern([30, 40, 60], 0.6); state.shake = Math.min(1, state.shake + 0.12); }
     state.wasBoosting = p.boost > 0;
     if (p.airborne) state._airMax = Math.max(state._airMax || 0, p.airTime);
     if (p.airborne && p.airTime > 0.45) state.warn = 'AIRBORNE';
@@ -2218,7 +2294,7 @@ function startPlayerArrest() {
     scene,
     onEvent: (e) => {
       if (e === 'cuff') state.warn = 'ARRESTED';
-      if (e === 'click') { audio.oneShot('impact', 0.4, 2.4); setTimeout(() => audio.oneShot('impact', 0.35, 2.6), 180); }
+      if (e === 'click') { audio.oneShot('impact', 0.4, 2.4); setTimeout(() => audio.oneShot('impact', 0.35, 2.6), 180); feel.pattern([25, 150, 25], 0.5); }
     },
     onDone: () => { state.arrest = null; bustRace(); },
   });
@@ -3198,6 +3274,7 @@ function openSettings(from) {
   $('set-fps').checked = settings.showFps;
   $('set-touch').value = settings.touch;
   $('set-tilt').checked = tilt.active;
+  $('set-vibe').checked = settings.vibration !== false;
   if (devUi) devUi.refresh();
   $(from === 'pause' ? 'pause' : 'title').classList.remove('on');
   $('settingsscreen').classList.add('on');
@@ -3232,6 +3309,7 @@ $('set-touch').addEventListener('change', (e) => {
 });
 // The checkbox tap IS the user gesture iOS demands for the motion permission,
 // so the request happens here, not at race start.
+$('set-vibe').addEventListener('change', (e) => { settings.vibration = e.target.checked; saveSettings(settings); if (e.target.checked) feel.pulse(0.6, 60); });
 $('set-tilt').addEventListener('change', async (e) => {
   if (e.target.checked) {
     const ok = await tilt.enable();

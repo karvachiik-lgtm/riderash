@@ -146,38 +146,51 @@ export class Landmarks {
     this.lite = lite;
     const L = finishS;
     const put = (fn, ...a) => { try { fn.apply(this, a); } catch (e) { console.warn('[landmarks]', e); } };
+    // CAMERA SHOTS for the attract/intro flythrough (main.js): the bounds of
+    // each named set piece, measured before its buffers are dropped below
+    this.shots = [];
+    const named = (name, fn, ...a) => {
+      const n0 = this.group.children.length;
+      put(fn, ...a);
+      const box = new THREE.Box3();
+      for (let i = n0; i < this.group.children.length; i++) { const o = this.group.children[i]; if (o.isMesh && !o.isInstancedMesh) box.expandByObject(o); }
+      if (!box.isEmpty()) {
+        const sph = box.getBoundingSphere(new THREE.Sphere());
+        this.shots.push({ name, centre: sph.center.clone(), r: Math.min(600, sph.radius), s: typeof a[0] === 'number' ? a[0] : 0 });
+      }
+    };
     if (mapId === 'sierra') {
-      put(this._monolith, L * 0.1, 1, 560, { w: 520, h: 430, d: 320, color: 0xc2bdb2, streak: 1 });           // El Capitan
-      put(this._falls, L * 0.28, 1, 470, { h: 420, tiers: [0.45, 0.4], cliff: 0xbab5aa, rainbow: true });     // Yosemite Falls
-      put(this._dome, L * 0.46, -1, 700, { r: 260, color: 0xc8c3b8 });                                          // Half Dome
-      put(this._falls, L * 0.74, -1, 430, { h: 260, tiers: [0.9], cliff: 0xb6b1a6, rainbow: false, w: 14 });   // Bridalveil
+      named('EL CAPITAN', this._monolith, L * 0.1, 1, 560, { w: 520, h: 430, d: 320, color: 0xc2bdb2, streak: 1 });           // El Capitan
+      named('YOSEMITE FALLS', this._falls, L * 0.28, 1, 470, { h: 420, tiers: [0.45, 0.4], cliff: 0xbab5aa, rainbow: true });     // Yosemite Falls
+      named('HALF DOME', this._dome, L * 0.46, -1, 700, { r: 260, color: 0xc8c3b8 });                                          // Half Dome
+      named('BRIDALVEIL FALL', this._falls, L * 0.74, -1, 430, { h: 260, tiers: [0.9], cliff: 0xb6b1a6, rainbow: false, w: 14 });   // Bridalveil
       put(this._birds, L * 0.3, 1, 180, 16);
       put(this._birds, L * 0.7, -1, 220, 12);
     } else if (mapId === 'coastal') {
-      put(this._stacks, L * 0.06, -1, 330);
-      put(this._lighthouse, L * 0.14, -1, 420);
-      put(this._seaArch, L * 0.58, -1, 380);
+      named('THE SEA STACKS', this._stacks, L * 0.06, -1, 330);
+      named('POINT SUR LIGHT', this._lighthouse, L * 0.14, -1, 420);
+      named('THE SEA ARCH', this._seaArch, L * 0.58, -1, 380);
       put(this._stacks, L * 0.66, -1, 300);
-      put(this._falls, L * 0.9, -1, 300, { h: 62, tiers: [0.72], cliff: 0x9c8a6e, rainbow: false, w: 6, cove: true, baseDy: -35 });   // McWay, onto the cove
+      named('McWAY FALLS', this._falls, L * 0.9, -1, 300, { h: 62, tiers: [0.72], cliff: 0x9c8a6e, rainbow: false, w: 6, cove: true, baseDy: -35 });   // McWay, onto the cove
       put(this._birds, L * 0.2, -1, 160, 14);
       put(this._birds, L * 0.62, -1, 180, 14);
     } else if (mapId === 'valley') {
-      put(this._balloons, L * 0.05, L * 0.7, lite ? 4 : 9);
+      named('BALLOONS OVER NAPA', this._balloons, L * 0.05, L * 0.7, lite ? 4 : 9);
       put(this._birds, L * 0.4, 1, 150, 12);
     } else if (mapId === 'desert') {
-      put(this._butte, L * 0.1, 1, 700, { r: 120, h: 260 });
+      named('MONUMENT VALLEY', this._butte, L * 0.1, 1, 700, { r: 120, h: 260 });
       put(this._butte, L * 0.16, -1, 820, { r: 90, h: 210 });
-      put(this._arch, L * 0.34, 1, 420, { span: 70, h: 55 });
-      put(this._butte, L * 0.52, -1, 650, { r: 160, h: 220, mesa: true });
-      put(this._butte, L * 0.58, 1, 900, { r: 70, h: 300, spire: true });
+      named('THE DELICATE ARCH', this._arch, L * 0.34, 1, 420, { span: 70, h: 55 });
+      named('THE MESA', this._butte, L * 0.52, -1, 650, { r: 160, h: 220, mesa: true });
+      named('THE SPIRE', this._butte, L * 0.58, 1, 900, { r: 70, h: 300, spire: true });
       put(this._butte, L * 0.8, 1, 720, { r: 130, h: 240 });
       put(this._birds, L * 0.45, 1, 220, 8);
     } else if (mapId === 'peninsula') {
-      put(this._bridge, L * 0.3, 1, 720);
+      named('THE GOLDEN GATE', this._bridge, L * 0.3, 1, 720);
       put(this._birds, L * 0.32, 1, 120, 14);
     } else if (mapId === 'ghat') {
-      put(this._ghatFalls, L * 0.36);
-      put(this._ghatFalls, L * 0.78);
+      named('DUDHSAGAR FALLS', this._ghatFalls, L * 0.36);
+      named('THE SECOND FALLS', this._ghatFalls, L * 0.78);
       put(this._birds, L * 0.2, 1, 120, 10);
       put(this._birds, L * 0.6, -1, 140, 10);
     }

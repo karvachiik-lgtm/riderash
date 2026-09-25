@@ -26,6 +26,7 @@ const DEFAULTS = {
   showFps: false,
   touch: 'auto',     // on-screen controls: auto = shown while touch is the input in use
   tilt: false,       // steer by tilting the phone (needs a permission tap on iOS)
+  vibration: true,   // phone vibration / gamepad rumble on hits (feel.js)
 };
 
 function clamp01(v, d) { return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : d; }
@@ -43,6 +44,7 @@ export function loadSettings() {
     showFps: typeof r.showFps === 'boolean' ? r.showFps : DEFAULTS.showFps,
     touch: TOUCH.includes(r.touch) ? r.touch : DEFAULTS.touch,
     tilt: typeof r.tilt === 'boolean' ? r.tilt : DEFAULTS.tilt,
+    vibration: typeof r.vibration === 'boolean' ? r.vibration : DEFAULTS.vibration,
   };
 }
 

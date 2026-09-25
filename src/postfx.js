@@ -38,6 +38,13 @@ const GradeShader = {
     uCoolAmt: { value: 0.070 },
     uLift:    { value: 0.012 },  // black floor: nothing crushes to pure black
     uVig:     { value: 0.34 },   // corner falloff, so the eye goes to the road
+    // FEEL (feel.js): speed blur, impact flash + fringe, boost glow, hurt pulse, grain
+    uSpeed:   { value: 0 },
+    uImpact:  { value: 0 },
+    uBoost:   { value: 0 },
+    uHurt:    { value: 0 },
+    uTime:    { value: 0 },
+    uGrain:   { value: 0.022 },
   },
   vertexShader: `
     varying vec2 vUv;
@@ -45,11 +52,29 @@ const GradeShader = {
   fragmentShader: `
     uniform sampler2D tDiffuse;
     uniform float uSat, uSatHi, uContrast, uWarmAmt, uCoolAmt, uLift, uVig;
+    uniform float uSpeed, uImpact, uBoost, uHurt, uTime, uGrain;
     uniform vec3 uWarm, uCool;
     varying vec2 vUv;
+    float fx_hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233)) + uTime * 61.7) * 43758.5453); }
 
     void main(){
-      vec3 c = texture2D(tDiffuse, vUv).rgb;
+      vec2 d0 = vUv - 0.5;
+      float r0 = length(d0);
+      // RADIAL SPEED BLUR: samples toward the centre, strongest at the edges and
+      // at speed (the centre -- the road ahead, the bike -- stays sharp)
+      float blur = (smoothstep(0.55, 1.0, uSpeed) * 0.022 + uBoost * 0.02) * smoothstep(0.12, 0.7, r0);
+      // CHROMATIC FRINGE on impacts: the channels part along the radius
+      float ca = uImpact * 0.012 * r0 + uBoost * 0.002;
+      vec3 c = vec3(0.0);
+      const int N = 6;
+      for (int i = 0; i < N; i++) {
+        float k = float(i) / float(N - 1);
+        vec2 uv = vUv - d0 * blur * k;
+        c.r += texture2D(tDiffuse, uv + d0 * ca).r;
+        c.g += texture2D(tDiffuse, uv).g;
+        c.b += texture2D(tDiffuse, uv - d0 * ca).b;
+      }
+      c /= float(N);
       float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
 
       // --- saturation, split by tone ---
@@ -80,6 +105,15 @@ const GradeShader = {
       vec2 d = vUv - 0.5;
       float r = dot(d, d) * 2.0;
       c *= 1.0 - uVig * smoothstep(0.25, 1.15, r);
+
+      // BOOST: a cool blue burn creeping in from the edges
+      c += vec3(0.25, 0.5, 1.0) * uBoost * 0.22 * smoothstep(0.3, 0.9, r * 1.0);
+      // IMPACT: a brief white-hot flash
+      c += vec3(1.0, 0.92, 0.85) * uImpact * uImpact * 0.09;       // squared: only a real hit flashes
+      // HURT: the edges pulse red when you are nearly out
+      c = mix(c, c * vec3(1.25, 0.35, 0.3), uHurt * (0.55 + 0.45 * sin(uTime * 6.0)) * smoothstep(0.35, 1.0, r));
+      // film grain, finer than a pixel's worth of banding
+      c += (fx_hash(vUv * 731.0) - 0.5) * uGrain;
 
       gl_FragColor = vec4(max(c, 0.0), 1.0);
     }`,
@@ -168,7 +202,12 @@ export class PostFX {
       };
       return;
     }
-    this.bloom.strength = 0.17 + speedFrac * 0.09;
+    this.bloom.strength = 0.17 + speedFrac * 0.09 + (this.feel ? this.feel.boost * 0.12 + this.feel.impact * 0.06 : 0);
+    if (this.feel) {
+      const U = this.grade.uniforms, f = this.feel;
+      U.uSpeed.value = f.speed; U.uImpact.value = f.impact; U.uBoost.value = f.boost;
+      U.uHurt.value = f.hurt; U.uTime.value = f.time % 100;
+    }
     this.composer.render(dt);
     // With a composer, renderer.info.render is RESET by each pass, so after the
     // last fullscreen quad it reports 1 call / 1 triangle. The scene's real cost

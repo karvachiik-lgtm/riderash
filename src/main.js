@@ -3439,7 +3439,70 @@ function refreshTitle() {
   if (ag) ag.textContent = over ? 'START NEW CAREER' : 'RIDE AGAIN';
   const note = document.getElementById('garagenote');
   if (note && over) note.textContent = 'your last career ended - a new one starts from race 1';
+  initGlides();
 }
+
+// THE GLIDE: one amber bar per menu row that SLIDES under whatever is hovered
+// or focused (CSS .glide), and rests under the row's selection -- the chosen
+// bike, the chosen road, RIDE -- when the pointer leaves. Rows are rebuilt by
+// refreshTitle, so the bar is re-attached each time (idempotent).
+const GLIDE_ROWS = [['garage', '.bike'], ['maps', '.map'], ['titleactions', '.btn'], ['freemaps', '.map'], ['freelevels', '.btn']];
+function glideTo(host, el) {
+  const g = host && host.querySelector(':scope > .glide');
+  if (!g || !el || !el.offsetWidth) { if (g) g.classList.remove('on'); return; }
+  g.style.left = `${el.offsetLeft + 4}px`;
+  g.style.width = `${Math.max(12, el.offsetWidth - 8)}px`;
+  g.style.top = `${el.offsetTop + el.offsetHeight + 9}px`;
+  g.classList.add('on');
+}
+function glideRest(host, sel) {
+  glideTo(host, host.querySelector(sel + '.sel') || host.querySelector('#start, #freego'));
+}
+function initGlides() {
+  for (const [id, sel] of GLIDE_ROWS) {
+    const host = document.getElementById(id);
+    if (!host) continue;
+    host.classList.add('glide-host');
+    if (!host.querySelector(':scope > .glide')) { const g = document.createElement('i'); g.className = 'glide'; host.appendChild(g); }
+    if (!host.__glide) {
+      host.__glide = true;
+      const at = (e) => { const el = e.target.closest && e.target.closest(sel); if (el && host.contains(el)) glideTo(host, el); };
+      host.addEventListener('pointerover', at);
+      host.addEventListener('focusin', at);
+      host.addEventListener('pointerleave', () => glideRest(host, sel));
+      host.addEventListener('focusout', () => setTimeout(() => { if (!host.contains(document.activeElement)) glideRest(host, sel); }, 0));
+    }
+    requestAnimationFrame(() => glideRest(host, sel));
+  }
+}
+addEventListener('resize', () => { for (const [id, sel] of GLIDE_ROWS) { const h = document.getElementById(id); if (h && h.__glide) glideRest(h, sel); } });
+
+// ARROW KEYS ON THE MENU: left / right along a row, up / down between rows
+// (garage, roads, actions), the glide following the focus; Enter or Space
+// presses the focused control (RIDE, or nothing focused, still starts).
+function menuNav(e) {
+  const title = document.getElementById('title'), free = document.getElementById('freescreen');
+  const screen = title.classList.contains('on') ? title : free.classList.contains('on') ? free : null;
+  if (!screen || state.running || document.getElementById('drivepick')?.classList.contains('on')) return;
+  if (showroom && showroom.isOpen) return;
+  const rows = (screen === title ? [['garage', '.bike'], ['maps', '.map'], ['titleactions', '.btn']] : [['freemaps', '.map'], ['freelevels', '.btn'], ['freego', null]])
+    .map(([id, sel]) => { const h = document.getElementById(id); return h ? (sel ? [...h.querySelectorAll(sel)] : [h.parentElement.querySelector('#freego'), h.parentElement.querySelector('#freeback')]).filter((x) => x && x.offsetWidth) : []; })
+    .filter((r) => r.length);
+  const ae = document.activeElement;
+  let ri = rows.findIndex((r) => r.includes(ae));
+  const k = e.key;
+  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(k)) return;
+  e.preventDefault(); e.stopPropagation();
+  if (ri < 0) { const r = rows[rows.length - 1]; r[0].focus(); return; }
+  const row = rows[ri], ci = row.indexOf(ae);
+  if (k === 'ArrowLeft' || k === 'ArrowRight') { row[(ci + (k === 'ArrowRight' ? 1 : row.length - 1)) % row.length].focus(); return; }
+  const nr = rows[Math.max(0, Math.min(rows.length - 1, ri + (k === 'ArrowDown' ? 1 : -1)))];
+  const x = ae.getBoundingClientRect().left + ae.offsetWidth / 2;
+  let best = nr[0], bd = Infinity;
+  for (const el of nr) { const r = el.getBoundingClientRect(), d = Math.abs(r.left + r.width / 2 - x); if (d < bd) { bd = d; best = el; } }
+  best.focus();
+}
+addEventListener('keydown', menuNav, true);
 
 buildMapPicker();
 refreshTitle();
@@ -3468,6 +3531,7 @@ function buildFreePicker() {
     el.addEventListener('click', () => { freePick.level = l; buildFreePicker(); });
     lv.appendChild(el);
   }
+  initGlides();
 }
 document.getElementById('freeride').addEventListener('click', () => {
   buildFreePicker();
@@ -3674,6 +3738,9 @@ function canKeyStart() {
 }
 addEventListener('keydown', (e) => {
   if (e.repeat) return;
+  const ae = document.activeElement;
+  const focusedCtl = ae && ae !== document.body && ae.id !== 'start' && ae.closest && ae.closest('#title, #over') && (ae.tagName === 'BUTTON' || ae.getAttribute('role') === 'button');
+  if ((e.code === 'Enter' || e.code === 'Space') && focusedCtl) return;
   if ((e.code === 'Enter' || e.code === 'Space' || e.code === 'KeyW') && canKeyStart()) {
     e.preventDefault();
     window.__START__();

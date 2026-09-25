@@ -846,7 +846,7 @@
   #titleactions .btn { font-size: 14px; padding: 13px 24px; }
   #titleactions #start { font-family: var(--display); font-weight: 400; font-size: 30px; letter-spacing: .16em; text-indent: .16em; padding: 8px 56px 6px; }
   #titleactions #resetcareer { font-size: 12px; padding: 10px 14px; }
-  #title p.keys { font-size: 12px !important; color: var(--dim) !important; line-height: 1.9; max-width: min(1180px, 96vw); }
+  #title p.keys { font-size: 12px !important; color: var(--dim) !important; line-height: 1.9; max-width: min(1320px, 98vw); }
   #title p.keys br { display: none; }
   #title p.keys kbd { font-size: 11px; padding: 1px 6px; }
   #tips { max-width: min(820px, 92vw); padding: 6px; margin-top: .4vh; }
@@ -862,6 +862,51 @@
   #titleactions #start { font-size: 26px; padding: 7px 48px 5px; }
   #titleactions .btn { padding: 11px 20px; }
 }
+
+/* ---- TACTILE: buttons that are BUTTONS -------------------------------------
+   Road Rash's menus were chunky slabs, italic, pressed in when you hit them.
+   Every title control gets a raised face (a top highlight, a hard dark lip under
+   it), lifts toward the cursor, and drops flat when pressed. One amber GLIDE bar
+   per row (title.js-less: main.js initGlides) slides to whatever is hovered or
+   focused, so moving between buttons reads as movement, not a colour swap. */
+#title .map, #title .bike, #titleactions .btn, #title .ccchip, #freescreen .map, #freescreen .btn, #over .btn {
+  transform: translateY(0) skewX(-6deg); transition: transform .12s cubic-bezier(.2,.9,.3,1.3), box-shadow .12s, background .14s, color .14s, border-color .14s; }
+#title .map, #title .bike, #freescreen .map {
+  background: linear-gradient(180deg, rgba(34,37,41,.9), rgba(14,15,17,.92)) !important;
+  border: 1px solid #2d3136 !important; box-shadow: inset 0 1px 0 rgba(255,255,255,.09), 0 5px 0 #050506, 0 6px 10px rgba(0,0,0,.35); }
+#title .map:not(.locked):hover, #title .bike:not(.locked):hover, #freescreen .map:hover {
+  transform: translateY(-3px) skewX(-6deg); border-color: #4a5057 !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.14), 0 8px 0 #050506, 0 10px 14px rgba(0,0,0,.4); }
+#title .map.sel, #title .bike.sel, #freescreen .map.sel {
+  transform: translateY(3px) skewX(-6deg); border-color: rgba(236,230,217,.6) !important;
+  background: linear-gradient(180deg, rgba(20,22,25,.95), rgba(30,32,36,.95)) !important;
+  box-shadow: inset 0 3px 0 var(--acc, #e3b93c), inset 0 -1px 0 rgba(255,255,255,.06), 0 2px 0 #050506; }
+#title .map:active, #title .bike:not(.locked):active, #freescreen .map:active { transform: translateY(4px) skewX(-6deg); box-shadow: inset 0 2px 6px rgba(0,0,0,.6), 0 1px 0 #050506; }
+#titleactions .btn, #freescreen .btn, #over .btn {
+  background: linear-gradient(180deg, #2c3035, #16181b) !important; border: 1px solid #3a3f45 !important; color: #d8d2c6 !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 5px 0 #050506, 0 7px 12px rgba(0,0,0,.35) !important; opacity: 1 !important; }
+#titleactions .btn:hover, #titleactions .btn:focus-visible, #freescreen .btn:hover, #over .btn:hover {
+  transform: translateY(-3px) skewX(-6deg); color: #fff !important; border-color: #5a6068 !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 8px 0 #050506, 0 10px 16px rgba(0,0,0,.4) !important; outline: none; }
+#titleactions .btn:active, #freescreen .btn:active, #over .btn:active {
+  transform: translateY(4px) skewX(-6deg); box-shadow: inset 0 2px 6px rgba(0,0,0,.6), 0 1px 0 #050506 !important; }
+#titleactions #start, #freescreen #freego, #over #again {
+  background: linear-gradient(180deg, #fff6e4, #e6dcc6 60%, #cfc3a8) !important; color: #0b0b0c !important; border: 1px solid #fff3dc !important;
+  box-shadow: inset 0 1px 0 #fff, inset 0 -2px 0 rgba(0,0,0,.18), 0 6px 0 #6b5a2c, 0 8px 14px rgba(0,0,0,.45) !important; }
+#titleactions #start:hover, #titleactions #start:focus-visible, #freescreen #freego:hover, #over #again:hover {
+  box-shadow: inset 0 1px 0 #fff, inset 0 -2px 0 rgba(0,0,0,.18), 0 9px 0 #6b5a2c, 0 12px 18px rgba(0,0,0,.5) !important; color: #0b0b0c !important; }
+#titleactions #start:active, #freescreen #freego:active, #over #again:active { box-shadow: inset 0 3px 6px rgba(0,0,0,.35), 0 1px 0 #6b5a2c !important; }
+#titleactions #resetcareer { color: #8f959b !important; }
+#title .ccchip { border-radius: 2px; }
+#title .ccchip:hover { transform: translateY(-2px) skewX(-6deg); }
+/* THE GLIDE: one per row, sliding under the hovered / focused control */
+.glide-host { position: relative; }
+.glide { position: absolute; left: 0; top: 0; width: 0; height: 4px; pointer-events: none; z-index: 2; opacity: 0;
+  background: var(--acc, #e3b93c); transform: skewX(-24deg);
+  transition: left .24s cubic-bezier(.3,1.35,.45,1), width .24s cubic-bezier(.3,1.35,.45,1), top .24s ease, opacity .18s; }
+.glide::after { content: ''; position: absolute; left: 50%; top: -6px; margin-left: -5px; border: 5px solid transparent; border-bottom-color: var(--acc, #e3b93c); }
+.glide.on { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .glide { transition: opacity .1s; } }
 
 /* ---- THE LOGO -----------------------------------------------------------------
    The three-colour fill the mark always had (cream, gold, orange: the

@@ -3,25 +3,26 @@
 // The music used to be synthesised at load (music.js): honest, file-free, and
 // soulless -- a sine-and-noise rock kit. These are ORIGINAL instrumental
 // recordings generated for this game (Atlas; see _refs/audio_briefs.md for the
-// briefs), in the register of 90s bike-combat racers: a grunge / alt-metal title
-// anthem, fuzz space-rock, bluesy biker stoner rock and a 16-bit-style metal
-// track with an FM lead -- no artist, song or game imitated, no vocals.
+// briefs), in the register of 90s bike-combat racers: a riff-led hard-rock title
+// theme, fast hard rock, bluesy stoner rock, double-kick metal and a grungy
+// biker groove -- generated with the model's instrumental flag ON (no vocals),
+// no artist, song or game imitated.
 //
 //   title      the menu and the intro flythrough
-//   race1..3   one per race, rotated (a course keeps its track across retries)
+//   race1..4   one per race, rotated (a course keeps its track across retries)
 //   win / bust stingers over the results
 //   rev        a V-twin revving away when you press RIDE
-//   select / move   menu confirm / navigation
+//   select     menu confirm (click only)
 //
 // Loaded after the game is audible, title first; if anything fails to load the
 // synthesised loops (music.js) and beds (audio_ext.js) simply stay in charge.
 const BASE = './assets/audio/music/';
 const FILES = {
-  title: 'title.mp3', race1: 'race1.mp3', race2: 'race2.mp3', race3: 'race3.mp3',
-  win: 'win.mp3', bust: 'bust.mp3', rev: 'rev.mp3', select: 'select.mp3', move: 'move.mp3',
+  title: 'title.mp3', race1: 'race1.mp3', race2: 'race2.mp3', race3: 'race3.mp3', race4: 'race4.mp3',
+  win: 'win.mp3', bust: 'bust.mp3', rev: 'rev.mp3', select: 'select.mp3',
 };
-const RACES = ['race1', 'race2', 'race3'];
-const LEVEL = { title: 0.9, race1: 0.8, race2: 0.8, race3: 0.8, win: 0.9, bust: 0.9, rev: 0.8, select: 0.55, move: 0.35 };
+const RACES = ['race1', 'race2', 'race3', 'race4'];
+const LEVEL = { title: 0.9, race1: 0.8, race2: 0.8, race3: 0.8, race4: 0.8, win: 0.9, bust: 0.9, rev: 0.8, select: 0.4 };
 
 export class Soundtrack {
   constructor(audio, audioExt) {
@@ -51,7 +52,7 @@ export class Soundtrack {
       this.ready = true;
       if (a._musicWant === 'menu') a.playMusic('menu', true);
     } catch (e) { console.warn('[soundtrack] title:', e); return; }
-    for (const n of ['select', 'move', 'rev', 'win', 'bust', ...RACES]) {
+    for (const n of ['select', 'rev', 'win', 'bust', ...RACES]) {
       try { await this._load(n); } catch (e) { console.warn('[soundtrack]', n, e); }
     }
     this._patchBeds();
@@ -103,20 +104,12 @@ export class Soundtrack {
     }
   }
 
-  /** Menu sounds on every button: a tick on hover/focus, a punchy confirm on click. */
+  /** Menu sounds: a confirm on click, the engine on RIDE. (No hover sound: a
+   *  tick on every pointer-over was noise, not feedback.) */
   bindUI(root = document) {
     if (this._uiBound) return;
     this._uiBound = true;
-    let lastMove = 0;
     const isBtn = (el) => el && el.closest && el.closest('button, .btn, .map, .bike, select');
-    root.addEventListener('pointerover', (e) => {
-      const b = isBtn(e.target);
-      if (!b || b === this._lastHover) return;
-      this._lastHover = b;
-      const t = performance.now();
-      if (t - lastMove > 60) { lastMove = t; this.play('move'); }
-    }, true);
-    root.addEventListener('focusin', (e) => { if (isBtn(e.target)) this.play('move'); }, true);
     root.addEventListener('click', (e) => {
       const b = isBtn(e.target);
       if (!b) return;

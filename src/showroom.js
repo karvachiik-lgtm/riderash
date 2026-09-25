@@ -150,7 +150,7 @@ export const PRESETS = {
   Outlaw:  { height: 1.82, build: 'heavy', shoulderWide: 1.14, limbLong: 0.98,
              colors: { jacket: 0x2a2624, pants: 0x3b4a63, helmet: 0x1a1d20, accent: 0x8a1f1f, skin: 0xc68e64 },
              look: { helmet: 'open', top: 'vest', hair: 'long', hairColor: 0x3b2616, beard: 'full', tattoo: 'tribal',
-                     glasses: 'shades', scarf: 'bandana', scarfColor: 0x1f2b3a, gloves: 'fingerless', finish: 'matte' } },
+                     glasses: 'shades', scarf: 'bandana', scarfColor: 0x1f2b3a, gloves: 'fingerless', finish: 'matte', buckle: 'star' } },
   Nomad:   { height: 1.76, build: 'lean', shoulderWide: 0.98, limbLong: 1.06,
              colors: { jacket: 0xc8b48a, pants: 0x6d4a2a, helmet: 0xd8d2c4, accent: 0x6d4a2a, skin: 0x7a5236 },
              look: { helmet: 'open', top: 'tee', hair: 'dreads', hairColor: 0x1a1512, glasses: 'goggles', scarf: 'bandana',
@@ -751,7 +751,7 @@ export class Showroom {
       // a whole random wardrobe, weighted toward the plausible (most riders
       // wear a lid; most accessories are off)
       look: {
-        helmet: pick(['full', 'full', 'open', 'none']), helmetSize: 0.92 + Math.random() * 0.2, headSize: 1.38 + Math.random() * 0.25,
+        helmet: pick(['full', 'full', 'open', 'none']), helmetSize: 0.92 + Math.random() * 0.2, headSize: 1.15 + Math.random() * 0.2,
         visor: pick(LOOK_OPTIONS.visor), stripe: pick(LOOK_OPTIONS.stripe), finish: pick(LOOK_OPTIONS.finish),
         hair: pick(LOOK_OPTIONS.hair), hairColor: pick(PALETTE.hair), beard: pick(['none', 'none', ...LOOK_OPTIONS.beard]),
         top: pick(LOOK_OPTIONS.top), tattoo: pick(['none', ...LOOK_OPTIONS.tattoo]), inkColor: pick(PALETTE.ink),

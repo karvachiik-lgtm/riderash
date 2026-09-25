@@ -28,7 +28,7 @@ const TIPS = [
 export function initTips(el) {
   if (!el) return;
   let i = Math.floor(Math.random() * TIPS.length), timer = 0, hold = false;
-  el.innerHTML = '<span class="tip-k">TIP</span><span class="tip-t" aria-live="polite"></span><span class="tip-n"><button type="button" class="tip-b" data-d="-1" aria-label="Previous tip">‹</button><button type="button" class="tip-b" data-d="1" aria-label="Next tip">›</button></span>';
+  el.innerHTML = '<span class="tip-k" aria-label="Tip"><b>T</b><b>I</b><b>P</b></span><i class="tip-tape" aria-hidden="true"></i><span class="tip-t" aria-live="polite"></span><span class="tip-n"><button type="button" class="tip-b" data-d="-1" aria-label="Previous tip">‹</button><button type="button" class="tip-b" data-d="1" aria-label="Next tip">›</button></span>';
   const t = el.querySelector('.tip-t');
   const show = (d) => {
     i = (i + d + TIPS.length) % TIPS.length;

@@ -105,6 +105,9 @@
   #replay .rp-b { background:none; border:1px solid transparent; color:#aeb3b9; font:inherit; font-size:12px; letter-spacing:.08em;
     padding:6px 10px; border-radius:6px; cursor:pointer; min-height:32px; }
   #replay .rp-b:hover { color:#fff; }
+  #replay .rp-i { width:16px; height:16px; display:block; }
+  #replay .rp-play .rp-i, #replay .rp-back .rp-i, #replay .rp-fwd .rp-i { width:18px; height:18px; }
+  #replay .rp-b:has(.rp-i) { display:inline-flex; align-items:center; justify-content:center; min-width:34px; }
   #replay .rp-b.sel { color:#fff; background:rgba(255,255,255,.1); border-color:rgba(255,255,255,.28); }
   #replay .rp-play { font-size:16px; color:#fff; min-width:42px; }
   #replay .rp-tl { position:relative; flex:1; height:30px; display:flex; align-items:center; }
@@ -270,7 +273,8 @@
      at full strength. The overlay gradient belongs to the menus, not here. */
   #showroom.screen { background:none; }
   #showtitle, #showbar, #showfoot { text-shadow:0 1px 3px rgba(0,0,0,.85); }
-  #showtitle { background:linear-gradient(90deg, rgba(8,9,11,.55), rgba(8,9,11,0)); padding:6px 14px 6px 10px; margin-left:-10px; border-radius:3px; }
+  #showtitle { background:rgba(10,11,13,.82); padding:8px 16px 8px 12px; margin-left:-10px; border-radius:3px; text-shadow:none; }
+  #showtitle .sub { color:#cfc9bd !important; font-weight:700; text-shadow:none; }
   #showfoot { background:linear-gradient(90deg, rgba(8,9,11,.6), rgba(8,9,11,0)); padding:6px 10px; border-radius:3px; }
   #showbar .emotes button { border-color:#6a5a3a; }
   #showbar .emotes .bategg { min-width:0; padding:4px 6px; border-color:transparent; background:transparent;
@@ -926,6 +930,26 @@
 .ep-repo-note { display: block; margin-top: 8px; font: italic 600 15px/1.3 var(--ui, sans-serif); color: #7a2a20; font-style: italic; }
 .ep-mug .ep-repo-note { color: #ff8a7a; text-align: center; }
 @media (max-width: 1100px) { .ep-pin { position: static; transform: none; width: min(300px, 80vw); margin: 0 auto 6px; } .ep-pin .ep { width: 100%; } .ep-pin .ep-line { font-size: 12px !important; } .ep-pin .ep-plac b { font-size: 16px; } }
+/* ---- TIPS, PUNK: a torn strip of black gaffer tape, ransom-note letters cut
+   from three different magazines, a safety pin through one end and a scrap of
+   masking tape on the other. The zine look, drawn in CSS: no images. */
+#tips { position: relative; border: 0 !important; border-radius: 0 !important; background: none !important; padding: 10px 14px 10px 18px !important; transform: rotate(-.6deg); }
+#tips::before { content: ''; position: absolute; inset: 0; z-index: -1; background: #0e0e10;
+  clip-path: polygon(0.0% 2.9%, 2.9% 5.9%, 5.9% 4.8%, 8.8% 0.5%, 11.8% 0.3%, 14.7% 0.6%, 17.6% 3.8%, 20.6% 1.1%, 23.5% 5.6%, 26.5% 5.2%, 29.4% 8.8%, 32.4% 7.7%, 35.3% 1.3%, 38.2% 2.8%, 41.2% 1.6%, 44.1% 5.8%, 47.1% 4.9%, 50.0% 0.5%, 52.9% 6.1%, 55.9% 2.8%, 58.8% 4.1%, 61.8% 7.1%, 64.7% 2.2%, 67.6% 4.7%, 70.6% 6.6%, 73.5% 8.8%, 76.5% 3.8%, 79.4% 1.4%, 82.4% 0.4%, 85.3% 6.9%, 88.2% 7.9%, 91.2% 6.3%, 94.1% 5.2%, 97.1% 7.6%, 100.0% 4.3%, 100.0% 98.6%, 97.1% 99.3%, 94.1% 96.7%, 91.2% 95.4%, 88.2% 96.1%, 85.3% 99.2%, 82.4% 92.6%, 79.4% 98.0%, 76.5% 91.5%, 73.5% 96.4%, 70.6% 99.6%, 67.6% 97.4%, 64.7% 98.9%, 61.8% 92.7%, 58.8% 94.8%, 55.9% 96.6%, 52.9% 99.4%, 50.0% 98.1%, 47.1% 96.2%, 44.1% 94.7%, 41.2% 97.3%, 38.2% 93.7%, 35.3% 94.8%, 32.4% 92.1%, 29.4% 97.4%, 26.5% 98.9%, 23.5% 93.2%, 20.6% 95.6%, 17.6% 94.0%, 14.7% 94.8%, 11.8% 97.2%, 8.8% 94.7%, 5.9% 95.9%, 2.9% 91.5%, 0.0% 94.0%);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.05); }
+#tips::after { content: ''; position: absolute; left: -26px; top: -10px; width: 74px; height: 22px; transform: rotate(-24deg);
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 80 24'%3E%3Cg fill='none' stroke='%23c9ccd0' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M10 12 H66 A6 6 0 0 0 66 6 H18'/%3E%3Cpath d='M66 12 A6 6 0 0 1 66 18 H22'/%3E%3C/g%3E%3Crect x='3' y='6' width='14' height='12' rx='3' fill='%23c9ccd0'/%3E%3Ccircle cx='66' cy='12' r='2.6' fill='none' stroke='%23c9ccd0' stroke-width='2'/%3E%3C/svg%3E") no-repeat center / contain; filter: drop-shadow(1px 2px 0 #000); pointer-events: none; }
+#tips .tip-tape { position: absolute; right: -14px; top: -8px; width: 58px; height: 22px; transform: rotate(18deg);
+  background: rgba(226,214,178,.82); box-shadow: 1px 1px 0 rgba(0,0,0,.4); pointer-events: none;
+  clip-path: polygon(0 8%, 6% 0, 12% 10%, 20% 2%, 30% 9%, 40% 0, 52% 8%, 64% 1%, 76% 9%, 88% 0, 100% 7%, 100% 92%, 90% 100%, 78% 91%, 66% 99%, 52% 90%, 40% 100%, 28% 92%, 16% 100%, 6% 91%, 0 98%); }
+#tips .tip-k { display: inline-flex; gap: 2px; align-items: center; background: none !important; padding: 0 !important; border-radius: 0 !important; transform: none !important; }
+#tips .tip-k b { display: inline-block; padding: 2px 5px 1px; line-height: 1; font-size: 17px; letter-spacing: 0; }
+#tips .tip-k b:nth-child(1) { background: #ece6d9; color: #0b0b0c; font-family: Georgia, 'Times New Roman', serif; font-weight: 900; transform: rotate(-7deg); }
+#tips .tip-k b:nth-child(2) { background: #e3b93c; color: #0b0b0c; font-family: var(--display, sans-serif); font-weight: 400; transform: rotate(5deg) translateY(2px); }
+#tips .tip-k b:nth-child(3) { background: #0b0b0c; color: #ece6d9; border: 2px solid #ece6d9; font-family: ui-monospace, Menlo, monospace; font-weight: 700; transform: rotate(-3deg); }
+#tips .tip-b { border-radius: 0 !important; border: 2px solid #ece6d9 !important; color: #ece6d9 !important; background: #0b0b0c; transform: rotate(-3deg); }
+#tips .tip-b + .tip-b { transform: rotate(4deg); }
+#tips .tip-b:hover { background: #ece6d9; color: #0b0b0c !important; }
 </style>
 </head>
 <body>

@@ -235,14 +235,17 @@ export const LOOK_OPTIONS = {
   scarf:   ['none', 'bandana'],
   suit:    ['none', 'bat'],
   gloves:  ['full', 'fingerless', 'none'],
+  bottomPrint: ['none', 'flag'],     // stars and stripes on swim bottoms (shape and colour, no lettering)
+  buckle:  ['plain', 'star'],        // a big rodeo buckle: gold rim, blue field, white star
 };
 export const LOOK_DEFAULTS = {
-  helmet: 'full', helmetSize: 1.0, headSize: 1.5, bust: 1.4, seat: 1.3, visor: 'smoke', stripe: 'racing', finish: 'gloss',
+  helmet: 'full', helmetSize: 1.0, headSize: 1.25, bust: 1.4, seat: 1.3, visor: 'smoke', stripe: 'racing', finish: 'gloss',
   hair: 'short', hairColor: 0x2a1d14, beard: 'none',
   top: 'leather', bottom: 'jeans', pattern: 'plain', figure: 'm', hat: 'none', shoes: 'boots', tattoo: 'none', inkColor: 0x1c2433,
   glasses: 'none', chain: 'none', suit: 'none', scarf: 'none', scarfColor: 0x8a1f1f,
   earring: false, spikes: false, backpack: false,
   gloves: 'full', gloveColor: 0x232020, bootColor: 0x1f1c1a,
+  bottomPrint: 'none', buckle: 'plain',
 };
 /** A complete, valid look from any partial (or junk) input. */
 export function makeLook(l) {

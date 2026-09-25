@@ -66,7 +66,7 @@ export const FLAG_OUTFITS = {
             chain: 'gold', earring: true, shoes: 'low', bootColor: 0xc4b03a } },
   'Stars & Stripes': { height: 1.72, skin: 0xe0ac87,
     colors: { jacket: 0x1f3a7a, pants: 0x1f3a7a, accent: 0xd8262e },
-    look: { top: 'bikini', pattern: 'stars', hair: 'long', hairColor: 0xe0cc8a, glasses: 'aviator', earring: true,
+    look: { top: 'bikini', pattern: 'stars', bottomPrint: 'flag', hair: 'long', hairColor: 0xe0cc8a, glasses: 'aviator', earring: true,
             shoes: 'low', bootColor: 0xf0efe8, hat: 'cowboy' } },
   'Beach Day': { height: 1.7, skin: 0xc68e64,
     colors: { jacket: 0xd8262e, pants: 0xd8262e, accent: 0xf0efe8 },
@@ -185,7 +185,7 @@ export function flagOutfitSpec(name) {
   return {
     height: O.height, build: 'lean', shoulderWide: 0.84, limbLong: 1.04,
     colors: { helmet: 0x1a1d20, skin: O.skin, ...O.colors },
-    look: { helmet: 'none', gloves: 'none', figure: 'f', headSize: 1.5, bust: O.bust ?? 1.45, seat: O.seat ?? 1.4, ...O.look },
+    look: { helmet: 'none', gloves: 'none', figure: 'f', headSize: 1.25, bust: O.bust ?? 1.45, seat: O.seat ?? 1.4, ...O.look },
   };
 }
 

@@ -37,11 +37,12 @@ export default function (THREE) {
   // the original rider -- full-face lid, leathers, gloves -- so a spec without a
   // look (an old save, a rival) builds the same body as before, mesh for mesh.
   const L = Object.assign({
-    helmet: 'full', helmetSize: 1, headSize: 1.5, bust: 1.4, seat: 1.3, visor: 'smoke', stripe: 'racing', finish: 'gloss', hair: 'short',
+    helmet: 'full', helmetSize: 1, headSize: 1.25, bust: 1.4, seat: 1.3, visor: 'smoke', stripe: 'racing', finish: 'gloss', hair: 'short',
     hairColor: 0x2a1d14, beard: 'none', top: 'leather', bottom: 'jeans', pattern: 'plain', figure: 'm',
     hat: 'none', shoes: 'boots', tattoo: 'none', inkColor: 0x1c2433,
     glasses: 'none', chain: 'none', suit: 'none', scarf: 'none', scarfColor: 0x8a1f1f, earring: false,
     spikes: false, backpack: false, gloves: 'full', gloveColor: 0x232020, bootColor: 0x1f1c1a,
+    bottomPrint: 'none', buckle: 'plain',
   }, S.look || {});
   if (L.suit === 'bat') {
     // the suit replaces everything it covers (cowl instead of lid and hair)
@@ -103,7 +104,13 @@ export default function (THREE) {
   if (L.pattern !== 'plain') { cotton.map = patternTex(L.pattern, C.jacket); cotton.color.setHex(0xffffff); }
   if (swim) { cotton.roughness = 0.45; }
   if (BAT) { cotton.roughness = 0.5; cotton.metalness = 0.1; }   // the suit's armoured weave                // swimwear: a lycra sheen
-  const skirtMat = BOTTOM === 'dress' || BOTTOM === 'swim' ? cotton : M(C.pants, 0.85, 0.0, true); skirtMat.name = 'fabric';
+  let skirtMat = BOTTOM === 'dress' || BOTTOM === 'swim' ? cotton : M(C.pants, 0.85, 0.0, true); skirtMat.name = 'fabric';
+  // STARS AND STRIPES on a swim bottom: red and white bands round the hips,
+  // the blue star field over the seat. Shape and colour only -- no lettering.
+  if (BOTTOM === 'swim' && L.bottomPrint === 'flag') {
+    skirtMat = cotton.clone(); skirtMat.name = 'fabric';
+    skirtMat.map = flagTex(); skirtMat.color.setHex(0xffffff);
+  }
   const cottonDk = M(shade(C.jacket, 0.72), 0.94, 0.0, true); cottonDk.name = 'fabric';
   const hairMat = M(L.hairColor, L.hair === 'slick' ? 0.32 : 0.86, 0.0, true); hairMat.name = 'fabric';
   const stubbleMat = M(mix(C.skin, L.hairColor, 0.55), 0.95, 0.0); stubbleMat.name = 'fabric';
@@ -217,6 +224,31 @@ export default function (THREE) {
     return t;
   }
 
+  // A FLAG wrapped round a sphere's UVs: u runs round the hips (0.75 is the
+  // back), v down them. Stripes by v, the canton over the seat with a star grid.
+  function flagTex() {
+    const W = 128, H = 64, d = new Uint8Array(W * H * 4);
+    const red = [178, 34, 52], white = [244, 240, 232], blue = [36, 52, 110];
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const u = x / W, v = y / H;
+      let c = Math.floor(v * 16) % 2 ? white : red;
+      if (u > 0.63 && u < 0.87 && v > 0.44 && v < 0.72) {
+        c = blue;
+        const cu = (u - 0.63) / 0.24 * 6, cv = (v - 0.44) / 0.28 * 4;
+        const fx = cu - Math.floor(cu) - 0.5, fy = cv - Math.floor(cv) - 0.5;
+        const r = Math.hypot(fx * 1.6, fy), a = Math.atan2(fy, fx) + Math.PI / 2;
+        if (r < 0.2 + 0.14 * Math.pow(Math.max(0, Math.cos((a * 5) / 2)), 3)) c = white;
+      }
+      const i = (y * W + x) * 4;
+      d[i] = c[0]; d[i + 1] = c[1]; d[i + 2] = c[2]; d[i + 3] = 255;
+    }
+    const t = new THREE.DataTexture(d, W, H);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.magFilter = THREE.LinearFilter;
+    t.needsUpdate = true;
+    return t;
+  }
+
   // TATTOOS: ink painted into a small DataTexture over the skin tone -- pure
   // code, no canvas, no image. The lathe segments carry UVs with u around the
   // limb and v down it (0 at the joint), so a pattern is a function of (u, v).
@@ -310,7 +342,20 @@ export default function (THREE) {
   if (!bareLegs) {
     // belt, and a steel buckle at the front
     pelvis.add(mk(cbox(S.pelvisW * 1.03, S.pelvisH * 0.2, S.pelvisD * 1.03, 0.012), seam, 0, S.pelvisH * 0.42, 0));
-    pelvis.add(mk(cbox(0.06, S.pelvisH * 0.2, 0.014, 0.004), steel, 0, S.pelvisH * 0.42, S.pelvisD * 0.52));
+    if (L.buckle === 'star') {
+      // A RODEO BUCKLE: a big gold oval, a blue field, a white five-point star
+      const bz = S.pelvisD * 0.52, by = S.pelvisH * 0.42, bw = 0.055;
+      const rim = mk(new THREE.CylinderGeometry(bw, bw, 0.012, 20), gold, 0, by, bz + 0.004, Math.PI / 2);
+      rim.scale.set(1.25, 1, 0.8); pelvis.add(rim);
+      const field = mk(new THREE.CylinderGeometry(bw * 0.78, bw * 0.78, 0.004, 20), P(0x24346e, 0.35, 0.3, 0.6, 0.2), 0, by, bz + 0.011, Math.PI / 2);
+      field.scale.set(1.25, 1, 0.8); pelvis.add(field);
+      const star = new THREE.Shape();
+      for (let k = 0; k < 10; k++) {
+        const r = k % 2 ? bw * 0.22 : bw * 0.55, a = Math.PI / 2 + k * Math.PI / 5;
+        if (k) star.lineTo(Math.cos(a) * r, Math.sin(a) * r); else star.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+      }
+      pelvis.add(mk(new THREE.ShapeGeometry(star), P(0xf4f0e8, 0.4, 0.0, 0.3, 0.3), 0, by, bz + 0.0135));
+    } else pelvis.add(mk(cbox(0.06, S.pelvisH * 0.2, 0.014, 0.004), steel, 0, S.pelvisH * 0.42, S.pelvisD * 0.52));
     // back pockets, as raised panels
     for (const s of [-1, 1]) pelvis.add(mk(cbox(S.pelvisW * 0.3, S.pelvisH * 0.42, 0.012, 0.004), denim, s * S.pelvisW * 0.22, -S.pelvisH * 0.04, -S.pelvisD * 0.51));
   } else if (BOTTOM !== 'swim') {

@@ -75,6 +75,18 @@ export const EV = {
   finish:{ w: 2, col: '#ffffff' },
 };
 
+// Control icons: drawn, one stroke weight, currentColor -- the emoji glyphs
+// (⏪ ⏩ ◀ ▶) rendered as coloured system emoji and read as clip art.
+const svgI = (d, fill = false) => `<svg class="rp-i" viewBox="0 0 24 24" aria-hidden="true">${fill ? d : `<g fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">${d}</g>`}</svg>`;
+const ICON = {
+  play: svgI('<path d="M7 4.5v15l12.5-7.5z" fill="currentColor"/>', true),
+  pause: svgI('<rect x="6" y="4.5" width="4" height="15" rx="1" fill="currentColor"/><rect x="14" y="4.5" width="4" height="15" rx="1" fill="currentColor"/>', true),
+  back: svgI('<path d="M11 6 5 12l6 6"/><path d="M19 6l-6 6 6 6"/>'),
+  fwd: svgI('<path d="M13 6l6 6-6 6"/><path d="M5 6l6 6-6 6"/>'),
+  prev: svgI('<path d="M15 5l-7 7 7 7"/>'),
+  next: svgI('<path d="M9 5l7 7-7 7"/>'),
+};
+
 export class Replay {
   /** `scene`: the world root (detached bikes and riders live there). */
   constructor(scene, camera, host, hooks = {}) {
@@ -509,15 +521,15 @@ export class Replay {
       <div class="rp-hint">PAUSED · drag to rotate · scroll / pinch to zoom · shift + ← → one frame</div>
       <div class="rp-bar">
         <div class="rp-row">
-          <button class="rp-b rp-play" title="Play / pause (Space)">❚❚</button>
-          <button class="rp-b rp-back" title="Back 5 s (←)">⏪</button><button class="rp-b rp-fwd" title="Forward 5 s (→)">⏩</button>
+          <button class="rp-b rp-play" title="Play / pause (Space)" aria-label="Play or pause">${ICON.pause}</button>
+          <button class="rp-b rp-back" title="Back 5 s (←)" aria-label="Back 5 seconds">${ICON.back}</button><button class="rp-b rp-fwd" title="Forward 5 s (→)" aria-label="Forward 5 seconds">${ICON.fwd}</button>
           <div class="rp-tl"><div class="rp-marks"></div><input type="range" class="rp-seek" min="0" max="1000" step="1" aria-label="Replay timeline"></div>
           <span class="rp-time">0:00</span>
         </div>
         <div class="rp-row rp-ctl">
           <span class="rp-grp rp-speeds">${[0.25, 0.5, 1, 2].map((s) => `<button class="rp-b" data-speed="${s}">${s}×</button>`).join('')}</span>
           <span class="rp-grp rp-cams">${['chase', 'tv', 'heli', 'orbit', 'onboard'].map((c) => `<button class="rp-b" data-cam="${c}">${c.toUpperCase()}</button>`).join('')}</span>
-          <span class="rp-grp rp-who"><button class="rp-b" data-who="-1">◀</button><span class="rp-name">YOU</span><button class="rp-b" data-who="1">▶</button></span>
+          <span class="rp-grp rp-who"><button class="rp-b" data-who="-1" aria-label="Previous rider">${ICON.prev}</button><span class="rp-name">YOU</span><button class="rp-b" data-who="1" aria-label="Next rider">${ICON.next}</button></span>
           <span class="rp-grp"><button class="rp-b rp-hl">HIGHLIGHTS</button><button class="rp-b rp-exit">EXIT</button></span>
         </div>
       </div>`;
@@ -613,7 +625,7 @@ export class Replay {
 
   _syncUi() {
     const u = this.ui;
-    u.play.textContent = this.playing ? '❚❚' : '▶';
+    { const k = this.playing ? 'pause' : 'play'; if (u.play.dataset.i !== k) { u.play.dataset.i = k; u.play.innerHTML = ICON[k]; } }
     this.el.classList.toggle('paused', !this.playing);
     this.el.querySelectorAll('[data-speed]').forEach((b) => b.classList.toggle('sel', +b.dataset.speed === this.speed));
     this.el.querySelectorAll('[data-cam]').forEach((b) => b.classList.toggle('sel', b.dataset.cam === this.camMode));

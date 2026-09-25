@@ -965,6 +965,32 @@
 #freelevels .fl.sel { border-color: var(--bone); color: var(--bone); box-shadow: inset 0 2px 0 var(--acc); }
 #freego { background: var(--bone); color: #0b0b0c; border: 0; font-family: var(--display); font-size: 26px; padding: 9px 48px 7px; box-shadow: 5px 5px 0 #000; }
 #freego:hover, #freego:focus { background: #fff; color: #0b0b0c; }
+/* ---- THE ARREST, CINEMATIC: letterbox bars in, a dip to black as he steps off */
+body::before, body::after { content: ''; position: fixed; left: 0; right: 0; height: 0; background: #000; z-index: 44; pointer-events: none; transition: height .9s cubic-bezier(.3,.8,.3,1); }
+body::before { top: 0; } body::after { bottom: 0; }
+body.cine::before, body.cine::after { height: 10.5vh; }
+#cinefade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 43; }
+#cinefade.dip { animation: cineDip 1.5s ease both; }
+@keyframes cineDip { 0% { opacity: 0; } 25% { opacity: 1; } 45% { opacity: 1; } 100% { opacity: 0; } }
+body.cine #hud, body.cine .hud { opacity: 0; transition: opacity .5s; }
+/* citation */
+.ep-cite { width: min(620px, 90vw); background: #f3ecc8; padding: 12px 14px 14px; transform: rotate(-1.5deg); box-shadow: 8px 10px 0 rgba(0,0,0,.45);
+  background-image: repeating-linear-gradient(180deg, transparent 0 23px, rgba(80,110,160,.18) 23px 24px); }
+.ep-cite-h { font: 700 12px/1.2 ui-monospace, Menlo, monospace; letter-spacing: .08em; color: #7a1f1a; border-bottom: 2px solid #7a1f1a; padding-bottom: 6px; display: flex; justify-content: space-between; }
+.ep-cite-h em { font-style: normal; color: #333; }
+.ep-cite-b { display: flex; gap: 12px; margin-top: 10px; }
+.ep-cite-b .ep-frame { flex: 0 0 46%; }
+.ep-cite-b img { filter: sepia(.35) contrast(1.05); border: 1px solid #bba; }
+.ep-cite-f { flex: 1; display: flex; flex-direction: column; text-align: left; font-family: ui-monospace, Menlo, monospace; }
+.ep-cite-f small { font-size: 9px; letter-spacing: .14em; color: #7a6a4a; margin-top: 4px; }
+.ep-cite-f b { font-family: 'Segoe Print', 'Bradley Hand', 'Comic Sans MS', cursive; font-size: 15px; font-weight: 700; color: #1d2a6a; line-height: 1.15; }
+.ep-cite-f .ep-fine { font-size: 24px; color: #7a1f1a; }
+.ep-sig { display: block; margin-top: auto; height: 18px; border-bottom: 1px solid #555;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 20'%3E%3Cpath d='M4 14c8-12 12 4 18-6s6 10 14 0 8-8 12 2 10-10 16-2 6 6 14-4 10 8 18 0' fill='none' stroke='%231d2a6a' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat left bottom / 120px 18px; }
+.ep-cite .ep-line { margin-top: 8px !important; font-style: italic; }
+@keyframes epStamp2 { from { opacity: 0; transform: rotate(-12deg) scale(2.4); } }
+.ep-final { position: absolute; right: 18px; top: 44%; transform: rotate(-12deg); border: 4px solid #b0302a; color: #b0302a; padding: 4px 12px 2px;
+  font: 400 34px/1 var(--display, sans-serif); letter-spacing: .08em; font-style: normal; animation: epStamp2 .35s cubic-bezier(.3,1.6,.5,1) .6s both; background: rgba(243,236,200,.3); }
 </style>
 </head>
 <body>
@@ -1069,6 +1095,7 @@
   <div id="tips" role="note"></div>
 </div>
 
+<div id="cinefade"></div>
 <div class="screen" id="freescreen">
   <h2>FREE RIDE</h2>
   <p>Any road, any level. No prize, no fines, no repair bills: nothing counts but the ride.</p>

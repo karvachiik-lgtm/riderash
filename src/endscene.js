@@ -12,7 +12,7 @@
 //
 // The photo is a real frame of the game: main.js asks for a snap, and the
 // canvas is copied straight after it renders (no preserveDrawingBuffer
-// needed). It holds for a beat (any key skips), then stays pinned to the
+// needed). It holds for a beat (Enter / Space / Esc / a tap skips), then stays pinned to the
 // results card. Everything here is DOM + a 2D canvas; no assets.
 
 const pick = (a) => a[Math.floor(Math.random() * a.length)];
@@ -47,6 +47,18 @@ const LINES = {
     'Excessive fun in a public place',
     'Aggravated wheelie',
   ],
+  ticket: [
+    'Operating a motorcycle in a manner best described as "yes"',
+    'Excessive enthusiasm, second degree',
+    'Failure to yield to common sense',
+    'Speeding, fighting, and speeding while fighting',
+    'Wearing that jacket at those speeds',
+  ],
+  ticketSub: [
+    'Signed, sealed, and slapped on your visor.',
+    'He wrote slowly. On purpose.',
+    'Payable in cash, tears, or both.',
+  ],
   bustSub: [
     'You have the right to remain silent. You were already screaming.',
     'Bail is set at one (1) bike.',
@@ -59,7 +71,7 @@ const LINES = {
     'Took the scenic route. Straight down.',
   ],
 };
-const TITLE = { win: 'WINNER', podium: 'QUALIFIED', loss: 'ALSO RAN', bust: 'BOOKED', plunge: 'GREETINGS FROM THE VALLEY' };
+const TITLE = { win: 'WINNER', podium: 'QUALIFIED', loss: 'ALSO RAN', bust: 'BOOKED', ticket: 'TICKETED', plunge: 'GREETINGS FROM THE VALLEY' };
 
 export class EndPhoto {
   constructor() {
@@ -98,6 +110,18 @@ export class EndPhoto {
         <b>${(ctx.name || 'RIDER').toUpperCase()}</b><span>CHARGE: ${charge.toUpperCase()}</span>
         <em>No. ${String(100000 + Math.floor(Math.random() * 899999))}</em></div>
         <p class="ep-line">${pick(LINES.bustSub)}</p></div>`;
+    } else if (kind === 'ticket') {
+      // A CITATION: the pad the cop just tore it off, the violation, the fine,
+      // his scrawl -- and on a lecture, the FINAL WARNING stamp
+      const fine = ctx.fine ? `$${ctx.fine}` : '$0 (FREE RIDE)';
+      html = `<div class="ep ep-cite"><div class="ep-cite-h">RIDERASH COUNTY · UNIFORM TRAFFIC CITATION<em>No. ${String(40000 + Math.floor(Math.random() * 59999))}</em></div>
+        <div class="ep-cite-b"><div class="ep-frame">${img}</div><div class="ep-cite-f">
+        <small>NAME</small><b>${(ctx.name || 'RIDER').toUpperCase()}</b>
+        <small>LOCATION</small><b>${f('{course}').toUpperCase()}</b>
+        <small>VIOLATION</small><b>${pick(LINES.ticket)}</b>
+        <small>FINE</small><b class="ep-fine">${fine}</b>
+        <i class="ep-sig"></i></div></div>
+        <p class="ep-line">${pick(LINES.ticketSub)}</p>${ctx.final ? '<i class="ep-final">FINAL WARNING</i>' : ''}</div>`;
     } else if (kind === 'plunge') {
       html = `<div class="ep ep-post"><div class="ep-frame">${img}<b class="ep-greet">GREETINGS FROM<br><span>${f('{course}').toUpperCase()}</span></b></div>
         <p class="ep-line">${f(pick(LINES.plunge))}</p><i class="ep-stamp">VALLEY FLOOR<br>POST</i></div>`;
@@ -108,7 +132,7 @@ export class EndPhoto {
         <p class="ep-line">${f(pick(LINES[kind]))}</p>${conf}</div>`;
     }
     this.card = html;
-    this.el.innerHTML = `<i class="ep-flash"></i>${html}<small class="ep-skip">any key</small>`;
+    this.el.innerHTML = `<i class="ep-flash"></i>${html}<small class="ep-skip">enter / tap</small>`;
     this.el.className = 'on';
     // confetti: each piece its own spot, colour and fall
     this.el.querySelectorAll('.ep-confetti').forEach((c, i) => {

@@ -583,7 +583,15 @@ export class Rival {
       }
     }
     // HELD: fight it. Skill decides how often a rival wriggles out.
-    if (f.heldBy) f.struggle((0.12 + this.brain.skill * 0.4) * dt);   // ~0.2-0.5/s: good riders sometimes slip a long hold
+    if (f.heldBy) {
+      f.struggle((0.12 + this.brain.skill * 0.4) * dt);   // ~0.2-0.5/s: good riders sometimes slip a long hold
+      // and they FIGHT it where you can see it: hard left-right-left weaving,
+      // each reversal a wrench at the grip (the same move that works for you)
+      this._weaveT = (this._weaveT || 0) + dt * (5.5 + this.brain.skill * 2.5);
+      const w = Math.sign(Math.sin(this._weaveT)) || 1;
+      if (w !== this._weaveW) { this._weaveW = w; f.struggle(CFG.GRAPPLE_BREAK * (0.25 + this.brain.skill * 0.25)); }
+      steer = w * 0.9;
+    } else this._weaveT = 0;
     const control = {
       throttle: thrOn && !brkOn,
       brake: brkOn,

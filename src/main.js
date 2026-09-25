@@ -1614,7 +1614,7 @@ function stepGame(dt) {
     onGrab(attacker, target) {
       audio.impact(0.8, 'punch');
       if (attacker === player.fighter) { state.warn = 'GRABBED HIM — G TO THROW'; state.shake = Math.min(1.2, state.shake + 0.25); }
-      else if (target === player.fighter) { state.warn = attacker.collar ? 'COLLARED! MASH J K L' : 'GRABBED! MASH J K L'; state.shake = Math.min(1.2, state.shake + 0.4); }
+      else if (target === player.fighter) { state.warn = attacker.collar ? 'COLLARED! MASH J K L OR WEAVE HARD' : 'GRABBED! MASH J K L OR WEAVE HARD'; state.shake = Math.min(1.2, state.shake + 0.4); }
     },
     onThrow(attacker, target) {
       state.score += attacker === player.fighter ? 60 : 0;
@@ -1709,6 +1709,7 @@ function stepGame(dt) {
   if (state.plunge) stepPlunge(dt);
   else {
     player.update(dt, gridInput, world, hooks);
+    weaveFree(dt, gridInput);
     if (player.phys.overEdge && !state.raceOver) startPlunge();
   }
   // SLIDE DUST. A thrown body scrubbing along the tarmac kicks up grit, and the
@@ -2339,6 +2340,13 @@ function eliminateRace() {
 // ---- THE ARREST (arrest.js) ---------------------------------------------------
 // A bust is not a card: the camera pulls back, the cop pulls up, gets off,
 // walks over and cuffs you; THEN the results. Any key skips it after a second.
+let lastBustVariant = null;
+// THE DIP: to black and back as the cop steps off -- the cut into the scene
+function cineDip() {
+  const el = document.getElementById('cinefade');
+  if (!el) return;
+  el.classList.remove('dip'); void el.offsetWidth; el.classList.add('dip');
+}
 function startPlayerArrest() {
   const cf = cop.fighter;
   if ((cf.hold || cf.heldBy) && cf._endHold) cf._endHold('break', hooks);
@@ -2346,14 +2354,31 @@ function startPlayerArrest() {
   audio.siren(0);
   audio.oneShot('horn', 0.35, 0.7);
   state.warn = 'BUSTED!';
+  // HOW HE TAKES YOU IN varies, and never twice running (arrest.js): made to
+  // kneel, put on the ground, cuffed, ticketed, or lectured THEN ticketed
+  const seated = !(player.dismount && player.dismount.onFoot);
+  const pool = (seated ? ['knees', 'ground', 'cuff', 'ticket', 'lecture'] : ['cuff', 'ticket', 'lecture']).filter((v) => v !== lastBustVariant);
+  const variant = window.__BUST_VARIANT__ || pool[Math.floor(Math.random() * pool.length)];
+  lastBustVariant = variant;
+  document.body.classList.add('cine');
   state.arrest = new Arrest(cop, { phys: player.phys, fighter: player.fighter, dismount: player.dismount }, {
-    scene,
+    scene, variant,
     onEvent: (e) => {
+      if (e === 'off') { cineDip(); state.warn = variant === 'knees' ? 'ON YOUR KNEES' : variant === 'ground' ? 'GET ON THE GROUND' : 'PULLED OVER'; }
+      if (e === 'wag') state.warn = 'LECTURE TIME';
+      if (e === 'write') state.warn = 'WRITING YOU UP';
+      if (e === 'ticket') { state.warn = 'TICKETED'; snapNext = true; audio.oneShot('impact', 0.25, 3.2); }
       if (e === 'cuff') { state.warn = 'ARRESTED'; snapNext = true; }
       if (e === 'click') { audio.oneShot('impact', 0.4, 2.4); setTimeout(() => audio.oneShot('impact', 0.35, 2.6), 180); feel.pattern([25, 150, 25], 0.5); }
     },
     // the mugshot holds on the orbiting arrest shot; THEN the results
-    onDone: () => photoThen('bust', !endPhoto.img, () => { state.arrest = null; bustRace(); }),
+    onDone: () => photoThen(variant === 'ticket' || variant === 'lecture' ? 'ticket' : 'bust', !endPhoto.img, () => {
+      document.body.classList.remove('cine');
+      // everyone back on their bikes behind the results card (the suspect's
+      // rider was lifted off for the scene)
+      try { state.arrest && state.arrest.release(); } catch (e) { /* the rig may be gone */ }
+      state.arrest = null; bustRace();
+    }, 0, { final: variant === 'lecture' }),
   });
   // the orbit starts from wherever the chase camera is now
   const f = state.arrest.focus;
@@ -2380,12 +2405,12 @@ function arrestCamera(dt) {
   const C = state.arrestCam, A = state.arrest;
   if (!C || !A) return;
   C.t += dt;
-  // pull back and up, then a slow orbit round the two of them
-  const k = Math.min(1, C.t / 2.2), e = k * k * (3 - 2 * k);
-  C.ang += dt * 0.22;
+  // a SLOW pull-out from close on the two of them, a slow orbit throughout
+  const k = Math.min(1, C.t / 7), e = k * k * (3 - 2 * k);
+  C.ang += dt * 0.16;
   const tp = A.targetPoint(new THREE.Vector3()), fp = A.focus;
   const mid = new THREE.Vector3().addVectors(tp, fp).multiplyScalar(0.5);
-  const r = 4.5 + 3.5 * e, h = 1.8 + 2.2 * e;
+  const r = 3.6 + 7.4 * e, h = 1.5 + 4.0 * e;
   // a longer lens than the drone's wide one: this is a close shot
   if (Math.abs(camera.fov - 44) > 0.1) { camera.fov += (44 - camera.fov) * Math.min(1, dt * 2); camera.updateProjectionMatrix(); }
   const want = new THREE.Vector3(mid.x + Math.sin(C.ang) * r, mid.y + h, mid.z + Math.cos(C.ang) * r);
@@ -2415,13 +2440,36 @@ function skipEnding() {
   if (state.arrest && !state.arrest.done && state.arrest.total > 1) state.arrest.finish();
   else if (state.ending && state.ending.t > 1 && !state.ending.shown) state.ending.t = Math.max(state.ending.t, END.SNAP);
 }
-addEventListener('keydown', skipEnding);
-addEventListener('pointerdown', skipEnding);
+// ONLY A DELIBERATE PRESS SKIPS. The attack keys used to: a player collared
+// and mashing J K L to break free skipped the arrest the second it began, and
+// then the photo -- the bust looked like a straight cut to the results.
+const SKIP_KEYS = new Set(['Enter', 'NumpadEnter', 'Space', 'Escape']);
+addEventListener('keydown', (e) => { if (SKIP_KEYS.has(e.code) && !e.repeat) skipEnding(); });
+addEventListener('pointerdown', (e) => { if (!e.target.closest || !e.target.closest('[id^="tp-"], #touchpad')) skipEnding(); });
 
 // IS ANYTHING HAPPENING? The radar holds its close sweep while it is, and tips
 // back into the far cruise view once it has been quiet a while (radar.js).
 // Island callouts count, except the ones that ARE cruising (boost, tow, lead).
 const CRUISE_OK = /BOOST|NITRO|SLIPSTREAM|LEADING|CLEAN LINE|OVERTAKE|^GO$/;
+// BREAKING A GRAB BY WEAVING: hard left-right-left on the bars wrenches at the
+// grip. Every full reversal of the steering (past WEAVE.MIN each way, within
+// WEAVE.GAP of the last) counts as a struggle, as an attack press does -- so a
+// grab is fought with the bars OR the fists, whichever the player reaches for.
+const WEAVE = { MIN: 0.55, GAP: 0.5, PULL: 0.8 };
+let weaveSide = 0, weaveT = 9;
+function weaveFree(dt, inp) {
+  const f = player.fighter;
+  weaveT += dt;
+  if (!f.heldBy) { weaveSide = 0; return; }
+  const st = inp ? inp.steer || 0 : 0;
+  if (Math.abs(st) < WEAVE.MIN) return;
+  const side = Math.sign(st);
+  if (side !== weaveSide) {
+    if (weaveSide !== 0 && weaveT < WEAVE.GAP) { f.struggle(CFG.GRAPPLE_BREAK * WEAVE.PULL); state.shake = Math.min(1.2, state.shake + 0.05); }
+    weaveSide = side; weaveT = 0;
+  }
+}
+
 function radarActive(live) {
   const f = player.fighter, ps = player.phys;
   if (f.busy || f.down || f.hold || f.heldBy || state.shake > 0.25) return true;
@@ -2462,14 +2510,15 @@ function endCtx(pos) {
     course: ev ? ev.name : '',
     field: Math.max(1, world.parts.length - 1),
     place: pos ? `${ORDINALS[pos - 1] || pos} PLACE` : '',
+    fine: freeEvent ? 0 : Cop.fine(ev || career.event),
   };
 }
 // ask for the photo: snapped off the next rendered frame (when `snap`), then
 // shown; `done` runs when it is dismissed
-function photoThen(kind, snap, done, pos) {
+function photoThen(kind, snap, done, pos, extra) {
   if (snap) snapNext = true;
   hud.show(false);
-  photoReq = { kind, ctx: endCtx(pos), done };
+  photoReq = { kind, ctx: { ...endCtx(pos), ...(extra || {}) }, done };
 }
 function flushPhoto(rendered) {
   if (snapNext && rendered) { snapNext = false; endPhoto.snap(renderer.domElement); }
@@ -2862,6 +2911,7 @@ function resetRace() {
   for (const k of ['arrest', 'copArrest']) { if (state[k]) { try { state[k].release(); } catch (e) { /* the rig may be gone */ } state[k] = null; } }
   state.arrestCam = null;
   state.ending = null; photoReq = null; snapNext = false; endPhoto.clear();
+  document.body.classList.remove('cine');
   document.querySelectorAll('#over .ep-pin').forEach((n) => n.remove());
   // The garage's bike is the machine you see: tier -> class (src/kit.js), tier colour.
   try {

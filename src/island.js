@@ -81,7 +81,7 @@ function classify(text, touch) {
     const m = t.match(/^(.*?!)\s+(MASH .*)$/);
     if (m) { title = m[1]; sub = m[2]; }
   }
-  if (touch) sub = sub.replace(/MASH J K L!?/, 'MASH THE ATTACK BUTTONS').replace(/G TO THROW/, 'GRAB AGAIN TO THROW');
+  if (touch) sub = sub.replace(/MASH J K L!?/, 'MASH ATTACK').replace(/G TO THROW/, 'GRAB AGAIN TO THROW');
   let tone = 'info', icon = 'info';
   for (const [re, tn, ic] of RULES) if (re.test(t)) { tone = tn; icon = ic; break; }
   return { key: t, title, sub, tone, icon };
@@ -154,7 +154,7 @@ export class Island {
     let view;
     if (L.collar != null) {
       view = { mode: 'x', tone: 'danger', icon: 'cop', title: 'PULLING YOU OVER',
-        sub: document.body.classList.contains('touch') ? 'MASH THE ATTACK BUTTONS' : 'MASH J K L', bar: Math.max(0, Math.min(1, L.collar)), key: 'collar' };
+        sub: document.body.classList.contains('touch') ? 'MASH ATTACK OR WEAVE HARD' : 'MASH J K L OR WEAVE HARD', bar: Math.max(0, Math.min(1, L.collar)), key: 'collar' };
     } else if (this.cur && !(L.cop != null && this.cur.tone === 'info')) {   // a cop on you outranks the tow/air states
       view = { mode: this.cur.tone === 'count' ? 'c' : 'x', ...this.cur };
     } else if (L.cop != null) {

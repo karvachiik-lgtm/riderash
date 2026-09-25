@@ -7,6 +7,8 @@ import { Showroom } from './showroom.js';
 import { PLAYER_CHAIN, chainState } from './chainweapon.js';   // [chain agent]
 import { buildRoad, buildRoadside, buildBackdrop, centreAt, centreTangent, headAt, setRoadProfile, roadProfile } from './level.js';
 import { GhatDress } from './ghat.js';
+import { ValleyDress } from './valley.js';
+import { TunnelDress, setCourseTunnels, tunnelK } from './tunnels.js';
 import { buildTraffic, updateTraffic, trafficHit, resetTraffic } from './world.js';
 import { buildFinish, placeFinish } from './finishline.js';
 import { TrackDress } from './trackdress.js';
@@ -179,7 +181,8 @@ let hazardView = null;     // oil slicks and gravel on the deck
 let animals = null;        // cows and deer on the rural roads
 let parked = null;         // cars at the kerb in town
 let crestShadows = null;   // a car's shadow shows over a blind crest before the car does
-let backdropGroup = null, ghatDress = null;     // per-course road profile (level.js) dressing
+let backdropGroup = null, ghatDress = null, valleyDress = null, tunnelDress = null;
+let _tunK = 0;                  // how deep in a tunnel the camera is (stepTunnelLight)     // per-course road profile (level.js) dressing
 let roadGroup = null, roadsideGroup = null;   // rebuilt when a course's lane layout differs (lanes.js)
 let raceCounter = 0;       // races started this session, so a replayed event gets a new outfit
 
@@ -464,7 +467,7 @@ async function init() {
     if (need > CFG.ROAD_SEGS) CFG.ROAD_SEGS = need;
   }
   // the lane layout of the first course, so the boot road is already right
-  { const ev0 = career.event; setRoadProfile(ev0.map); setLanePlan(ev0.map, ev0.lenMul); }
+  { const ev0 = career.event; setRoadProfile(ev0.map, ev0.lenMul); setLanePlan(ev0.map, ev0.lenMul); }
   const road = roadGroup = buildRoad();
   const side = roadsideGroup = buildRoadside();
   const back = backdropGroup = buildBackdrop();
@@ -492,6 +495,8 @@ async function init() {
   try { crestShadows = new CrestShadows(scene); window.__CREST__ = crestShadows; } catch (e) { console.warn('[riderash] crest shadows:', e); }
   try { parked = new Parked(scene); window.__PARKED__ = parked; } catch (e) { console.warn('[riderash] parked:', e); }
   try { ghatDress = new GhatDress(scene); } catch (e) { console.warn('[riderash] ghat:', e); ghatDress = null; }
+  try { valleyDress = new ValleyDress(scene); } catch (e) { console.warn('[riderash] valley:', e); valleyDress = null; }
+  try { tunnelDress = new TunnelDress(scene); } catch (e) { console.warn('[riderash] tunnels:', e); tunnelDress = null; }
   try { animals = new Animals(scene); window.__ANIMALS__ = animals; } catch (e) { console.warn('[riderash] animals:', e); }
   try { crossTraffic = new CrossTraffic(scene); window.__CROSS__ = crossTraffic; } catch (e) { console.warn('[riderash] cross traffic:', e); crossTraffic = null; }
   // INSTANT REPLAY (replay.js): records the race as it is drawn
@@ -1148,6 +1153,8 @@ function guardBodies() {
 }
 
 function frameBody(dt) {
+  if (valleyDress) valleyDress.update(dt);
+  stepTunnelLight(dt);
   // COUNTDOWN. A race should begin, not fade in. The world runs -- traffic
   // moves, the pack idles, the camera settles -- but throttle and steering are
   // locked until the lights go out, so nobody is already at 50 m/s when the
@@ -1245,9 +1252,21 @@ function applyWeatherLight(w) {
   if (!lights) return;
   const base = (l) => { if (!LIGHT_BASE.has(l)) LIGHT_BASE.set(l, l.intensity); return LIGHT_BASE.get(l); };
   const k = THREE.MathUtils.clamp(w, 0, 1);
-  if (lights.sun) lights.sun.intensity = base(lights.sun) * (1 - 0.72 * k);
+  if (lights.sun) lights.sun.intensity = base(lights.sun) * (1 - 0.72 * k) * (1 - 0.9 * _tunK);   // (and no sun in a tunnel)
   if (lights.rim) lights.rim.intensity = base(lights.rim) * (1 - 0.5 * k);
   if (lights.sky2) lights.sky2.intensity = base(lights.sky2) * (1 - 0.18 * k);
+}
+
+// IN A TUNNEL IT IS DARK (Road Rash's Pacific Coast tunnels were pitch black):
+// the exposure and the sun fall with how deep the CAMERA is in the bore
+// (tunnels.js tunnelK), so the mouth ahead glows and the lamps carry the light.
+function stepTunnelLight(dt) {
+  if (!renderer || !lights) return;
+  const s = state.running ? (player && player.phys ? player.phys.s : 0) : 0;
+  const k = tunnelK(s);
+  _tunK += (k - _tunK) * Math.min(1, dt * 4);
+  if (!stepTunnelLight.base) stepTunnelLight.base = renderer.toneMappingExposure || 1;
+  renderer.toneMappingExposure = stepTunnelLight.base * (1 - 0.62 * _tunK);
 }
 
 let idleAngle = 0;
@@ -2076,7 +2095,7 @@ const ORDINALS = (() => {
 const PLUNGE = { TIME: 2.6, OUT: 6, UP: 2.5, G: 9.8, SPIN: 1.6, BILL: 2.5 };
 const _pn = new THREE.Vector3(), _pt = new THREE.Vector3();
 function startRivalPlunge(r) {
-  const p = r.phys, side = (roadProfile().cliff || { side: 1 }).side, f = r.fighter;
+  const p = r.phys, side = Math.sign(p.lateral) || 1, f = r.fighter;   // over whichever edge they went
   if ((f.hold || f.heldBy) && f._endHold) f._endHold('break', hooks);
   r.out = true;
   f.down = true; f.downTimer = 1e9; f.active = null;
@@ -2102,7 +2121,7 @@ function stepRivalPlunge(r, dt) {
   g.rotation.x += PLUNGE.SPIN * dt; g.rotation.z += PLUNGE.SPIN * 0.6 * dt;
 }
 function startPlunge() {
-  const p = player.phys, side = (roadProfile().cliff || { side: 1 }).side;
+  const p = player.phys, side = Math.sign(p.lateral) || 1;
   centreTangent(-p.s, _pt);
   state.plunge = {
     t: 0, vx: Math.max(PLUNGE.OUT, Math.abs(p.lateralV || 0)), vy: PLUNGE.UP, v: p.speed * 0.6,
@@ -2275,7 +2294,7 @@ window.__START__ = () => {
   // deck, markings, kerbs and rails, so the road is rebuilt when it changes.
   // THE ROAD ITSELF IS PER COURSE TOO (level.js profiles): a cliff course has
   // its own centreline, its own depth under the deck, and no verge.
-  const profChanged = setRoadProfile(ev.map);
+  const profChanged = setRoadProfile(ev.map, ev.lenMul);
   if (setLanePlan(ev.map, ev.lenMul) || profChanged) {
     try { rebuildRoad(); } catch (e) { console.warn('[riderash] road rebuild:', e); }
   }
@@ -2297,6 +2316,8 @@ window.__START__ = () => {
   if (animals) animals.reset();
   try { if (parked) parked.build(spine, state.finishS); } catch (e) { console.warn('[riderash] parked:', e); }
   try { if (ghatDress) ghatDress.build(state.finishS, (ev.lenMul * 100) | 0); } catch (e) { console.warn('[riderash] ghat:', e); }
+  try { if (valleyDress) valleyDress.build(state.finishS, (ev.lenMul * 100) | 0); } catch (e) { console.warn('[riderash] valley:', e); }
+  try { setCourseTunnels(ev.map, spine, state.finishS, (ev.lenMul * 100) | 0); if (tunnelDress) tunnelDress.build(); } catch (e) { console.warn('[riderash] tunnels:', e); }
   try { window.__HAZARDS__ = placeHazards(spine, state.finishS); if (hazardView) hazardView.build(); } catch (e) { console.warn('[riderash] hazards:', e); }
   if (flagger) {
     flagger.reset(window.__FLAGGER_OUTFIT__ != null ? window.__FLAGGER_OUTFIT__ : (career.state.race || 0) + (career.state.wins || 0) * 3 + raceCounter++);

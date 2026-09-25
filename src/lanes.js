@@ -25,6 +25,7 @@
 //   peninsula  a four-lane divided highway, lanes dropping and adding at ramps
 //   desert     long four-lane stretches narrowing to two at the bridges
 import { CFG } from './config.js';
+import { ghatRanges } from './ghatdesign.js';
 
 export const LANE = 3.6;
 export const SHOULDER = 1.9;
@@ -61,15 +62,41 @@ let plan = { stretches: [[0, 1, 1]], crossings: [] };
 let planKey = '';
 
 /** Choose the course's layout. Returns true when it changed (the road must be rebuilt). */
+// THE GHAT (ghatdesign.js): one lane each way, except where the monsoon took
+// the valley-side lane -- it narrows to a third of a lane over a short 25 m
+// taper (a collapse, not a planned merge) and comes back after the break.
+// Positions are the design's own metres, repeated (not scaled) with lenMul.
+const BROKEN_LANE = 0.35, BROKEN_TAPER = 25;
+// NARROWS: a single-track stretch, both lanes squeezed to 0.7 (traffic and the
+// pack have to take turns), over a 40 m taper.
+const NARROW_LANE = 0.7, NARROW_TAPER = 40;
+function ghatPlan(lenMul) {
+  const R = ghatRanges(6000 * lenMul + 600);
+  const ev = [];
+  for (const [a, b, side] of R.broken) {
+    const n = side > 0 ? [BROKEN_LANE, 1] : [1, BROKEN_LANE];
+    ev.push([a + BROKEN_TAPER / 2, n[0], n[1], BROKEN_TAPER], [b - BROKEN_TAPER / 2, 1, 1, BROKEN_TAPER]);
+  }
+  for (const [a, b] of R.narrows) ev.push([a + NARROW_TAPER / 2, NARROW_LANE, NARROW_LANE, NARROW_TAPER], [b - NARROW_TAPER / 2, 1, 1, NARROW_TAPER]);
+  ev.sort((x, y) => x[0] - y[0]);
+  // (a narrows that overlaps a break keeps the break's own lane counts)
+  const st = [[0, 1, 1]];
+  for (const e of ev) if (e[0] - st[st.length - 1][0] > 30) st.push(e);
+  return { stretches: st, crossings: [] };
+}
+
 export function setLanePlan(mapId, lenMul = 1) {
-  const P = PLANS[mapId] || { stretches: [[0, 1, 1]], crossings: [] };
   const k = (mapId || '') + ':' + lenMul;
   if (k === planKey) return false;
   planKey = k;
-  plan = {
-    stretches: P.stretches.map(([s, r, l]) => [s * lenMul, r, l]),
-    crossings: P.crossings.map((s) => s * lenMul),
-  };
+  if (mapId === 'ghat') plan = ghatPlan(lenMul);
+  else {
+    const P = PLANS[mapId] || { stretches: [[0, 1, 1]], crossings: [] };
+    plan = {
+      stretches: P.stretches.map(([s, r, l]) => [s * lenMul, r, l]),
+      crossings: P.crossings.map((s) => s * lenMul),
+    };
+  }
   plan.medians = buildMedians(plan);
   return true;
 }
@@ -87,7 +114,8 @@ export function lanesAt(s, out = { r: 1, l: 1 }) {
   const S = plan.stretches;
   let r = S[0][1], l = S[0][2];
   for (let i = 1; i < S.length; i++) {
-    const k = ease((s - (S[i][0] - TAPER / 2)) / TAPER);
+    const tp = S[i][3] || TAPER;
+    const k = ease((s - (S[i][0] - tp / 2)) / tp);
     if (k <= 0) break;
     r += (S[i][1] - S[i - 1][1]) * k;
     l += (S[i][2] - S[i - 1][2]) * k;

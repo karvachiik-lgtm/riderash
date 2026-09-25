@@ -37,7 +37,11 @@
 //   6. Rebuilt when the course changes (`setCourse`), deterministic per map id.
 import * as THREE from 'three';
 import { CFG } from './config.js';
-import { centreAt, centreTangent, roadProfile } from './level.js';
+import { centreAt, centreTangent, roadProfile, cliffDropK } from './level.js';
+import { ghatBrokenAt, ghatSection, GHAT_FLOOR } from './ghatdesign.js';
+const _cy = new THREE.Vector3();
+// 0..1 how deep into a bridge s is (eased ~20 m at each abutment)
+const cliffBridgeK = (s) => { let k = 0; for (let i = -2; i <= 2; i++) k += ghatSection(Math.max(0, s + i * 8))[2] === 2 ? 1 : 0; return k / 5; };
 import { edgeAt, crossingNear, crossings } from './lanes.js';
 import { BIOMES } from './worldspine.js';
 import { texMaterial } from './textures.js';
@@ -428,20 +432,37 @@ export class Scenery {
     // cliff.side + is the rider's RIGHT.
     const CL = roadProfile().cliff;
     const CT0 = CL ? edgeAt(0, 1) + CFG.KERB_W + 2.2 : T0;
-    const dropSign = CL ? -CL.side : 0;
+    // Which side drops changes along the course (ghatdesign.js): the terrain
+    // morphs between the drop and the wall through each change (cliffDropK),
+    // and where a lane has collapsed the drop starts at the broken edge.
+    const riderSide = (lat) => -(Math.sign(lat) || 1);           // scenery lat + = rider's LEFT
+    const isDrop = (s, lat) => CL && cliffDropK(s, riderSide(lat)) > 0.5;
     const cliffRelief = (s, lat) => {
       const a = Math.abs(lat);
-      if (a <= CT0) return 0;
+      if (a < CT0) return 0;
+      // the innermost column (a = CT0) stays at the deck -- except where there is
+      // no ground there at all: under a bridge, and past a collapsed lane
+      if (a === CT0 && !(cliffBridgeK(s) > 0 || ghatBrokenAt(Math.max(0, s), riderSide(lat)))) return 0;
       const ph = lat > 0 ? 1.7 : 4.1;
       const n = Math.sin(s * 0.0093 + a * 0.011 + ph) * 0.5 + Math.sin(s * 0.023 - a * 0.031 + ph * 2) * 0.3 + Math.sin(s * 0.0041 + ph * 3) * 0.4;
       const ledge = Math.sin(s * 0.061 + a * 0.4) * 0.8 + Math.sin(s * 0.17) * 0.5;       // broken rock, not a smooth fillet
-      if (Math.sign(lat) === dropSign) {
-        // sheer within ~16 m, then the scree runs out to the valley floor
-        const u = Math.pow(smooth(CT0, CT0 + 16, a), 0.5);
-        return -CL.drop * u * (0.9 + 0.1 * n) - 12 * smooth(CT0 + 40, 420, a) + ledge * (1 - u) * 2;
+      const k = cliffDropK(s, riderSide(lat));
+      let hd = 0, hw = 0;
+      if (k > 0) {
+        // sheer within ~16 m, then the scree runs out to the valley floor --
+        // from the broken edge itself where the lane has gone
+        // (a bridge: the gorge is already below the deck edge -- nothing holds the road up but the piers)
+        const bridgeK = cliffBridgeK(s);
+        const c0 = bridgeK > 0 ? CT0 - 24 * bridgeK : ghatBrokenAt(Math.max(0, s), riderSide(lat)) ? Math.min(CT0, edgeAt(Math.max(0, s), riderSide(lat)) + CFG.KERB_W + 0.2) : CT0;
+        // ...down to the valley floor, which is FLAT and one height for the
+        // whole course (valley.js lays the river and the paddies on it)
+        const u = Math.pow(smooth(c0, c0 + 16, a), 0.5);
+        const floor = GHAT_FLOOR - centreAt(-s, _cy).y + 1.2 * n * smooth(CT0 + 60, CT0 + 140, a);
+        hd = floor * u + ledge * (1 - u) * 2;
       }
       // the wall: up at once, then the mountainside keeps climbing
-      return CL.wall * Math.pow(smooth(CT0, CT0 + 7, a), 0.6) * (0.85 + 0.25 * n) + 90 * smooth(CT0 + 15, 260, a) + ledge * 1.5;
+      if (k < 1) hw = CL.wall * Math.pow(smooth(CT0, CT0 + 7, a), 0.6) * (0.85 + 0.25 * n) + 90 * smooth(CT0 + 15, 260, a) + ledge * 1.5;
+      return hd * k + hw * (1 - k);
     };
     const reliefAt = (s, lat, tb) => {
       if (CL) return cliffRelief(s, lat);
@@ -467,6 +488,46 @@ export class Scenery {
 
     const _c = new THREE.Vector3(), _t = new THREE.Vector3();
     const frame = (s) => { centreAt(-s, _c); centreTangent(-s, _t); return { cx: _c.x, cy: _c.y, cz: _c.z, tx: _t.x, tz: _t.z, nx: -_t.z, nz: _t.x }; };
+    // FAR FIELD, CLIFF COURSES: the ghat's swirls are ~32 m in radius, and an
+    // offset of the road's own frame further out than that on the inside of a
+    // bend FOLDS BACK over the road (MEASURED: a wall-side slab of terrain
+    // standing beside a bridge 60 m away). So beyond ~12 m everything is laid
+    // along a SMOOTHED copy of the road (a +/-120 m moving average), blending
+    // into it by 45 m -- the near field still hugs every bend, the far field
+    // cannot fold. Terrain and props both go through placeXZ, so they agree.
+    let SMF = null;
+    if (CL) {
+      const ST = 4, HW = 30, s0 = -PRE - 200, n = Math.ceil((sEnd + 400 - s0) / ST);
+      const cx = new Float64Array(n), cz = new Float64Array(n);
+      for (let i = 0; i < n; i++) { centreAt(-(s0 + i * ST), _c); cx[i] = _c.x; cz[i] = _c.z; }
+      const mx = new Float64Array(n), mz = new Float64Array(n);
+      for (let i = 0; i < n; i++) {
+        let ax = 0, az = 0, k = 0;
+        for (let j = Math.max(0, i - HW); j <= Math.min(n - 1, i + HW); j++) { ax += cx[j]; az += cz[j]; k++; }
+        mx[i] = ax / k; mz[i] = az / k;
+      }
+      SMF = { s0, ST, n, mx, mz };
+    }
+    const _sm = { x: 0, z: 0, nx: 0, nz: 0 };
+    const smoothAt = (s) => {
+      const u = Math.max(0, Math.min(SMF.n - 2.001, (s - SMF.s0) / SMF.ST)), i = Math.floor(u), t = u - i;
+      _sm.x = SMF.mx[i] + (SMF.mx[i + 1] - SMF.mx[i]) * t; _sm.z = SMF.mz[i] + (SMF.mz[i + 1] - SMF.mz[i]) * t;
+      // geometric tangent (+z = decreasing s), normal as frame() builds it
+      const a = Math.max(0, i - 2), b = Math.min(SMF.n - 1, i + 3);
+      let tx = SMF.mx[a] - SMF.mx[b], tz = SMF.mz[a] - SMF.mz[b];
+      const L = Math.hypot(tx, tz) || 1; tx /= L; tz /= L;
+      _sm.nx = -tz; _sm.nz = tx;
+      return _sm;
+    };
+    const _xz = { x: 0, z: 0 };
+    const placeXZ = (s, lat, f) => {
+      _xz.x = f.cx + f.nx * lat; _xz.z = f.cz + f.nz * lat;
+      if (SMF) {
+        const w = smooth(12, 45, Math.abs(lat));
+        if (w > 0) { const g = smoothAt(s); _xz.x += (g.x + g.nx * lat - _xz.x) * w; _xz.z += (g.z + g.nz * lat - _xz.z) * w; }
+      }
+      return _xz;
+    };
     const groundY = (s, lat, tb, f) => f.cy - 0.06 + (Math.abs(lat) > CT0 ? reliefAt(s, lat, tb) - 0.04 : 0);
 
     // Occupancy: building footprints, so trees do not grow through barns.
@@ -494,11 +555,12 @@ export class Scenery {
       // the cross road at a crossroads stays clear for its length
       if (Math.abs(lat) < 230 && crossingNear(s, 24)) return;
       if (Math.abs(lat) < KERB + 2.2 && !o.allowNear) return;    // never on the road or shoulder
-      if (CL && Math.sign(lat) === dropSign) return;               // nothing stands over the drop
+      if (isDrop(s, lat)) return;                                   // nothing stands over the drop
       const tb = o.tb || themeAt(s);
       const f = frame(s);
       const y = (o.y !== undefined ? o.y : groundY(s, lat, tb, f)) - (o.sink || 0);
-      _p.set(f.cx + f.nx * lat, y, f.cz + f.nz * lat);
+      const xz = placeXZ(s, lat, f);
+      _p.set(xz.x, y, xz.z);
       _e.set(o.tilt || 0, o.yaw || 0, o.roll || 0, 'YXZ'); _q.setFromEuler(_e);
       const sc = o.scale || 1; _sc.set(sc * (o.sx || 1), sc * (o.sy || 1), sc * (o.sz || 1));
       _m.compose(_p, _q, _sc);
@@ -726,7 +788,7 @@ export class Scenery {
     };
     const POLE_ATTACH = { 0: { y: 9.0, xs: [-1.1, -0.5, 0.5, 1.1] }, 1: { y: 9.0, xs: [-1.1, -0.5, 0.5, 1.1] }, 2: { y: 9.6, xs: [-1.4, 0, 1.4] } };
     let prevPole = null;
-    for (let s = -PRE; s < sEnd; s += 42) {
+    for (let s = -PRE; s < (CL ? -PRE : sEnd); s += 42) {        // (none on a cliff course)
       const tb = themeAt(s);
       const v = tb.cur.pole === 0 ? (rnd() < 0.25 ? 1 : 0) : tb.cur.pole;
       const lat = widen(s, KERB + 7.2);
@@ -744,7 +806,7 @@ export class Scenery {
       prevPole = { v, pts };
     }
     let prevL = null;
-    for (let z = -30; z > -roadEnd; z -= 46) {
+    for (let z = -30; z > (CL ? 0 : -roadEnd); z -= 46) {
       const s = -z, f = frame(s);
       const lat = widen(s, -(CFG.ROAD_W / 2 + CFG.KERB_W + 5.5));
       // that arm is yawed atan2(t)+pi/2, which lays it ALONG the road, so its
@@ -777,7 +839,7 @@ export class Scenery {
     // ---- 9. Terrain skirt, per chunk. (A cliff course packs its columns at the
     // road, where the face and the wall are.)
     const COLS = CL ? [CT0, CT0 + 1.5, CT0 + 3.5, CT0 + 6, CT0 + 9, CT0 + 13, CT0 + 18, CT0 + 26, 40, 60, 90, 140, 220, 330, 480, 650] : TCOLS;
-    const ROCK = new THREE.Color(0x7a624e), ROCK2 = new THREE.Color(0x6e5c4e);
+    const ROCK = new THREE.Color(0x76695c), ROCK2 = new THREE.Color(0x5f5a52);   // grey-brown basalt (Atlas refs, _refs/ghat)
     const terrainGeos = [];
     for (let ci = 0; ci < nChunks; ci++) {
       const s0 = -PRE + ci * CHUNK, s1 = Math.min(sEnd + 40, s0 + CHUNK);
@@ -800,15 +862,17 @@ export class Scenery {
             const a = (a0 === CT0 && s < -165) ? 0.01 : a0;
             const lat = side * a;
             const h = reliefAt(s, lat, tb);
-            pos.push(f.cx + f.nx * lat, f.cy - 0.1 + h, f.cz + f.nz * lat);
+            const xz = placeXZ(s, lat, f);
+            pos.push(xz.x, f.cy - 0.1 + h, xz.z);
             const u = smooth(CT0, 160, a);
             const n = 0.5 + 0.5 * Math.sin(s * 0.017 + a * 0.05) * Math.sin(s * 0.0061 - a * 0.013 + side);
             cc.copy(cv).lerp(cg, u).multiplyScalar(0.88 + n * 0.22);
             if (tb.cur.ridge.snow && h > 34) cc.lerp(new THREE.Color(0xd8dde2), smooth(34, 48, h));
             if (CL) {
               // bare rock where it is steep: the drop's face and the cut wall
-              const face = Math.sign(lat) === dropSign ? 0.85 * (1 - smooth(CT0 + 18, CT0 + 60, a)) : 0.8 * (1 - smooth(CT0 + 8, CT0 + 30, a));
-              cc.lerp(Math.sign(lat) === dropSign ? ROCK2 : ROCK, face);
+              const dk = cliffDropK(s, riderSide(lat));
+              const face = dk * 0.85 * (1 - smooth(CT0 + 18, CT0 + 60, a)) + (1 - dk) * 0.8 * (1 - smooth(CT0 + 8, CT0 + 30, a));
+              cc.lerp(dk > 0.5 ? ROCK2 : ROCK, face);
               // strata: horizontal bands down the face, not vertical streaks
               cc.multiplyScalar(1 - face * (0.12 + 0.1 * Math.sin(h * 0.45 + s * 0.004)));
             }

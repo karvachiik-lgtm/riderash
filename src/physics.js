@@ -25,7 +25,7 @@
 
 import * as THREE from 'three';
 import { CFG } from './config.js';
-import { centreAt, centreTangent, headAt, roadProfile } from './level.js';
+import { centreAt, centreTangent, headAt, roadProfile, cliffDropAt } from './level.js';
 import { cliffGapAt } from './ghat.js';
 
 const CFG_ROAD_W_HALF = CFG.ROAD_W / 2;
@@ -1760,12 +1760,14 @@ export class BikePhys {
     // the shoulder's edge there is only air: `overEdge`, and main.js does the
     // rest. The other side is the cut rock face, a hard wall. Every bike obeys
     // it: the pack, the cop, and you.
+    // Which side drops changes along the course (ghatdesign.js): the flank
+    // swaps through cuttings, a bridge drops on both sides, a cutting on neither.
     const CLF = roadProfile().cliff;
     if (CLF && !this.overEdge) {
       const sd = Math.sign(this.lateral) || 1;
       const e = edgeAt(Math.max(0, this.s), sd);
-      if (sd === CLF.side) {
-        if (!cliffGapAt(this.s)) {
+      if (cliffDropAt(this.s, sd)) {
+        if (!cliffGapAt(this.s, sd)) {
           const rail = e + CFG.KERB_W + 0.55 - 0.32;          // the bike's half-width inside the beam
           if (this.lateral * sd > rail) {
             const v = this.lateralV * sd;
@@ -1829,7 +1831,7 @@ export class BikePhys {
     // (on a cliff course, through a gap in the rail on the drop side there is
     // no wall at all -- that is the point of the gap; see THE CLIFF ROAD above)
     const CLG = roadProfile().cliff;
-    const inGap = CLG && Math.sign(this.lateral) === CLG.side && cliffGapAt(this.s);
+    const inGap = CLG && cliffDropAt(this.s, Math.sign(this.lateral) || 1) && cliffGapAt(this.s, Math.sign(this.lateral) || 1);
     let railHit = inGap ? 0 : this.hitRail(wall);
     // THE MEDIAN (lanes.js): a divided section's barrier is a wall on the
     // centreline. The side a body is kept on is the one it was last on, so it

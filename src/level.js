@@ -4,6 +4,8 @@ import * as THREE from 'three';
 import { CFG, PAL } from './config.js';
 import { texMaterial, getTexture } from './textures.js';
 import { edgeAt, lanesAt, LANE, crossings, CROSS_HALF, medians, MEDIAN_HALF } from './lanes.js';
+import { ghatX, ghatY, GHAT_Y_AMP, ghatDropAt, ghatDropK, ghatSection, setGhatDesign } from './ghatdesign.js';
+const ghatSectionSide = (s) => ghatSection(s)[2];
 
 // ---------------------------------------------------------------------------
 // ASPHALT IN DAYLIGHT, NOT A WET MIRROR.
@@ -161,36 +163,38 @@ function yDefault(z) {
   return Math.sin(z * 0.0016 + 0.4) * 2.6 + Math.sin(z * 0.0043) * 0.9
        + Math.sin(z * 0.011 + 2.1) * 2.3 + Math.sin(z * 0.042 + 1.3) * 0.55;
 }
-// THE GHAT: a road cut into a mountainside. MEASURED shape (tools: ghatshape):
-// tightest bend R 110 m (~31 m/s at 0.9 g, against R ~460 m on the other
-// courses), headings to 31 deg off the valley axis, 7.2% grades, +/-32 m of
-// climb and descent. A straight grid (the bends ease in over 80-700 m). A true
-// switchback cannot be drawn -- the road is x as a function of z -- so the
-// drama is the tight S-bends and what is beside them: rock wall on one side,
-// a sheer drop on the other.
-function xGhat(z) {
-  const env = 0.75 + 0.25 * Math.sin(z * 0.0011 + 0.4);
-  const u = Math.min(1, Math.max(0, (z - 80) / 620)), ramp = u * u * (3 - 2 * u);
-  return ramp * (env * 34 * Math.sin(z * 0.0158 + 0.3) + 26 * Math.sin(z * 0.0037 + 1.1));
-}
-function yGhat(z) { return 30 * Math.sin(z * 0.00165 - 1.2) + 2.2 * Math.sin(z * 0.011); }
+// THE GHAT: a road cut into a mountainside -- designed, not a sum of sines.
+// ghatdesign.js holds the layout: flanks that swap sides through cuttings, a
+// tunnel and gorge bridges, four SWIRL sets of ~32 m coils (headings to 40 deg
+// off the valley axis), collapsed lanes, 5% grades. MEASURED (ghatshape2).
+// The design is in s; the road is drawn in z = -s.
+const xGhat = (z) => ghatX(-z);
+const yGhat = (z) => ghatY(-z);
 
 export const ROAD_PROFILES = {
   default: { id: 'default', x: xDefault, y: yDefault, yMin: -(2.6 + 0.9 + 2.3 + 0.55), cliff: null },
   // cliff.side: +1 drops on the rider's right. verge: metres of shoulder before
   // the drop / the rock face. drop: how far the valley floor is below the deck.
-  ghat: { id: 'ghat', x: xGhat, y: yGhat, yMin: -(30 + 2.2),
+  // cliff.side is the course's DEFAULT drop side; where it actually drops at
+  // each s is ghatdesign.js ghatDropAt (read through cliffDropAt below).
+  ghat: { id: 'ghat', x: xGhat, y: yGhat, yMin: -(GHAT_Y_AMP + 2),
     cliff: { side: 1, verge: 1.6, wallVerge: 1.4, drop: 140, wall: 34 } },
 };
 let PROF = ROAD_PROFILES.default;
 /** Pick the road for a course. Returns true when it changed (rebuild the road). */
-export function setRoadProfile(id) {
+export function setRoadProfile(id, lenMul = 1) {
   const next = ROAD_PROFILES[id] || ROAD_PROFILES.default;
-  if (next === PROF) return false;
+  // the ghat is GENERATED per course and level (ghatdesign.js)
+  const designChanged = next === ROAD_PROFILES.ghat && setGhatDesign(`${id}:${lenMul}`);
+  if (next === PROF && !designChanged) return false;
   PROF = next;
   return true;
 }
 export function roadProfile() { return PROF; }
+/** On a cliff course: does the rider's `sgn` side (+1 right) drop away at s? */
+export function cliffDropAt(s, sgn) { return !!PROF.cliff && ghatDropAt(s, sgn); }
+/** 0..1 drop (1) vs rock (0) on the rider's `sgn` side at s, eased through changes. */
+export function cliffDropK(s, sgn) { return PROF.cliff ? ghatDropK(s, sgn) : 0; }
 
 export function centreAt(z, out = new THREE.Vector3()) {
   return out.set(PROF.x(z), PROF.y(z), z);
@@ -768,7 +772,10 @@ export function buildRoadside(seed = 7) {
     for (let z = -40; z > -N * SEG; z -= 130) {
       const rs = r() > 0.5 ? -1 : 1;            // (drawn either way: the default road stays identical)
       // a cliff road's chevrons stand at the drop, on the rail line
-      const s = PROF.cliff ? -PROF.cliff.side : rs;
+      // (level lateral + is the rider's LEFT, so a rider-right drop is s = -1)
+      const dsd = PROF.cliff ? ghatSectionSide(-z) : 0;
+      if (PROF.cliff && (dsd === 0 || dsd === 2)) continue;   // a cutting or a bridge: nothing to warn of
+      const s = PROF.cliff ? -dsd : rs;
       const c = centreAt(z), t = centreTangent(z);
       const nx = -t.z, nz = t.x;
       const off = s * (edgeAt(Math.max(0, -z), -s) + CFG.KERB_W + (PROF.cliff ? 1.25 : 2.3));
@@ -840,7 +847,8 @@ export function buildRoadside(seed = 7) {
   armInst.castShadow = true;
   let pcount = 0;
   const ma = new THREE.Matrix4(), qa = new THREE.Quaternion(), sa = new THREE.Vector3(1, 1, 1), pa = new THREE.Vector3();
-  for (let z = -30; z > -N * SEG; z -= 46) {
+  // (a cliff course has no pole line: one side is air, the other rock)
+  for (let z = -30; z > (PROF.cliff ? 0 : -N * SEG); z -= 46) {
     const s = -1;
     const c = centreAt(z), t = centreTangent(z);
     const nx = -t.z, nz = t.x;
@@ -931,7 +939,8 @@ export function buildBackdrop(seed = 11) {
 
   // --- headlands: far, low, overlapping ridges. Placed 400-1400 m out, so
   // they occupy the lower sky and leave the horizon visible above them. ---
-  for (let i = 0; i < 14; i++) {
+  // (a cliff course has none of this sea-level coast: valley.js draws its ridges)
+  for (let i = 0; i < (PROF.cliff ? 0 : 14); i++) {
     const depth = 900 + i * 320 + r() * 300;
     const s = i % 2 === 0 ? -1 : 1;
     const w = 500 + r() * 700;
@@ -954,7 +963,7 @@ export function buildBackdrop(seed = 11) {
   // in traps.md and I walked into it anyway: an object big enough to fill the
   // frame is a wall, whatever you call it. Push them out, shrink them, and let
   // them sit BELOW the horizon line.
-  for (let z = 60; z > -CFG.ROAD_SEGS * CFG.SEG; z -= 340) {
+  for (let z = 60; z > (PROF.cliff ? 1e9 : -CFG.ROAD_SEGS * CFG.SEG); z -= 340) {
     const c = centreAt(z);
     const s = -1;
     const w = 90 + r() * 110;

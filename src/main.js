@@ -1508,7 +1508,7 @@ function stepGame(dt) {
     if (Number.isFinite(tow)) p.slipstream += (tow - p.slipstream) * Math.min(1, dt * 3.0);
   }
 
-  if (state.countdown <= 0) { for (const r of rivals) r.update(dt, world, hooks); }
+  if (state.countdown <= 0) { for (const r of rivals) r.update(dt, world, hooks); defendPositions(dt); }
   // THE POLICE. After the pack, so a bust is judged on this frame's crash.
   if (cop && state.countdown <= 0) {
     const ev = cop.update(dt, player, state.running && !state.raceOver, world.traffic, hooks, state.finishS);
@@ -1524,7 +1524,10 @@ function stepGame(dt) {
     else if (ev === 'busted' && !state.raceOver) { state.raceOver = true; bustRace(); }
     const flag = document.getElementById('copflag');
     if (flag) flag.classList.toggle('on', cop.active && !state.raceOver);
-    if (cop.active) {
+    // Only while the race is ON: after a finish or a bust the cop's update
+    // returns early and he stays 'active', and the wail carried on over the
+    // results screen and the menus.
+    if (cop.active && state.running && !state.raceOver) {
       const gap = player.phys.s - cop.phys.s;
       audio.siren(1 / (1 + (Math.hypot(gap, player.phys.lateral - cop.phys.lateral) / 25) ** 2),
         (cop.phys.lateral - player.phys.lateral) / 4);
@@ -2179,6 +2182,52 @@ window.__GAME__ = {
   lateral: 0, position: 6, s: 0, down: false,
 };
 
+// POSITION DEFENCE. A rival running 1st or 2nd who is overtaken -- by the
+// player or another rival -- may take it personally: he goes after the passer
+// (chase, pull alongside, try to knock him off), through the same grudge the
+// brain already uses for a rider who hit him. It is a DECISION, not a reflex:
+// the odds rise with his aggression, the race stage and his mood, carry a
+// random swing, and he reacts after a human beat (0.3-1.2 s), not on the frame.
+// (MEASURED: persona aggression runs 0.4-1.3; the odds land ~40% for the mildest
+// rider to ~80% for the hottest, +10% for losing the LEAD, +/-15% jitter)
+const DEFEND = { EVERY: 0.25, RANGE: 40, BASE: 0.55, AGGRO: 0.45, LEAD: 0.1, LATE: 0.15, JITTER: 0.15, FOR: [8, 16] };
+let defendT = 0, defendRank = new Map(), defendPending = [];
+function defendPositions(dt) {
+  for (const d of defendPending) d.t -= dt;
+  for (const d of defendPending.filter((x) => x.t <= 0)) {
+    const b = d.r.brain;
+    // (a fresh insult: losing the lead outranks an older grudge)
+    if (b && !d.r.fighter.down) { b.grudgeKey = d.key; b.grudgeT = d.hold; b.defendT = d.hold; b._event && b._event('defend:' + d.key); }
+  }
+  defendPending = defendPending.filter((x) => x.t > 0);
+  defendT -= dt;
+  if (defendT > 0) return;
+  defendT = DEFEND.EVERY;
+  const order = world.standings();
+  const rank = new Map(order.map((e, i) => [e, i]));
+  for (const r of rivals) {
+    const was = defendRank.get(r);
+    if (was === undefined || was > 1 || r.fighter.down || !r.brain) continue;   // only a rider who was 1st or 2nd
+    for (const x of order) {
+      if (x === r || x.fighter && x.fighter.down) continue;
+      const before = defendRank.get(x), now = rank.get(x);
+      // x was behind r and is now ahead of him, close by: an overtake
+      if (before === undefined || before <= was || now >= rank.get(r)) continue;
+      if (x.phys.s - r.phys.s > DEFEND.RANGE) continue;
+      const aggro = (r.brain.persona && r.brain.persona.aggression) || 1;
+      const late = Math.min(1, r.phys.s / Math.max(1, state.finishS));
+      const p = DEFEND.BASE + DEFEND.AGGRO * (aggro - 0.8) + (was === 0 ? DEFEND.LEAD : 0) + DEFEND.LATE * late + 0.1 * (r.brain.mood || 0) + (Math.random() * 2 - 1) * DEFEND.JITTER;
+      if (Math.random() < Math.max(0.05, Math.min(0.9, p))) {
+        const key = x === player ? 'player' : 'r' + x.id;
+        defendPending.push({ r, key, t: 0.3 + Math.random() * 0.9, hold: DEFEND.FOR[0] + Math.random() * (DEFEND.FOR[1] - DEFEND.FOR[0]) });
+        if (x === player && Math.abs(x.phys.s - player.phys.s) < 1) state.warn = `${r.name || 'RIVAL'} WANTS HIS PLACE BACK`;
+      }
+      break;
+    }
+  }
+  defendRank = rank;
+}
+
 function resetRace() {
   // The garage's bike is the machine you see: tier -> class (src/kit.js), tier colour.
   try {
@@ -2186,6 +2235,7 @@ function resetRace() {
   } catch (e) { console.warn('[riderash] setBike:', e); }
   state.time = 0; state.score = 0; state.hits = 0; state.knockDowns = 0; state.contacts = 0; state.trafficHits = 0; state.trafficWrecks = 0;
   warnQueue.length = 0;                               // menu-time callouts are not race news
+  defendRank = new Map(); defendPending = []; defendT = 0;
   if (hud && hud.island) hud.island.clear();
   state.raceOver = false; state.shake = 0; state.hitstop = 0; state.wrecksBy = {}; state.stats = freshStats(); state.swapped = 0; state.lastPos = 6;
   camInitialised = false; camRoll = 0; crashHold = 0;
@@ -2387,6 +2437,7 @@ function publishState() {
   window.__RIVALS__ = rivals;   // harness: the pack, for contact and slipstream diagnosis
   window.__WORLD__ = world;     // harness: fighters list, standings
   window.__CAREER__ = career;   // harness: jump races
+  window.__AUDIO__ = audio;     // harness: siren and mix checks
   // The traffic, for the oncoming near-miss meter in _feel.mjs. `dir === 1` is
   // ONCOMING (see world.js), so the harness can count only the cars that come at
   // you -- which is the pressure the feel meter is about.

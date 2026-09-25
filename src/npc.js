@@ -611,6 +611,7 @@ export class NpcBrain {
       this.grudgeT = this.persona.grudge * (1 + 0.3 * this.mood);
     }
     if (this.grudgeT > 0) { this.grudgeT -= dt; if (this.grudgeT <= 0) { this.grudgeKey = null; this.grudgeT = 0; } }
+    if (this.defendT > 0) { this.defendT -= dt; if (!this.grudgeKey) this.defendT = 0; }
     this._moodTick(dt);
 
     // --- world facts, computed once and shared by every state ---
@@ -1350,7 +1351,11 @@ export class NpcBrain {
     const P = this.persona;
     // BRAWL = a fixated rowdy on the player, or a grudge-holder on his man.
     const brawl = !!(facts.fixated || (facts.grudgeTarget && v === facts.grudgeTarget));
+    // DEFENDING A PLACE (main.js defendPositions): he has been overtaken while
+    // leading and wants it back -- park level with the passer and come in close
     let standoff = P.standoff;
+    const defending = brawl && this.defendT > 0;
+    if (defending) standoff = Math.min(standoff, 1.4);
     // THE SWERVE: a brawler periodically closes the standoff by `ram` metres --
     // he rides INTO you (the contact solver turns it into a shove) and back out.
     if (brawl && P.ram > 0) {
@@ -1369,7 +1374,7 @@ export class NpcBrain {
     const pace = this._paceIntent(facts, this.persona.speedBias);
     let throttle = pace.throttle;
     let brake = pace.brake;
-    if (brawl && P.matchSpeed) {
+    if (brawl && (P.matchSpeed || defending)) {
       // EASE OFF TO MATCH: hold the victim's speed plus a closing term that
       // parks him level with you (not the rider's own pace -- he has stopped
       // racing). Brakes if he is overshooting.

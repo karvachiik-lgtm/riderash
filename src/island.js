@@ -59,6 +59,7 @@ const RULES = [
   [/BUMPED A |CAR HIT A /, 'warn', 'animal'],
   [/SIDE-SWIPE|^BUMP$|SCRAPE|CONTACT|HARD LANDING/, 'warn', 'hit'],
   [/LOST YOUR CHAIN|DISARMED|SLIPPED THE GRIP/, 'warn', 'fist'],
+  [/WANTS HIS PLACE BACK/, 'warn', 'fist'],
   [/RIVAL (HIT TRAFFIC|T-BONED)/, 'info', 'hit'],
   [/COP DOWN|LOST THE COP/, 'good', 'cop'],
   [/TOOK OUT|THROWN!|GOT HIS CHAIN|GRABBED HIM|BROKE FREE|LOST HIS GRIP/, 'good', 'fist'],

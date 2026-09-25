@@ -73,8 +73,20 @@ export const COPS = {
   // Every attack key struggles; his grip hardens with the level.
   GRAB_CHANCE: [0.22, 0.28, 0.34, 0.4, 0.46],   // of his swings that are a grab, by level
   GRIP_BY_LEVEL: [1.0, 1.15, 1.3, 1.45, 1.6],   // presses needed x this (5 at level 1)
-  COLLAR_DECEL: 9.5,         // m/s^2 he brakes while he has you
+  COLLAR_DECEL: 11,          // m/s^2 he brakes while he has you
   COLLAR_BUST_V: 12,         // m/s: dragged below this and you are pulled over
+  COLLAR_END_BUST_V: 22,     // m/s: still held at the end of the collar and this slow: pulled over
+  // A GRAB IS AN ARM'S LENGTH. He decides to grab, then has to MOVE IN: the
+  // swing reach (2.4 m across) looked like a grab from the next lane, the hold's
+  // pull doing the rest. Close enough within CLOSE_IN_T or he gives it up.
+  GRAB_REACH_LAT: 1.35,      // m across
+  GRAB_REACH_S: 1.1,         // m along
+  CLOSE_IN_T: 1.4,           // s he has to get there
+  // SHAKEN OFF: broken free (or his grip gone), he drops back and has to catch
+  // you again -- no swings meanwhile, and no new grab for a while.
+  SHAKEN_T: [2.5, 4.0],      // s dropping back
+  SHAKEN_DROP: 7,            // m/s slower than you while he does
+  GRAB_CD_AFTER: 7,          // s before he tries another grab
   // THE BARGE. Between swings he leans his bike into yours: the contact solver
   // does the rest, and near the kerb or a car that is the whole point.
   BARGE_EVERY: [3.5, 7.0],   // s between barges once alongside
@@ -177,6 +189,7 @@ export class Cop {
     this.enabled = !!enabled;
     this.fighter.grip = COPS.GRIP_BY_LEVEL[this.level - 1];
     this.bargeT = 0; this.bargeCool = COPS.BARGE_EVERY[0];
+    this.shakenT = 0; this.grabIntent = 0; this._collared = false;
     if (this.dismount) this.dismount.reset();
     this.state = 'off';
     this.active = false;              // chasing (siren, flag, radar): main.js reads this
@@ -223,6 +236,7 @@ export class Cop {
     this.active = true;
     this.chaseT = 0;
     this.swingT = COPS.SWING_EVERY[0];
+    this.shakenT = 0; this.grabIntent = 0; this._collared = false;
     this.onSpawn && this.onSpawn();
   }
 
@@ -297,8 +311,21 @@ export class Cop {
     }
     if (this.chaseT > COPS.CHASE_FOR || gap > COPS.LOSE_DIST) { this._leave(); return 'gone'; }
 
+    // THE COLLAR ENDED last frame without a bust: you broke free, or his grip
+    // went. Either way he is shaken off -- unless he held on to the end and you
+    // are down to a crawl, which is a pull-over.
+    if (this._collared && !(f.hold && f.hold.target === player.fighter)) {
+      this._collared = false;
+      const heldToEnd = f.holdEnd && f.holdEnd.kind === 'release';
+      if (heldToEnd && pp.speed < COPS.COLLAR_END_BUST_V && !this.busted) { this.busted = true; this._visual(dt); return 'busted'; }
+      const [sa, sb] = COPS.SHAKEN_T;
+      this.shakenT = sa + Math.random() * (sb - sa);
+      f.cooldowns.grapple = Math.max(f.cooldowns.grapple || 0, COPS.GRAB_CD_AFTER);
+      this.grabIntent = 0;
+    }
     // THE COLLAR: he has you. Brake, and the hold tows you down with him.
     if (f.hold && f.hold.target === player.fighter) {
+      this._collared = true;
       p.speed = Math.max(0, p.speed - COPS.COLLAR_DECEL * dt);
       const steer = Math.max(-1, Math.min(1, ((pp.lateral + f.hold.side * -CFG.GRAPPLE_GAP) - p.lateral) * 0.6 - (p.lateralV || 0) * 0.2));
       p.advance(dt, { throttle: false, brake: false, steer, tuck: false });
@@ -320,7 +347,10 @@ export class Cop {
     // He holds station a little BEHIND your centre (STATION_GAP): a swing only
     // lands inside the attacker's forward arc, and sitting level he drifted 0.7 m
     // ahead of you and missed 15 swings out of 17 (MEASURED).
-    const want = pp.speed + THREE.MathUtils.clamp((gap - COPS.STATION_GAP) * 0.7, -8, COPS.CLOSE_RATE);
+    // shaken off: fall back first, then the ordinary chase brings him in again
+    if (this.shakenT > 0) this.shakenT -= dt;
+    const want = this.shakenT > 0 ? pp.speed - COPS.SHAKEN_DROP
+      : pp.speed + THREE.MathUtils.clamp((gap - COPS.STATION_GAP) * 0.7, -8, COPS.CLOSE_RATE);
     const dv = THREE.MathUtils.clamp(Math.max(0, want) - p.speed, -9 * dt, COPS.ACCEL * dt);
     p.speed = Math.min(p.topSpeed * 1.02, Math.max(0, p.speed + dv));
     const needPower = want > p.speed + 0.3;
@@ -338,7 +368,8 @@ export class Cop {
       const [ba, bb] = COPS.BARGE_EVERY;
       this.bargeCool = (ba + Math.random() * (bb - ba)) * (1.2 - this.level * 0.08);
     }
-    const sideGap = this.bargeT > 0 ? COPS.BARGE_SIDE : COPS.SIDE;
+    if (this.grabIntent > 0) this.grabIntent -= dt;
+    const sideGap = this.grabIntent > 0 ? CFG.GRAPPLE_GAP : this.bargeT > 0 ? COPS.BARGE_SIDE : COPS.SIDE;
     let tLat = Math.abs(gap) < 18 ? pp.lateral + (this.sideLock || 1) * sideGap : pp.lateral;
     tLat = Math.max(-lim, Math.min(lim, tLat));
     // TRAFFIC. A trained rider's 2.8 s look: swerve to the nearer clear flank,
@@ -365,18 +396,25 @@ export class Cop {
     // THE TAKEDOWN. Alongside and in reach: he swings, on a rhythm with a little
     // randomness so it cannot be timed. The fighter decides whether it lands.
     this.swingT -= dt;
-    const alongside = near;
-    if (alongside && this.swingT <= 0 && !f.busy && !player.fighter.down) {
+    const alongside = near && !(this.shakenT > 0);
+    const pf = player.fighter;
+    const nextSwing = () => { const [a, b] = COPS.SWING_BY_LEVEL[this.level - 1]; this.swingT = (a + Math.random() * (b - a)) * (this.chaseT > COPS.IMPATIENT_AFTER ? 0.75 : 1); };
+    // the grab he is moving in for: only at an arm's length
+    if (this.grabIntent > 0 && !f.busy) {
+      const dl = Math.abs(pp.lateral - p.lateral);
+      if (pf.down || pf.heldBy || !f.can('grapple')) this.grabIntent = 0;
+      else if (Math.abs(gap) < COPS.GRAB_REACH_S && dl < COPS.GRAB_REACH_LAT) {
+        if (f.commit('grapple')) nextSwing();
+        this.grabIntent = 0;
+      } else if (this.grabIntent <= dt) this.swingT = 0.4;          // did not get there: something else soon
+    } else if (alongside && this.swingT <= 0 && !f.busy && !pf.down) {
       // The nightstick when it is ready (the weapon swing: wider arc, hits hard),
-      // fists and boots in between.
-      // or the collar: a hand on you, and he starts braking
-      const pf = player.fighter;
+      // fists and boots in between -- or the collar, which he has to move in for.
       const grab = f.can('grapple') && !pf.heldBy && !pf.hold && Math.random() < COPS.GRAB_CHANCE[this.level - 1];
-      const kind = grab ? 'grapple'
-        : (f.can('chain') && Math.random() < 0.35) ? 'chain' : (Math.random() < 0.55 ? 'punch' : 'kick');
-      if (f.commit(kind)) {
-        const [a, b] = COPS.SWING_BY_LEVEL[this.level - 1];
-        this.swingT = (a + Math.random() * (b - a)) * (this.chaseT > COPS.IMPATIENT_AFTER ? 0.75 : 1);
+      if (grab) { this.grabIntent = COPS.CLOSE_IN_T; this.swingT = COPS.CLOSE_IN_T + 0.2; }
+      else {
+        const kind = (f.can('chain') && Math.random() < 0.35) ? 'chain' : (Math.random() < 0.55 ? 'punch' : 'kick');
+        if (f.commit(kind)) nextSwing();
       }
     }
     f.update(dt, [player.fighter], hooks);

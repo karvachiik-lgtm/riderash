@@ -457,7 +457,7 @@ export class Scenery {
         // ...down to the valley floor, which is FLAT and one height for the
         // whole course (valley.js lays the river and the paddies on it)
         const u = Math.pow(smooth(c0, c0 + 16, a), 0.5);
-        const floor = GHAT_FLOOR - centreAt(-s, _cy).y + 1.2 * n * smooth(CT0 + 60, CT0 + 140, a);
+        const floor = GHAT_FLOOR - centreAt(-s, _cy).y + 0.5 * n * smooth(CT0 + 60, CT0 + 140, a);
         hd = floor * u + ledge * (1 - u) * 2;
       }
       // the wall: up at once, then the mountainside keeps climbing
@@ -981,9 +981,11 @@ export class Scenery {
           // crest is now pushed out until the inner foot stays beyond the
           // terrain skirt (650 m) plus the road's own x wander (<~76 m).
           const Lmin = 740 + Math.max(0, h) * 1.4 + 200;
-          const x = side * Math.max(Lmin, L + Math.sin(z * 0.0013 + phase) * 160);
-          const ybase = -60;
-          pos.push(x - side * (h * 1.4 + 200), ybase, z, x, h, z, x + side * (h * 1.6 + 300), ybase, z);
+          // (a cliff course: the ridges stand on the valley floor, and follow the
+          // road's own wander -- the ghat's x drifts much further than a coast road's)
+          const x = (CL ? centreAt(z, _cy).x : 0) + side * Math.max(Lmin, L + Math.sin(z * 0.0013 + phase) * 160);
+          const ybase = CL ? GHAT_FLOOR - 10 : -60;
+          pos.push(x - side * (h * 1.4 + 200), ybase, z, x, CL ? ybase + h * 0.85 : h, z, x + side * (h * 1.6 + 300), ybase, z);
           const base = new THREE.Color(rg.col).lerp(new THREE.Color(tb.cur.ground), 0.25);
           const far = layer ? 0.18 : 0;
           const fogC = new THREE.Color(0x9aa8b8);

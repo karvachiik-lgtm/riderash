@@ -28,7 +28,7 @@ export const VALLEY = {
     paddy: [0x7fa21e, 0x9bc33a, 0x6d9a2a, 0x86a860], bund: 0x6b7a3a,
     blossom: [0xef9cc4, 0xf6d4e4, 0xd8679a, 0xffffff], trunk: 0x4a3a30,
     wall: 0xe6dccb, roof: 0xc4613a, palm: 0x3f6a2a,
-    mist: 0xd6dde2, ridge: [0x5f7a74, 0x7f98a0, 0xa3b8c4],
+    mist: 0xd6dde2, ridge: [0x3f5a4c, 0x5d7474, 0x7d919c],
     fall: 0xe8f4f6,
   },
 };
@@ -47,8 +47,9 @@ export class ValleyDress {
     this.waterTex = waterTexture();
     this.fallTex = fallTexture();
     this.mat = {
-      water: new THREE.MeshStandardMaterial({ color: P.water, roughness: 0.18, metalness: 0.1, map: this.waterTex }),
-      sand: new THREE.MeshStandardMaterial({ color: P.sand, roughness: 0.95 }),
+      // (double-sided: the ribbons' winding depends on which bank is which)
+      water: new THREE.MeshStandardMaterial({ color: P.water, roughness: 0.18, metalness: 0.1, map: this.waterTex, side: THREE.DoubleSide }),
+      sand: new THREE.MeshStandardMaterial({ color: P.sand, roughness: 0.95, side: THREE.DoubleSide }),
       paddy: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85 }),
       blossom: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8, flatShading: true }),
       trunk: new THREE.MeshStandardMaterial({ color: P.trunk, roughness: 0.9 }),
@@ -118,8 +119,8 @@ export class ValleyDress {
     let run = null;
     const flush = () => {
       if (run && run.length > 3) {
-        ribbon(run.map((q) => [q.p, q.n]), run.map((q) => q.w), riverPos, riverIdx, riverUV, FLOOR + 0.35);
-        ribbon(run.map((q) => [q.p, q.n]), run.map((q) => q.w + 9 + 6 * Math.sin(q.s * 0.013)), sandPos, sandIdx, null, FLOOR + 0.2);
+        ribbon(run.map((q) => [q.p, q.n]), run.map((q) => q.w), riverPos, riverIdx, riverUV, FLOOR + 1.3);
+        ribbon(run.map((q) => [q.p, q.n]), run.map((q) => q.w + 9 + 6 * Math.sin(q.s * 0.013)), sandPos, sandIdx, null, FLOOR + 1.1);
       }
       run = null;
     };
@@ -145,8 +146,8 @@ export class ValleyDress {
         const p = new THREE.Vector3(c.x + (-t.z) * along + t.x * wig, 0, c.z + t.x * along + t.z * wig);
         pts.push([p, t.clone()]); ws.push(16 + 4 * Math.sin(k * 0.5));
       }
-      ribbon(pts, ws, riverPos, riverIdx, riverUV, FLOOR + 0.35);
-      ribbon(pts, ws.map((w) => w + 10), sandPos, sandIdx, null, FLOOR + 0.2);
+      ribbon(pts, ws, riverPos, riverIdx, riverUV, FLOOR + 1.3);
+      ribbon(pts, ws.map((w) => w + 10), sandPos, sandIdx, null, FLOOR + 1.1);
     }
     const mesh = (pos, idx, uv, mat) => {
       if (!idx.length) return;
@@ -180,7 +181,7 @@ export class ValleyDress {
         const inner = q.off - q.sd * (q.w + 14);
         for (let j = 0; j < 3; j++) {
           const lat = inner - q.sd * (j * 26 + r() * 6);
-          const p = P(q.i, lat, FLOOR + 0.25 + j * 0.9);
+          const p = P(q.i, lat, FLOOR + 1.0 + j * 0.9);
           const yaw = Math.atan2(path[q.i].rn.x, path[q.i].rn.z);
           mats.paddy.push(M(p, yaw, 22 + r() * 4, 0.5, 24 + r() * 8));
           cols.paddy.push(C(PAL.paddy[(r() * PAL.paddy.length) | 0]));
@@ -267,14 +268,16 @@ export class ValleyDress {
       }
       inst(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), this.mat.mist, mist);
       // three ridge bands each side, further, higher and bluer out
-      const bands = [[700, 120, 0], [1150, 210, 1], [1750, 320, 2]];
+      const bands = [[650, 90, 0], [1050, 150, 1], [1600, 230, 2]];
       for (const [off, hgt, k] of bands) {
         for (const side of [-1, 1]) {
           const pos = [], idx = [];
           let n = 0;
           for (let i = 0; i < path.length; i += 3) {
             const s = path[i].s;
-            const hh = hgt * (0.55 + 0.45 * Math.abs(Math.sin(s * 0.0021 + off + side))) + 40 * Math.sin(s * 0.011 + k);
+            // peaks and saddles, not a wall: a sharpened |sin| ridge line plus a ripple
+            const pk = Math.pow(Math.abs(Math.sin(s * 0.0042 + off * 0.01 + side)), 0.7);
+            const hh = hgt * (0.3 + 0.7 * pk) + hgt * 0.12 * Math.sin(s * 0.019 + k * 2);
             const top = P(i, side * off, FLOOR + hh), foot = P(i, side * (off - 160), FLOOR - 5);
             pos.push(foot.x, foot.y, foot.z, top.x, top.y, top.z);
             if (n) { const b = (n - 1) * 2; idx.push(b, b + 2, b + 1, b + 1, b + 2, b + 3); }

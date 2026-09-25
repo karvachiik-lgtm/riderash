@@ -56,6 +56,7 @@ import { Gamepads } from './gamepad.js';
 import { Cop } from './cops.js';
 import { PHYS } from './physics.js';
 import { BIKE_FOR_TIER, bikeSource } from './kit.js';
+import { GarageBikes } from './garagebikes.js';
 import { initTips } from './tips.js';
 import { EndPhoto } from './endscene.js';
 import { armAim } from './riderpose.js';
@@ -188,6 +189,8 @@ let playerSpec = makeSpec({ height: 1.75, build: 'normal', colors: { ...(CFG.PLA
 // showroom needs the rider prototype to show the player's real body, and it is
 // constructed after the loader has run. `loadAssets` fills it in.
 const assets = { bike: null, rider: null };
+// the garage cards' turntable bikes (src/garagebikes.js); drawn once assets load
+const garageBikes = new GarageBikes();
 let finishGantry = null;   // the FINISH banner, moved to each race's line in __START__
 let trackDress = null;     // chevrons, rails, warnings, countdown boards, start line (per course)
 let flagger = null;        // the starter in the road with the chequered flag
@@ -550,6 +553,7 @@ async function init() {
 
   // fills the MODULE-SCOPE `assets`, so the showroom can reach the rider later
   await loadAssets();
+  try { garageBikes.setAssets(assets); } catch (e) { console.warn('[riderash] garage bikes:', e); }
 
   // surfaces are applied at load time, never baked into the asset
   try { applySurfaces(THREE, road); applySurfaces(THREE, side); } catch (e) { console.warn('[riderash] surfaces:', e); }
@@ -3418,6 +3422,7 @@ function buildGarage() {
         `<i style="background:#1b1b1e"></i>` +
         `<i style="background:#8a9199"></i>` +
       `</span>` +
+      `<canvas class="bk3d" aria-hidden="true"></canvas>` +
       `<span class="bl">${b.blurb}</span>` +
       `<span class="pr">${riding ? 'RIDING' : owned ? 'OWNED' : levelLocked ? `COMING SOON · LVL ${b.unlockLevel}` : '$' + b.price}</span>` +
       (b.isNew ? '<i class="sticker">NEW</i>' : '') +
@@ -3436,6 +3441,8 @@ function buildGarage() {
       refreshTitle();
     });
     host.appendChild(el);
+    // the machine itself, still; it turns while the card is hovered
+    try { garageBikes.bind(el, el.querySelector('.bk3d'), b); } catch (e) { console.warn('[riderash] garage bike:', e); }
   }
 }
 

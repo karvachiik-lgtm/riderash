@@ -1044,6 +1044,12 @@ body.cine #hud, body.cine .hud { opacity: 0; transition: opacity .5s; }
 @keyframes epStamp2 { from { opacity: 0; transform: rotate(-12deg) scale(2.4); } }
 .ep-final { position: absolute; right: 18px; top: 44%; transform: rotate(-12deg); border: 4px solid #b0302a; color: #b0302a; padding: 4px 12px 2px;
   font: 400 34px/1 var(--display, sans-serif); letter-spacing: .08em; font-style: normal; animation: epStamp2 .35s cubic-bezier(.3,1.6,.5,1) .6s both; background: rgba(243,236,200,.3); }
+/* ---- THE BIKE ITSELF in each garage card (src/garagebikes.js): a still model
+   in the middle, turning slowly while the card is hovered or focused */
+.bike .bk3d { display: block; width: 100%; height: 64px; margin: 6px 0 2px; pointer-events: none; }
+#title .bike .bk3d { height: 72px; }
+.bike.locked .bk3d { opacity: .55; }
+@media (max-height: 520px) { .bike .bk3d, #title .bike .bk3d { height: 48px; margin: 3px 0 0; } }
 /* ---- THE ONE-WHEELER's garage card: set apart on the right, a NEW sticker,
    a TEST RIDE chip that works even while it is locked */
 #title .bike.bike-mono { position: relative; margin-left: 22px; overflow: visible; border-color: rgba(224,80,28,.55); }

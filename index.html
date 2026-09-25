@@ -1003,6 +1003,35 @@ body.cine #hud, body.cine .hud { opacity: 0; transition: opacity .5s; }
   letter-spacing: .16em; cursor: pointer; }
 .bike .try:hover, .bike .try:focus { background: #ece6d9; color: #0b0b0c; outline: none; }
 #title .bike.bike-mono .pr { color: #e3b93c; }
+.bike .drv { display: inline-block; margin: 6px 6px 0 0; padding: 4px 8px; background: #e0501c; color: #0b0b0c; font: 700 10.5px/1 var(--ui, sans-serif);
+  letter-spacing: .14em; cursor: pointer; }
+.bike .drv:hover, .bike .drv:focus { background: #ece6d9; outline: none; }
+/* THE POWERTRAIN PICKER */
+#drivepick { position: fixed; inset: 0; z-index: 60; display: none; align-items: center; justify-content: center; padding: 16px;
+  background: rgba(8,8,9,.93); }
+#drivepick.on { display: flex; }
+#drivepick .dp-box { width: min(980px, 100%); max-height: 100%; overflow: auto; text-align: center; }
+#drivepick h3 { font-family: var(--display); font-weight: 400; font-size: clamp(30px, 5vh, 52px); letter-spacing: .08em; color: #ece6d9;
+  transform: skewX(-8deg); margin: 0; }
+#drivepick .dp-sub { color: #8f959b; font: 600 13px/1.4 var(--ui, sans-serif); letter-spacing: .12em; margin: 4px 0 16px; text-transform: uppercase; }
+#drivepick .dp-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+#drivepick .dp-card { position: relative; flex: 1 1 260px; max-width: 310px; padding: 16px 16px 14px; text-align: left; cursor: pointer;
+  background: rgba(14,15,17,.92); border: 1px solid #3d4247; color: #cfc9bd; display: flex; flex-direction: column; gap: 6px;
+  transition: border-color .12s, transform .12s; }
+#drivepick .dp-card:hover { border-color: #8f959b; }
+#drivepick .dp-card.sel { border-color: #ece6d9; box-shadow: inset 0 3px 0 #e3b93c, 5px 5px 0 #000; transform: translateY(-2px); }
+#drivepick .dp-ico svg { width: 34px; height: 34px; fill: none; stroke: #e3b93c; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+#drivepick .dp-nm { font-family: var(--display); font-weight: 400; font-size: 30px; letter-spacing: .06em; color: #ece6d9; line-height: 1; }
+#drivepick .dp-tag { font: 700 11px/1 var(--ui, sans-serif); letter-spacing: .2em; color: #8f959b; }
+#drivepick .dp-stats { display: grid; grid-template-columns: 84px 1fr; gap: 6px 10px; align-items: center; margin: 6px 0 4px; }
+#drivepick .dp-stats em { font: 700 10.5px/1 var(--ui, sans-serif); letter-spacing: .16em; color: #8f959b; font-style: normal; }
+#drivepick .dp-bar { display: block; height: 6px; background: #24272b; }
+#drivepick .dp-bar b { display: block; height: 100%; background: #ece6d9; }
+#drivepick .dp-card.sel .dp-bar b { background: #e3b93c; }
+#drivepick .dp-bl { font: 500 13.5px/1.4 var(--ui, sans-serif); color: #b8b2a6; }
+#drivepick kbd { position: absolute; top: 12px; right: 12px; font: 700 11px/1 var(--ui, sans-serif); color: #5e6368; border: 1px solid #3d4247; padding: 3px 6px; }
+#drivepick .dp-act { display: flex; gap: 10px; justify-content: center; margin-top: 16px; }
+#drivepick .dp-go { background: #ece6d9; color: #0b0b0c; border: 0; font-family: var(--display); font-size: 24px; letter-spacing: .14em; padding: 8px 40px 6px; box-shadow: 5px 5px 0 #000; }
 @media (max-width: 760px) { #title .bike.bike-mono { margin-left: 0; } #title .bike.bike-mono::before { display: none; } }
 /* the intro's sound gate prompt: shown only while the browser has sound blocked */
 #introsound { position: absolute; left: 50%; bottom: 13vh; transform: translateX(-50%); z-index: 2; pointer-events: none; opacity: 0;

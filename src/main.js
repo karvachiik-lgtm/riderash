@@ -44,7 +44,7 @@ import { DynamicSky } from './sky.js';
 import { WorldSpine, MAPS, MAP_ORDER, BIOMES } from './worldspine.js';
 import { SurfaceDriver } from './surfacedriver.js';
 import { Radar } from './radar.js';
-import { Career, SERIES, BIKES, COURSES_UI, COURSE_COUNT } from './career.js';
+import { Career, SERIES, BIKES, COURSES_UI, COURSE_COUNT, MONO_DRIVES } from './career.js';
 import { gridFor, aggroFactorFor, takeRaceSeed } from './roster.js';
 import { initCharCard } from './charcard.js';   // [npc-persona] character cards + easter eggs
 import { CAM_MODES } from './cameramodes.js';
@@ -1947,10 +1947,17 @@ function stepGame(dt) {
     }
   }
   const monoRide = raceBike().id === 'mono';
+  const drive = monoRide ? raceBike().drive : 'engine';
   audio.update({
     speed: player.phys.speed,
     maxSpeed: monoRide ? player.phys.topSpeed : CFG.MAX_SPEED,
-    enginePitch: monoRide ? 1.28 : 1,
+    enginePitch: monoRide ? (drive === 'hybrid' ? 1.12 : 1.28) : 1,
+    voice: monoRide ? 'mono' : 'bike',
+    // THE POWERTRAIN'S VOICE: an EV has no engine note at all, only its motor;
+    // the hybrid is electric at walking pace and the engine fires up from ~6 m/s,
+    // its motor whining under it while it assists
+    engineMix: drive === 'ev' ? 0 : drive === 'hybrid' ? Math.max(0, Math.min(1, (player.phys.speed - 6) / 8)) : 1,
+    motor: drive === 'ev' ? 1 : drive === 'hybrid' ? Math.max(player.phys.assist || 0, 1 - Math.max(0, Math.min(1, (player.phys.speed - 6) / 8))) * 0.8 : 0,
     throttle: input.down.up ? 1 : 0,
     rival: near,
     lean: player.phys.lean,
@@ -2730,7 +2737,17 @@ let lastResult = null;
 let freeEvent = null;
 function raceEvent() { return freeEvent || career.event; }
 // the machine this race is ridden on: the garage's, or the one-wheeler on a test ride
-function raceBike() { return (freeEvent && freeEvent.trial && BIKES.find((b) => b.id === 'mono')) || career.bike; }
+// The machine this race is on. The one-wheeler carries its chosen POWERTRAIN
+// (career.monoDrive -> MONO_DRIVES) merged over its base stats; cached, since
+// this is read every frame.
+let _rbKey = '', _rbVal = null;
+function raceBike() {
+  const b = (freeEvent && freeEvent.trial && BIKES.find((x) => x.id === 'mono')) || career.bike;
+  if (!b || b.id !== 'mono') return b;
+  const d = career.monoDrive, key = b.id + ':' + d;
+  if (key !== _rbKey) { _rbKey = key; _rbVal = { ...b, ...MONO_DRIVES[d], drive: d, name: b.name, blurb: b.blurb }; }
+  return _rbVal;
+}
 // THE TEST RIDE: the one-wheeler, alone, on a short run of the coast road
 function startTrial() {
   freeEvent = { ...SERIES[1], lenMul: 0.35, name: 'TEST RIDE', free: true, trial: true };
@@ -2738,6 +2755,50 @@ function startTrial() {
   window.__START__();
 }
 window.__TRIAL__ = startTrial;   // harness
+
+// THE POWERTRAIN PICKER. Three cards, one per MONO_DRIVES entry, with bars from
+// MEASURED runs of each (0-60 mph, top speed, weight, braking; see HANDOFF).
+// `ride`: start the test ride on pick; otherwise just set it (the garage chip).
+const DRIVE_ICON = {
+  engine: '<svg viewBox="0 0 24 24"><path d="M7 3h10v4h-2v3h3l2 3v6H4v-6l2-3h3V7H7z"/><circle cx="12" cy="15" r="2.2"/></svg>',
+  ev: '<svg viewBox="0 0 24 24"><path d="M13 2 5 13h6l-1 9 8-11h-6z"/></svg>',
+  hybrid: '<svg viewBox="0 0 24 24"><path d="M5 19c0-8 5-13 14-14-1 9-6 14-14 14zm0 0 7-7"/><path d="M15 12l-3 5h2l-1 4 4-6h-2l1-3z"/></svg>',
+};
+function openDrivePicker(ride) {
+  let el = document.getElementById('drivepick');
+  if (!el) { el = document.createElement('div'); el.id = 'drivepick'; document.body.appendChild(el); }
+  const cur = career.monoDrive;
+  const bar = (v) => `<i class="dp-bar"><b style="width:${Math.round(v * 100)}%"></b></i>`;
+  el.innerHTML = `<div class="dp-box"><h3>CHOOSE THE ONE-WHEELER</h3><p class="dp-sub">Same frame, one wheel. What drives it changes everything.</p><div class="dp-row">` +
+    Object.entries(MONO_DRIVES).map(([k, d], i) => `<button type="button" class="dp-card${k === cur ? ' sel' : ''}" data-k="${k}">
+      <span class="dp-ico">${DRIVE_ICON[k]}</span><b class="dp-nm">${d.label}</b><small class="dp-tag">${d.tag}</small>
+      <span class="dp-stats"><em>LAUNCH</em>${bar(d.bars.launch)}<em>TOP SPEED</em>${bar(d.bars.top)}<em>WEIGHT</em>${bar(d.bars.weight)}<em>BRAKES</em>${bar(d.bars.brakes)}</span>
+      <span class="dp-bl">${d.blurb}</span><kbd>${i + 1}</kbd></button>`).join('') +
+    `</div><div class="dp-act"><button type="button" class="btn dp-go">${ride ? 'TEST RIDE' : 'DONE'}</button><button type="button" class="btn dp-x">CANCEL</button></div></div>`;
+  el.className = 'on';
+  let pick = cur;
+  const sel = (k) => { pick = k; el.querySelectorAll('.dp-card').forEach((c) => c.classList.toggle('sel', c.dataset.k === k)); };
+  const close = () => { el.className = ''; el.innerHTML = ''; document.removeEventListener('keydown', onKey, true); };
+  const go = () => { career.setMonoDrive(pick); close(); if (ride) startTrial(); else refreshTitle(); };
+  const onKey = (e) => {
+    const keys = Object.keys(MONO_DRIVES);
+    if (/^[1-3]$/.test(e.key)) sel(keys[+e.key - 1]);
+    else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') sel(keys[(keys.indexOf(pick) + (e.key === 'ArrowRight' ? 1 : 2)) % 3]);
+    else if (e.key === 'Enter') go();
+    else if (e.key === 'Escape') close();
+    else return;
+    e.preventDefault(); e.stopPropagation();
+  };
+  document.addEventListener('keydown', onKey, true);
+  el.querySelectorAll('.dp-card').forEach((c) => {
+    c.addEventListener('click', () => sel(c.dataset.k));
+    c.addEventListener('dblclick', () => { sel(c.dataset.k); go(); });
+  });
+  el.querySelector('.dp-go').addEventListener('click', go);
+  el.querySelector('.dp-x').addEventListener('click', close);
+  el.addEventListener('click', (e) => { if (e.target === el) close(); });
+}
+window.__DRIVEPICK__ = openDrivePicker;   // harness
 function freeResult() {
   return { fine: 0, bill: 0, paid: 0, cash: career.state.cash, over: false, advanced: false, complete: false, free: true };
 }
@@ -3339,9 +3400,13 @@ function buildGarage() {
       `<span class="bl">${b.blurb}</span>` +
       `<span class="pr">${riding ? 'RIDING' : owned ? 'OWNED' : levelLocked ? `COMING SOON · LVL ${b.unlockLevel}` : '$' + b.price}</span>` +
       (b.isNew ? '<i class="sticker">NEW</i>' : '') +
-      (b.id === 'mono' ? '<span class="try" role="button" tabindex="0">TEST RIDE</span>' : '');
+      (b.id === 'mono' ? `<span class="drv" role="button" tabindex="0" title="Change powertrain">${MONO_DRIVES[career.monoDrive].label}</span>`
+        + '<span class="try" role="button" tabindex="0">TEST RIDE</span>' : '');
+    // TEST RIDE asks WHICH one-wheeler first: engine, EV or eco-hybrid
     const tr = el.querySelector('.try');
-    if (tr) tr.addEventListener('click', (e) => { e.stopPropagation(); if (!state.running) startTrial(); });
+    if (tr) tr.addEventListener('click', (e) => { e.stopPropagation(); if (!state.running) openDrivePicker(true); });
+    const dv = el.querySelector('.drv');
+    if (dv) dv.addEventListener('click', (e) => { e.stopPropagation(); if (!state.running) openDrivePicker(false); });
     el.addEventListener('click', () => {
       if (state.running || riding) return;
       const r = career.buy(b.id);

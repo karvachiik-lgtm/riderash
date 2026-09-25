@@ -794,7 +794,7 @@ export class BikePhys {
     // record of what happens when a reset takes a subset.
     this.wheelie = 0;
     this.airY = 0; this.airVY = 0; this.airborne = false; this.airTime = 0;
-    this.backT = 0; this.backV = 0;
+    this.backT = 0; this.backV = 0; this.charge = 1; this.assist = 0;
     this.lastRoadY = null;
     this.boost = 0; this.boostCool = 0; this.swerveT = 0; this.swerveCool = 0;
     this.nitro = PHYS.NITRO_START;
@@ -904,12 +904,23 @@ export class BikePhys {
     this.machine = { power: f(m.power), grip: f(m.grip), mass: f(m.mass), agility: f(m.agility), brake: f(m.brake), mono: m.id === 'mono' || !!m.mono,
       // heft: how hard it is to SHOVE (contact, traffic, blows), separate from
       // `mass`, which is how hard it is to accelerate
-      heft: f(m.heft) };
+      heft: f(m.heft),
+      // POWERTRAIN (the one-wheeler's; every other machine is 'engine'):
+      // ev: motor force multiple, base speed and the controller's limit;
+      // hybrid: assist force multiple and the speed it fades out by
+      drive: m.drive === 'ev' || m.drive === 'hybrid' ? m.drive : 'engine',
+      vmax: Number.isFinite(m.vmax) && m.vmax > 0 ? m.vmax : 0,
+      motor: f(m.motor), motorBase: Number.isFinite(m.motorBase) ? m.motorBase : 20,
+      assist: Number.isFinite(m.assist) ? m.assist : 0, assistTo: Number.isFinite(m.assistTo) ? m.assistTo : 26 };
+    this.charge = 1; this.assist = 0;
     return this;
   }
 
   /** This machine's top speed on the flat, m/s (drag-limited). */
-  get topSpeed() { return CFG.MAX_SPEED * Math.sqrt(this.machine.power); }
+  get topSpeed() {
+    const v = CFG.MAX_SPEED * Math.sqrt(this.machine.power);
+    return this.machine.vmax ? Math.min(v, this.machine.vmax) : v;
+  }
 
   /**
    * WHERE THE BIKE PIVOTS WHEN IT TURNS: THE REAR CONTACT, NOT THE MIDDLE.
@@ -1006,7 +1017,29 @@ export class BikePhys {
       // is what strandered a rider in the dirt; damping it means you can always
       // claw your way back.
       const surface = this.onRoad ? 1.0 : PHYS.OFROAD_THROTTLE;
-      const Fe = PHYS.ENGINE_PEAK * curve * tuckBonus * surface * this.machine.power;
+      const M = this.machine, v = Math.max(0, this.speed);
+      let Fe;
+      if (M.drive === 'ev') {
+        // AN ELECTRIC MOTOR: constant torque (force at the tyre) from zero up to
+        // its base speed, constant POWER above it (F = P / v), and the
+        // controller cutting it over the last 1.5 m/s before its limit
+        const Fmax = PHYS.ENGINE_PEAK * M.motor * M.power;
+        const lim = M.vmax ? Math.max(0, Math.min(1, (M.vmax - v) / 1.5)) : 1;
+        Fe = (v < M.motorBase ? Fmax : Fmax * M.motorBase / v) * lim * tuckBonus * surface;
+        this.assist = 1;
+      } else {
+        Fe = PHYS.ENGINE_PEAK * curve * tuckBonus * surface * M.power;
+        if (M.drive === 'hybrid') {
+          // THE HYBRID'S MOTOR fills the engine's low-rev hole: full shove from
+          // a standstill fading linearly to nothing by assistTo, on what the
+          // battery has left; it drains while it pushes
+          const fade = Math.max(0, 1 - v / M.assistTo);
+          const Fa = PHYS.ENGINE_PEAK * M.assist * fade * Math.min(1, this.charge * 2.5) * surface;
+          if (Fa > 0) this.charge = Math.max(0, this.charge - h * 0.075 * fade);
+          this.assist = Fa / Math.max(1, Fe + Fa);
+          Fe += Fa;
+        } else this.assist = 0;
+      }
       F += Fe; FxTyre += Fe;
 
       // Launch assist: below walking pace, the rider paddles and slips the
@@ -1035,7 +1068,15 @@ export class BikePhys {
     if (!throttle && !brake) {
       // engine braking, scaled by revs
       F -= 110 * (0.3 + 0.7 * this.revFrac);
+      // REGEN on lift-off: an EV slows like one pedal; the hybrid recovers less
+      const d = this.machine.drive;
+      if (d !== 'engine' && this.speed > 2) {
+        F -= (d === 'ev' ? 320 : 140) * Math.min(1, this.speed / 12);
+        if (d === 'hybrid') this.charge = Math.min(1, this.charge + h * 0.035);
+      }
+      if (d !== 'ev') this.assist = 0;
     }
+    if (brake && this.machine.drive === 'hybrid' && this.speed > 2) this.charge = Math.min(1, this.charge + h * 0.16);
 
     // BOOST. A short overtake tool, not a second throttle: it costs a charge,
     // it has a cooldown, and it refuses below walking pace so it cannot be used

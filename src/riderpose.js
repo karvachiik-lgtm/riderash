@@ -675,6 +675,7 @@ export function poseRideDynamics(joints, phys, time = 0, seed = 0) {
   if (joints.__ik && joints.__ikOn) solveLimbs(joints, null);
 }
 
+const CHAIN_STOW = 0.45;   // s the chain stays out after a swing (see poseCombat)
 export function poseCombat(joints, f, phys, time, attacksTable) {
   if (!joints || !f) return;
   const speed = phys ? phys.speed : 0;
@@ -766,12 +767,13 @@ export function poseCombat(joints, f, phys, time, attacksTable) {
     solveLimbs(joints, over);
   }
   if (joints.chain) {
-    // CARRIED WRAPPED. It used to be stowed between swings (a loose chain
-    // streaming at 40 m/s read as noise); now a rider who has it keeps it
-    // coiled round the fist (chainweapon.js) with a short tail, so it is on
-    // show the whole race -- the player sees they are armed -- and it only
-    // leaves the fist to strike.
-    const show = chainPh >= 0 || !!f.hasWeapon;
+    // STOWED UNTIL IT IS SWUNG. Carried in the fist at 40 m/s, a loose chain
+    // streamed and fluttered all race and read as noise, so it comes out for
+    // the swing (unwinding off the fist, see chainweapon.js) and is put away
+    // CHAIN_STOW s after, once it has wrapped back round the fist.
+    if (chainPh >= 0) joints.__chainOut = time;
+    const out = joints.__chainOut != null && time - joints.__chainOut >= 0 && time - joints.__chainOut < CHAIN_STOW;
+    const show = chainPh >= 0 || (!!f.hasWeapon && (out || joints.__chainAlwaysOut));
     joints.chain.visible = show;
     // [chain agent] simulated rope pinned to the fist; animateChain (the old
     // travelling-wave formula) is kept exported but no longer drives it

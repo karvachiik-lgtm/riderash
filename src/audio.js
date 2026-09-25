@@ -167,6 +167,13 @@ export class Audio {
       // exponential decay from a hard onset; fail steps DOWN from ~750 Hz to a
       // sagging ~490 Hz (-0.6 st droop) and ends near 292 Hz, over an octave
       // below where it began. All three sound from their first 10 ms.
+      // The one-wheeler's own voices, Atlas audio_sfx (ElevenLabs SFX v2),
+      // project "RideRash monowheel concept": 6 s generations cut to a steady
+      // 4.5 s with a 0.5 s equal-power seam and normalised. MEASURED: the V-twin
+      // fires at ~88 Hz, steady RMS 0.19; the hub motor is a clean whine with
+      // partials at ~623 and ~1308 Hz.
+      load('monoVtwin', './assets/audio/mono_vtwin.mp3'),
+      load('monoMotor', './assets/audio/mono_ev_motor.mp3'),
       load('cheer', './assets/audio/cheer.mp3'),
       load('stinger', './assets/audio/stinger.mp3'),
       load('fail', './assets/audio/fail.mp3'),
@@ -186,6 +193,16 @@ export class Audio {
       src.start(0);
       this.nodes.engine = { src, filter, gain };
     }
+    // the one-wheeler's engine and motor: loops that run silent until used
+    const loopNode = (buf, type, freq) => {
+      const src = c.createBufferSource(); src.buffer = buf; src.loop = true;
+      const filter = c.createBiquadFilter(); filter.type = type; filter.frequency.value = freq;
+      const gain = c.createGain(); gain.gain.value = 0;
+      src.connect(filter).connect(gain).connect(this.nodes.sfx); src.start(0);
+      return { src, filter, gain };
+    };
+    if (this.buffers.monoVtwin) this.nodes.monoEngine = loopNode(this.buffers.monoVtwin, 'lowpass', 1800);
+    if (this.buffers.monoMotor) this.nodes.monoMotor = loopNode(this.buffers.monoMotor, 'lowpass', 5000);
 
     // --- rival engine: the same loop, panned and Doppler-shifted for whoever is
     // closest. One voice, not six: the ear tracks the nearest bike, and six
@@ -348,7 +365,7 @@ export class Audio {
       if (gear < 6 && sp > TOP[gear] * 0.97) {
         gear++; this._shiftT = t;
         // the pop only under power: an upshift while coasting is silent
-        if (!g.silent && g.throttle) this.oneShot('shift', 0.35 + gear * 0.04, 0.92 + Math.random() * 0.16);
+        if (!g.silent && g.throttle && (g.engineMix ?? 1) > 0.5) this.oneShot('shift', 0.35 + gear * 0.04, 0.92 + Math.random() * 0.16);
       }
       else if (gear > 1 && sp < TOP[gear - 1] * 0.80) gear--;
       this._gear = gear;
@@ -358,14 +375,46 @@ export class Audio {
       const shifting = t - this._shiftT < 0.09;
       // (enginePitch: a machine's own voice -- the one-wheeler is higher-strung)
       const rate = (0.60 + rpm * 1.15 + (gear - 1) * 0.04 - (shifting ? 0.12 : 0)) * (g.enginePitch || 1);
+      // the one-wheeler (g.voice 'mono') speaks with its own V-twin
+      const me = this.nodes.monoEngine, useMono = g.voice === 'mono' && !!me;
       e.src.playbackRate.setTargetAtTime(rate, t, shifting ? 0.02 : 0.05);
+      if (me) me.src.playbackRate.setTargetAtTime(rate / (g.enginePitch || 1) * 0.95, t, shifting ? 0.02 : 0.05);
       // off the throttle the engine note falls back: overrun, not drive
       const load = g.throttle === undefined ? 1 : 0.55 + 0.45 * Math.max(0, g.throttle);
       // +4.5 dB at cruise, +5.6 dB at idle over the old curve: the engine was
       // 2.5 dB over the wind and buried under the music on the grid.
-      const want = g.silent ? 0 : (0.115 + rpm * 0.16 + sp * 0.09) * load;
-      e.gain.gain.setTargetAtTime(want, t, 0.06);
+      const want = g.silent ? 0 : (0.115 + rpm * 0.16 + sp * 0.09) * load * (g.engineMix ?? 1);
+      e.gain.gain.setTargetAtTime(useMono ? 0 : want, t, 0.06);
       e.filter.frequency.setTargetAtTime(800 + rpm * 2200 + sp * 1200, t, 0.08);
+      if (me) {
+        me.gain.gain.setTargetAtTime(useMono ? want * 0.85 : 0, t, 0.06);
+        me.filter.frequency.setTargetAtTime(900 + rpm * 2600 + sp * 1400, t, 0.08);
+      }
+    }
+
+    // THE ELECTRIC MOTOR (EV / hybrid one-wheeler): no gears, so one rising
+    // note locked to the wheel speed -- a sawtooth fundamental through a band
+    // filter, plus the inverter's high whine at ~2.9x -- louder under load.
+    // Synthesised, so it costs no download and never loops audibly.
+    const mm = this.nodes.monoMotor;
+    if (mm) {
+      // the sampled hub motor: one gear, pitch locked to wheel speed (its
+      // ~623 Hz partial runs from ~220 Hz at a standstill to ~1.1 kHz at 50 m/s)
+      const v = Math.max(0, g.speed || 0);
+      mm.src.playbackRate.setTargetAtTime(0.35 + v * 0.028, t, 0.05);
+      const load = g.throttle ? 1 : 0.4;
+      const want = g.silent ? 0 : (g.motor || 0) * (0.05 + 0.10 * load * Math.min(1, v / 6) + Math.min(1, v / 50) * 0.05);
+      mm.gain.gain.setTargetAtTime(want, t, 0.07);
+    } else if ((g.motor || 0) > 0 || this.nodes.motor) {
+      const m = this.nodes.motor || (this.nodes.motor = this._makeMotor());
+      const v = Math.max(0, g.speed || 0);
+      const f = 55 + v * 15;
+      m.o1.frequency.setTargetAtTime(f, t, 0.05);
+      m.o2.frequency.setTargetAtTime(f * 2.9, t, 0.05);
+      m.bp.frequency.setTargetAtTime(f * 1.8, t, 0.08);
+      const load = g.throttle ? 1 : 0.35;
+      const want = g.silent ? 0 : (g.motor || 0) * (0.035 + 0.075 * load * Math.min(1, v / 6) + Math.min(1, v / 50) * 0.04);
+      m.gain.gain.setTargetAtTime(want, t, 0.07);
     }
 
     const w = this.nodes.wind;
@@ -426,6 +475,19 @@ export class Audio {
       s.gain.gain.setTargetAtTime(want, t, 0.07);
       s.src.playbackRate.setTargetAtTime(0.9 + Math.min(1, g.speed / 61) * 0.5, t, 0.1);
     }
+  }
+
+  _makeMotor() {
+    const c = this.ctx;
+    const o1 = c.createOscillator(); o1.type = 'sawtooth'; o1.frequency.value = 60;
+    const o2 = c.createOscillator(); o2.type = 'sine'; o2.frequency.value = 170;
+    const g2 = c.createGain(); g2.gain.value = 0.35;
+    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.8; bp.frequency.value = 200;
+    const gain = c.createGain(); gain.gain.value = 0;
+    o1.connect(bp); o2.connect(g2).connect(bp);
+    bp.connect(gain).connect(this.nodes.sfx);
+    o1.start(); o2.start();
+    return { o1, o2, bp, gain };
   }
 
   /**

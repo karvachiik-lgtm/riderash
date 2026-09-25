@@ -200,6 +200,7 @@ function read() {
       // (trunk, arm, leg, seat contact) is re-derived by makeSpec from these
       // four, which is the whole reason the spec exists as a derived object.
       rider: sanitiseRider(d.rider),
+      monoDrive: MONO_DRIVES[d.monoDrive] ? d.monoDrive : 'engine',
     };
   } catch (e) {
     return { ...FRESH, owned: [...FRESH.owned], best: {} };
@@ -261,8 +262,37 @@ function sanitiseRider(r) {
   };
 }
 
+// THE ONE-WHEELER'S THREE POWERTRAINS. Same frame, same one wheel; what turns
+// it decides how it goes (physics.js reads `drive` and the rest as machine stats):
+//   engine  a petrol V-twin geared into the hub. Torque builds with the revs, so
+//           it is soft off the line, but it screams on to the highest top end.
+//   ev      a hub motor: full torque from a standstill up to its base speed,
+//           then constant power -- the hardest launch of the three -- but the
+//           controller holds it at 50 m/s (110 mph). The battery is heavy; the
+//           motor brakes too (regen), so the brakes are stronger and lifting off
+//           slows it like one pedal.
+//   hybrid  the engine AND a smaller motor on a small battery: the motor shoves
+//           it off the line and fades out by 30 m/s (67 mph), where the engine
+//           has the revs to carry it. The assist drains the battery, braking and
+//           coasting refill it. Top end between the two.
+// MEASURED (trial course, straight, traffic off): 0-30 / 0-60 / 0-100 mph and
+// top -- engine 1.1 / 2.3 / 4.3 s, 139 mph; ev 0.8 / 1.9 / 4.9 s, 110 mph;
+// hybrid 0.9 / 2.0 / 4.8 s, 128 mph (the RAT: 1.4 / 3.1 / 8.2 s, 108 mph).
+// The picker's bars are those numbers normalised.
+export const MONO_DRIVES = {
+  engine: { label: 'ENGINE', tag: 'PETROL V-TWIN', power: 1.64, mass: 1.15, heft: 2.2, brake: 0.8, bars: { launch: 0.73, top: 1, weight: 0.88, brakes: 0.92 },
+    blurb: 'Soft off the line, screams on to 139 mph. Six gears, all noise.' },
+  ev: { label: 'EV', tag: 'HUB MOTOR', power: 1.64, mass: 1.30, heft: 2.4, brake: 1.0, vmax: 50, motor: 1.3, motorBase: 20, bars: { launch: 1, top: 0.79, weight: 1, brakes: 1 },
+    blurb: 'Instant torque, near silent, regen brakes. Limited to 110 mph.' },
+  hybrid: { label: 'ECO-HYBRID', tag: 'ENGINE + MOTOR', power: 1.40, mass: 1.25, heft: 2.5, brake: 0.9, assist: 1.2, assistTo: 30, bars: { launch: 0.89, top: 0.92, weight: 0.96, brakes: 0.94 },
+    blurb: 'The motor shoves you off the line, the engine takes it from 67 mph.' },
+};
+
 export class Career {
   constructor() { this.state = read(); }
+  /** The one-wheeler's powertrain ('engine' | 'ev' | 'hybrid'), remembered. */
+  get monoDrive() { return MONO_DRIVES[this.state.monoDrive] ? this.state.monoDrive : 'engine'; }
+  setMonoDrive(d) { if (MONO_DRIVES[d]) { this.state.monoDrive = d; write(this.state); } }
 
   get cash() { return this.state.cash; }
   get raceIndex() { return Math.min(this.state.race, SERIES.length - 1); }

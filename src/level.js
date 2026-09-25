@@ -3,6 +3,7 @@
 import * as THREE from 'three';
 import { CFG, PAL } from './config.js';
 import { texMaterial, getTexture } from './textures.js';
+import { enhanceTerrain } from './terrainshader.js';
 import { edgeAt, lanesAt, LANE, crossings, CROSS_HALF, medians, MEDIAN_HALF } from './lanes.js';
 import { ghatX, ghatY, GHAT_Y_AMP, ghatDropAt, ghatDropK, ghatSection, setGhatDesign } from './ghatdesign.js';
 const ghatSectionSide = (s) => ghatSection(s)[2];
@@ -632,6 +633,9 @@ export function buildRoad() {
 // verge and shoulder are DIRT and CONCRETE — they need a dark tint over the map.
   const verge = texMaterial('dry_scrub', { repeat: 6, color: 0x6a6048, roughness: 0.96, metalness: 0.0 });
   verge.name = 'foliage';
+  // the same per-pixel ground detail as the terrain beyond it (terrainshader.js):
+  // it was one flat tinted strip from the kerb to 35 m
+  enhanceTerrain(verge, { rockAmt: 0, bump: 1.4, detail: 1.1 });
   const shoulder = texMaterial('concrete', { repeat: 3, color: 0x4a4844, roughness: 0.94, metalness: 0.0 });
   shoulder.name = 'shoulder';
   // VERGE PLACEMENT, and this is why the road looked like dirt.

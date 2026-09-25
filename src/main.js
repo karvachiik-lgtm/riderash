@@ -601,6 +601,10 @@ async function init() {
   // with the scene's value whenever the material's own envMap is null, so a
   // per-material intensity is silently ignored. See lighting.js.
   const setEnv = scene.userData.setMaterialEnv;
+  // THE FAR MOUNTAINS AND THE GROUND ARE MATTE: at the scene's full sky
+  // intensity their grazing facets washed out to a pale, icy sheen (MEASURED in
+  // the ghat renders); a low per-material intensity keeps them earth-coloured.
+  if (setEnv && scenery) { setEnv(scenery.ridgeMat, 0.3); setEnv(scenery.terrainMat, 0.55); }
   if (setEnv) {
     road.traverse((n) => {
       if (!n.isMesh || !n.material) return;

@@ -46,6 +46,8 @@ import { edgeAt, crossingNear, crossings } from './lanes.js';
 import { BIOMES } from './worldspine.js';
 import { texMaterial } from './textures.js';
 import { ASSET } from '../assetlib.js';
+import { enhanceTerrain, TERRAIN_ROCK } from './terrainshader.js';
+import { tuftGeometry, tuftMaterial, GRASS_TIME } from './groundcover.js';
 
 // --------------------------------------------------------------------------
 // The kit: asset -> number of variants it publishes (see each file's header).
@@ -193,6 +195,14 @@ function prng(seed) {
 }
 const hashStr = (s) => { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; };
 const pickW = (list, r) => { let tot = 0; for (const [, w] of list) tot += w; let x = r * tot; for (const [k, w] of list) { x -= w; if (x <= 0) return k; } return list[list.length - 1][0]; };
+// seeded 2D value noise (0..1), for terrain displacement
+const _vh = (x, y) => { let n = Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263); n = Math.imul(n ^ (n >>> 13), 1274126177); return ((n ^ (n >>> 16)) >>> 0) / 4294967296; };
+function vnoise2(x, y) {
+  const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy;
+  const u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+  const a = _vh(ix, iy), b = _vh(ix + 1, iy), c = _vh(ix, iy + 1), d = _vh(ix + 1, iy + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
 const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 
 // --------------------------------------------------------------------------
@@ -317,8 +327,13 @@ export class Scenery {
     this.terrainMat = texMaterial('dry_scrub', { repeat: 1, color: 0xffffff, roughness: 0.97, metalness: 0.0 });
     this.terrainMat.vertexColors = true;
     this.terrainMat.name = 'ground';
-    this.ridgeMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1.0, metalness: 0, flatShading: true });
+    this.ridgeMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1.0, metalness: 0, flatShading: false });
     this.ridgeMat.name = 'stone';
+    this.ridgeMat.side = THREE.DoubleSide;         // (both flanks of a ridge can face the road)
+    // procedural detail per pixel (terrainshader.js): noise, rock on the steep,
+    // strata, bump -- the skirt is big triangles, this is what makes it ground
+    enhanceTerrain(this.terrainMat, { bump: 1.0 });
+    enhanceTerrain(this.ridgeMat, { bump: 2.2, detail: 0.8, strata: 0.25, rockAmt: 0.55 });
     this.wireMat = new THREE.MeshStandardMaterial({ color: 0x1b1b1e, roughness: 0.6, metalness: 0.4 });
     this.wireMat.name = 'metal';
     this.vineMat = new THREE.MeshStandardMaterial({ color: 0x4a5e2c, roughness: 0.95, metalness: 0, flatShading: true });
@@ -337,7 +352,7 @@ export class Scenery {
     const prev = scene.onBeforeRender;
     const self = this;
     scene.onBeforeRender = function (r, s, cam, ...rest) {
-      if (cam === self.camera) self._cull(cam.position);
+      if (cam === self.camera) { self._cull(cam.position); GRASS_TIME.value = performance.now() / 1000; }
       if (prev) prev.call(this, r, s, cam, ...rest);
     };
   }
@@ -348,6 +363,11 @@ export class Scenery {
     if (key === this.mapKey) return;
     this.mapKey = key;
     this.spine = spine;
+    const TR = TERRAIN_ROCK[spine.mapId] || TERRAIN_ROCK.valley;
+    for (const m of [this.terrainMat, this.ridgeMat]) {
+      const U = m.userData.terrainUniforms;
+      if (U) { U.uRock.value.setHex(TR.rock); U.uDirt.value.setHex(TR.dirt); }
+    }
     const t0 = performance.now();
     this._clear();
     this._build(spine);
@@ -461,7 +481,14 @@ export class Scenery {
         hd = floor * u + ledge * (1 - u) * 2;
       }
       // the wall: up at once, then the mountainside keeps climbing
-      if (k < 1) hw = CL.wall * Math.pow(smooth(CT0, CT0 + 7, a), 0.6) * (0.85 + 0.25 * n) + 90 * smooth(CT0 + 15, 260, a) + ledge * 1.5;
+      // ...and a MOUNTAINSIDE beyond it, not a plateau: it keeps climbing out to
+      // the skirt's edge, carved by ridged noise into spurs and gullies
+      if (k < 1) {
+        let rn = 0, amp = 0.5, fr = 1;
+        for (let o = 0; o < 3; o++) { rn += amp * (1 - Math.abs(2 * vnoise2(s * 0.004 * fr + o * 7.1, a * 0.006 * fr + o * 3.3) - 1)); fr *= 2.2; amp *= 0.5; }
+        hw = CL.wall * Math.pow(smooth(CT0, CT0 + 7, a), 0.6) * (0.85 + 0.25 * n) + 90 * smooth(CT0 + 15, 260, a)
+           + 260 * smooth(120, 650, a) * (0.35 + 0.8 * rn) + 40 * rn * smooth(CT0 + 20, 120, a) + ledge * 1.5;
+      }
       return hd * k + hw * (1 - k);
     };
     const reliefAt = (s, lat, tb) => {
@@ -519,6 +546,24 @@ export class Scenery {
       _sm.nx = -tz; _sm.nz = tx;
       return _sm;
     };
+    // DISPLACEMENT (seeded value-noise fBm in world space): the skirt was smooth
+    // between its rows and columns. Out in the fields a rolling bump; on a cliff
+    // course's faces buttresses and gullies -- the face is pushed in and out
+    // ALONG the road normal, so a 150 m drop is not one flat sheet. Zero at the
+    // inner column: the road edge never moves. Props use it too (groundY, put).
+    const _D = { dh: 0, dl: 0 };
+    const disp = (x, z, a) => {
+      _D.dh = 0; _D.dl = 0;
+      const wn = vnoise2(x * 0.045, z * 0.045) * 0.65 + vnoise2(x * 0.13, z * 0.13) * 0.35;
+      if (CL) {
+        const face = smooth(CT0 + 1.2, CT0 + 6, a) * (1 - smooth(CT0 + 40, CT0 + 90, a));
+        _D.dl = (wn - 0.5) * 11 * face;
+        _D.dh = (vnoise2(x * 0.08 + 9, z * 0.08) - 0.5) * 6 * smooth(CT0 + 1.2, CT0 + 12, a);
+      } else {
+        _D.dh = (wn - 0.5) * 5 * smooth(T0 + 2, T0 + 40, a);
+      }
+      return _D;
+    };
     const _xz = { x: 0, z: 0 };
     const placeXZ = (s, lat, f) => {
       _xz.x = f.cx + f.nx * lat; _xz.z = f.cz + f.nz * lat;
@@ -528,7 +573,11 @@ export class Scenery {
       }
       return _xz;
     };
-    const groundY = (s, lat, tb, f) => f.cy - 0.06 + (Math.abs(lat) > CT0 ? reliefAt(s, lat, tb) - 0.04 : 0);
+    const groundY = (s, lat, tb, f) => {
+      if (Math.abs(lat) <= CT0) return f.cy - 0.06;
+      const xz = placeXZ(s, lat, f);
+      return f.cy - 0.06 + reliefAt(s, lat, tb) - 0.04 + disp(xz.x, xz.z, Math.abs(lat)).dh;
+    };
 
     // Occupancy: building footprints, so trees do not grow through barns.
     const reserved = [];
@@ -845,7 +894,7 @@ export class Scenery {
       const s0 = -PRE + ci * CHUNK, s1 = Math.min(sEnd + 40, s0 + CHUNK);
       if (s0 >= s1) { terrainGeos.push(null); continue; }
       const pos = [], col = [], uv = [], idx = [];
-      const rows = Math.ceil((s1 - s0) / 8);
+      const rows = Math.ceil((s1 - s0) / (CL ? 4 : 6));     // finer rows: the displacement below needs them
       const cc = new THREE.Color(), cg = new THREE.Color(), cv = new THREE.Color();
       for (const side of [-1, 1]) {
         const base = pos.length / 3;
@@ -863,7 +912,14 @@ export class Scenery {
             const lat = side * a;
             const h = reliefAt(s, lat, tb);
             const xz = placeXZ(s, lat, f);
-            pos.push(xz.x, f.cy - 0.1 + h, xz.z);
+            // DISPLACEMENT (seeded value-noise fBm in world space): the skirt was
+            // smooth between its rows and columns. Out in the fields a rolling
+            // bump; on a cliff course's faces buttresses and gullies -- the face
+            // is pushed in and out ALONG the road normal, so a 150 m drop is not
+            // one flat sheet. Zero at the inner column: the road edge never moves.
+            const D = disp(xz.x, xz.z, a);
+            const px = xz.x + (D.dl ? f.nx * side * D.dl : 0), pz = xz.z + (D.dl ? f.nz * side * D.dl : 0);
+            pos.push(px, f.cy - 0.1 + h + D.dh, pz);
             const u = smooth(CT0, 160, a);
             const n = 0.5 + 0.5 * Math.sin(s * 0.017 + a * 0.05) * Math.sin(s * 0.0061 - a * 0.013 + side);
             cc.copy(cv).lerp(cg, u).multiplyScalar(0.88 + n * 0.22);
@@ -897,6 +953,58 @@ export class Scenery {
       terrainGeos.push(geo);
     }
 
+    // ---- 9b. Ground cover (groundcover.js): tufts of grass along both verges,
+    // from just off the shoulder out to ~28 m, seated on the displaced ground,
+    // tinted by the biome's verge colour with a little per-tuft variation. Its
+    // own random stream, so the rest of the layout is untouched; thinned by the
+    // tier's density. On a cliff course only the wall-side shoulder has any.
+    const grass = [];
+    for (let i = 0; i < nChunks; i++) grass.push({ m: [], c: [], n: 0 });     // flat number arrays, not objects
+    {
+      const gr = prng(hashStr(spine.mapId + 'grass'));
+      const per = Math.round(14 * density);                      // tufts per metre of road, both sides
+      const gc = new THREE.Color(), g2 = new THREE.Color();
+      const gm = new THREE.Matrix4(), gq = new THREE.Quaternion(), gs = new THREE.Vector3(), gp = new THREE.Vector3(), ge = new THREE.Euler();
+      for (let s = Math.max(-150, -PRE); s < sEnd; s += 1) {
+        if (crossingNear(s, 12)) continue;
+        const tb = themeAt(s);
+        if (tb.cur.street) continue;                                  // town: pavements, not meadow
+        const f = frame(s);
+        for (let k = 0; k < per; k++) {
+          const side = gr() < 0.5 ? -1 : 1;
+          let lat;
+          if (CL) {
+            if (isDrop(s, side)) continue;
+            const e = edgeAt(Math.max(0, s), -side) + CFG.KERB_W;     // (scenery lat + is the rider's left)
+            lat = side * (e + 0.4 + gr() * Math.max(0.2, CT0 - e - 0.6));     // the flat shoulder only
+          } else {
+            const a0 = KERB + 2.6 + Math.pow(gr(), 1.6) * 25;        // denser near the road
+            lat = widen(s, side * a0);
+          }
+          // (no isFree test: it scans every reservation, per tuft, and a tuft
+          // under a footprint is hidden by the building anyway; towns are skipped)
+          const y = groundY(s, lat, tb, f);
+          const xz = placeXZ(s, lat, f);
+          const hgt = 0.35 + gr() * 0.55 * (tb.cur.street ? 0.5 : 1);
+          gp.set(xz.x, y - 0.03, xz.z);
+          ge.set((gr() - 0.5) * 0.25, gr() * 6.28, (gr() - 0.5) * 0.25); gq.setFromEuler(ge);
+          const w = 1.1 + gr() * 1.0; gs.set(w, hgt, w);
+          const G = grass[chunkOf(s)];
+          gm.compose(gp, gq, gs);
+          for (let e = 0; e < 16; e++) G.m.push(gm.elements[e]);
+          G.n++;
+          // the biome's ground colour, a little of its verge, and brighter: grass
+          // catches the light that bare ground does not
+          gc.setHex(tb.cur.ground).lerp(tb.verge, 0.25).multiplyScalar(1.15 + gr() * 0.4);
+          // a few dry stalks and the odd flower head in the mix
+          const rr = gr();
+          if (rr < 0.12) gc.lerp(g2.setHex(0xc8b27a), 0.6);
+          else if (rr < 0.15) gc.lerp(g2.setHex(gr() < 0.5 ? 0xf2e6f0 : 0xe8c64a), 0.7);
+          G.c.push(gc.r, gc.g, gc.b);
+        }
+      }
+    }
+
     // ---- 10. Assemble chunks.
     //   group       terrain skirt (always, to VIS_R)
     //     props     everything else, to the tier's visR
@@ -919,6 +1027,18 @@ export class Scenery {
       const near = new THREE.Group(); near.name = 'near';
       const far = new THREE.Group(); far.name = 'far';
       g.add(props); props.add(near, far);
+      if (grass[ci] && grass[ci].n) {
+        const G = grass[ci];
+        const gi = new THREE.InstancedMesh(tuftGeometry(), tuftMaterial(), G.n);
+        gi.name = 'grass';
+        gi.instanceMatrix.array.set(G.m);
+        gi.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(G.c), 3);
+        grass[ci] = null;
+        gi.instanceMatrix.needsUpdate = true;
+        gi.castShadow = false; gi.receiveShadow = true;
+        gi.computeBoundingSphere();
+        near.add(gi); stats.meshes++;
+      }
       const sMid = -PRE + (ci + 0.5) * CHUNK;
       const fc = frame(Math.min(sMid, sEnd));
       if (terrainGeos[ci]) {
@@ -953,8 +1073,22 @@ export class Scenery {
       for (const layer of [0, 1]) {
         const L = layer ? 1900 + ridgeRnd() * 300 : 820 + ridgeRnd() * 200;
         const pos = [], col = [], idx = [];
-        const zA = 1800, zB = -(sEnd + 2200), step = 50;
+        // A HEIGHT FIELD, not a tent. Each row across the ridge is K samples
+        // from the inner foot to the outer one; the height is a bell profile
+        // shaped by RIDGED fBm in world space (peaks, saddles, spurs running
+        // down the flanks, gullies between them) plus finer noise, and each
+        // vertex is coloured by its height -- dark forest at the foot, the
+        // course's rock above, snow over the snowline -- then hazed with
+        // distance. Step 25 m along the course.
+        const zA = 1800, zB = -(sEnd + 2200), step = 25, K = 11, CREST = 0.42;
         const phase = ridgeRnd() * 100;
+        const ridged = (x, z) => {
+          let a = 0.5, t = 0, f = 1;
+          for (let o = 0; o < 4; o++) { const n = vnoise2(x * f + o * 31.7, z * f - o * 17.3); t += a * (1 - Math.abs(2 * n - 1)); f *= 2.1; a *= 0.5; }
+          return t / 0.9375;
+        };
+        const fogC = new THREE.Color(0x9fb0c0), cF = new THREE.Color(), cM = new THREE.Color(), cT = new THREE.Color(), cc = new THREE.Color();
+        const snowC = new THREE.Color(0xe8ecf0);
         let row = 0;
         for (let z = zA; z >= zB; z -= step, row++) {
           const s = -z;
@@ -970,34 +1104,50 @@ export class Scenery {
             // world -x because the road runs down -z) is ocean, so that side's
             // ridge is sunk below the sea plane instead of walling off the view.
             if (side < 0 && t.terrain.ampL < 0) h = -120;
-            if (t.ridge.mesa) { const top = (h0 + h1) * 0.45 * (layer ? 1.2 : 0.8); h = h > top * 0.7 ? top + Math.sin(z * 0.03) * 4 : h * 0.6; }
             return h;
           };
           const h = mixNum(tb, hOf);
+          const mesa = rg.mesa;
           // BUG FIX (the "white slabs across the sky" in town, sierra ~3700 m):
           // the ridge's inner foot is `h*1.4 + 200` inside its crest, so a 500 m
           // Sierra ridge on the 820 m layer put its foot at x ~ -100 -- ACROSS
-          // the road -- and the rider rode under a sloping snow-lit wall. The
-          // crest is now pushed out until the inner foot stays beyond the
-          // terrain skirt (650 m) plus the road's own x wander (<~76 m).
+          // the road. The crest is pushed out until the inner foot stays beyond
+          // the terrain skirt (650 m) plus the road's own x wander.
           const Lmin = 740 + Math.max(0, h) * 1.4 + 200;
           // (a cliff course: the ridges stand on the valley floor, and follow the
           // road's own wander -- the ghat's x drifts much further than a coast road's)
-          const x = (CL ? centreAt(z, _cy).x : 0) + side * Math.max(Lmin, L + Math.sin(z * 0.0013 + phase) * 160);
+          const xc = (CL ? centreAt(z, _cy).x : 0) + side * Math.max(Lmin, L + Math.sin(z * 0.0013 + phase) * 160);
           const ybase = CL ? GHAT_FLOOR - 10 : -60;
-          pos.push(x - side * (h * 1.4 + 200), ybase, z, x, CL ? ybase + h * 0.85 : h, z, x + side * (h * 1.6 + 300), ybase, z);
-          const base = new THREE.Color(rg.col).lerp(new THREE.Color(tb.cur.ground), 0.25);
-          const far = layer ? 0.18 : 0;
-          const fogC = new THREE.Color(0x9aa8b8);
-          const cFoot = base.clone().multiplyScalar(0.8).lerp(fogC, far);
-          const cTop = base.clone().multiplyScalar(1.08).lerp(fogC, far);
-          if (rg.snow && h > 380 * (layer ? 1.2 : 0.8)) cTop.lerp(new THREE.Color(0xe6eaee), 0.85);
-          col.push(cFoot.r, cFoot.g, cFoot.b, cTop.r, cTop.g, cTop.b, cFoot.r, cFoot.g, cFoot.b);
+          const hScale = CL ? 0.85 : 1;
+          const inner = h * 1.4 + 200, outer = h * 1.6 + 300;
+          // colours for this row: foot (forest / scrub), flank (the ridge's rock), top
+          cF.setHex(tb.cur.ground).multiplyScalar(0.5);
+          cM.setHex(rg.col);
+          cT.setHex(rg.col).multiplyScalar(1.12);
+          const far = layer ? 0.16 : 0.04;               // (the scene fog does the rest)
+          for (let k = 0; k < K; k++) {
+            const u = k / (K - 1);
+            const x = xc + side * (u < CREST ? -inner * (1 - u / CREST) : outer * ((u - CREST) / (1 - CREST)));
+            // bell across the ridge, peaks and saddles along it, spurs down it
+            const across = u < CREST ? u / CREST : 1 - (u - CREST) / (1 - CREST);
+            const bell = Math.pow(Math.sin(across * Math.PI / 2), 1.6);
+            const rn = ridged(x * 0.0021 + phase, z * 0.0021);
+            let hh = h > 0 ? h * bell * (0.55 + 0.7 * rn) + h * 0.08 * (vnoise2(x * 0.011, z * 0.011) - 0.5) * bell : h * bell;
+            if (mesa && hh > h * 0.62) hh = h * 0.62 + (hh - h * 0.62) * 0.08;          // flat-topped
+            pos.push(x, CL ? ybase + hh * hScale : Math.max(ybase, hh), z);
+            // height colouring, then haze
+            const t = Math.max(0, Math.min(1, hh / Math.max(1, Math.abs(h))));
+            cc.copy(cF).lerp(cM, Math.min(1, t * 1.6)).lerp(cT, Math.max(0, t - 0.6) * 1.5);
+            if (rg.snow && hh > 300 * (layer ? 1.2 : 0.8)) cc.lerp(snowC, Math.min(0.9, (hh - 300) / 120));
+            cc.lerp(fogC, far + 0.06 * t);
+            col.push(cc.r, cc.g, cc.b);
+          }
           if (row > 0) {
-            const a = (row - 1) * 3, b = row * 3;
-            // front slope (faces the road) and back slope; wound for both sides
-            if (side > 0) idx.push(a, a + 1, b, a + 1, b + 1, b, a + 1, a + 2, b + 1, a + 2, b + 2, b + 1);
-            else idx.push(a, b, a + 1, a + 1, b, b + 1, a + 1, b + 1, a + 2, a + 2, b + 1, b + 2);
+            for (let k = 0; k < K - 1; k++) {
+              const a = (row - 1) * K + k, b = row * K + k;
+              if (side > 0) idx.push(a, a + 1, b, a + 1, b + 1, b);
+              else idx.push(a, b, a + 1, a + 1, b, b + 1);
+            }
           }
         }
         const geo = new THREE.BufferGeometry();

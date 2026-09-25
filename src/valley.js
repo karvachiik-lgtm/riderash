@@ -268,7 +268,8 @@ export class ValleyDress {
       }
       inst(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), this.mat.mist, mist);
       // three ridge bands each side, further, higher and bluer out
-      const bands = [[650, 90, 0], [1050, 150, 1], [1600, 230, 2]];
+      // (the far ridges are scenery.js's noise-field ranges now; these flat bands are retired)
+      const bands = [];
       for (const [off, hgt, k] of bands) {
         for (const side of [-1, 1]) {
           const pos = [], idx = [];

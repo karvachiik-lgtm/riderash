@@ -9,6 +9,7 @@ import { buildRoad, buildRoadside, buildBackdrop, centreAt, centreTangent, headA
 import { GhatDress } from './ghat.js';
 import { ValleyDress } from './valley.js';
 import { TunnelDress, setCourseTunnels, tunnelK } from './tunnels.js';
+import { Arrest } from './arrest.js';
 import { buildTraffic, updateTraffic, trafficHit, resetTraffic } from './world.js';
 import { buildFinish, placeFinish } from './finishline.js';
 import { TrackDress } from './trackdress.js';
@@ -1169,6 +1170,8 @@ function frameBody(dt) {
   if (state.running && !state.raceOver) {
     stepGame(dt);
     guardBodies();
+  } else if (state.running && state.arrest) {
+    stepArrestScene(dt);
   }
 
   // The camera MUST be driven on every frame. updateCamera was defined but
@@ -1176,7 +1179,7 @@ function frameBody(dt) {
   // while the player drove away: measured 302 m of separation, which is why the
   // hero read as a tiny speck and then left the frame entirely.
   if (state.running) {
-    if (state.plunge) plungeCamera(); else updateCamera(dt, state);
+    if (state.plunge) plungeCamera(); else if (state.arrest) arrestCamera(dt); else updateCamera(dt, state);
   } else {
     updateCameraIdle(dt);
   }
@@ -1607,7 +1610,11 @@ function stepGame(dt) {
 
   if (state.countdown <= 0) {
     for (const r of rivals) {
-      if (r.out) { stepRivalPlunge(r, dt); continue; }          // over the edge: out of the race
+      if (r.out) {                                                 // out of the race
+        if (r._pl) stepRivalPlunge(r, dt);                        // over the edge
+        else if (r.dismount && r.dismount.onFoot) { if (r.dismount.state === 'FALLING') r.dismount.update(dt, null); r.dismount.render(dt); }  // arrested: stays down
+        continue;
+      }
       r.update(dt, world, hooks);
       if (r.phys.overEdge) startRivalPlunge(r);
     }
@@ -1615,7 +1622,15 @@ function stepGame(dt) {
   }
   // THE POLICE. After the pack, so a bust is judged on this frame's crash.
   if (cop && state.countdown <= 0) {
-    const ev = cop.update(dt, player, state.running && !state.raceOver, world.traffic, hooks, state.finishS);
+    // A RIVAL ARREST in progress: he is busy with them, not with you
+    let ev = null;
+    if (state.copArrest) {
+      state.copArrest.update(dt);
+      if (state.copArrest.done) { state.copArrest.release(); state.copArrest = null; cop._leave(); }
+    } else {
+      ev = cop.update(dt, player, state.running && !state.raceOver, world.traffic, hooks, state.finishS);
+      if (!ev && cop.state === 'chase') maybeArrestRival();
+    }
     // A CHASING cop is a fighter like anyone: in the list while he chases (so the
     // player's punches can find him), out of it otherwise (nobody punches a
     // parked cop, and a cop who left is not a target).
@@ -1631,7 +1646,7 @@ function stepGame(dt) {
       state.warn = by === player.fighter ? 'COP TAKEDOWN — +1 NITRO' : 'COP DOWN!';
     }
     else if (ev === 'gone') state.warn = cop.fighter.down ? '' : 'LOST THE COP';
-    else if (ev === 'busted' && !state.raceOver) { state.raceOver = true; bustRace(); }
+    else if (ev === 'busted' && !state.raceOver) { state.raceOver = true; startPlayerArrest(); }
     const flag = document.getElementById('copflag');
     if (flag) flag.classList.toggle('on', cop.active && !state.raceOver);
     // Only while the race is ON: after a finish or a bust the cop's update
@@ -2173,6 +2188,81 @@ function eliminateRace() {
   lastResult = res;
 }
 
+// ---- THE ARREST (arrest.js) ---------------------------------------------------
+// A bust is not a card: the camera pulls back, the cop pulls up, gets off,
+// walks over and cuffs you; THEN the results. Any key skips it after a second.
+function startPlayerArrest() {
+  const cf = cop.fighter;
+  if ((cf.hold || cf.heldBy) && cf._endHold) cf._endHold('break', hooks);
+  document.getElementById('copflag')?.classList.remove('on');
+  audio.siren(0);
+  audio.oneShot('horn', 0.35, 0.7);
+  state.warn = 'BUSTED!';
+  state.arrest = new Arrest(cop, { phys: player.phys, fighter: player.fighter, dismount: player.dismount }, {
+    scene,
+    onEvent: (e) => {
+      if (e === 'cuff') state.warn = 'ARRESTED';
+      if (e === 'click') { audio.oneShot('impact', 0.4, 2.4); setTimeout(() => audio.oneShot('impact', 0.35, 2.6), 180); }
+    },
+    onDone: () => { state.arrest = null; bustRace(); },
+  });
+  // the orbit starts from wherever the chase camera is now
+  const f = state.arrest.focus;
+  state.arrestCam = { ang: Math.atan2(camera.position.x - f.x, camera.position.z - f.z), r: 8, h: 4, t: 0 };
+  if (replay) replay.event('cop', 'ARRESTED', player.fighter, 5);
+}
+const BRAKE_INPUT = { throttle: 0, brake: 1, steer: 0, tuck: false, attackPressed: () => false, pressed: {} };
+function stepArrestScene(dt) {
+  const A = state.arrest;
+  // the player: a thrown body finishes its fall and STAYS down; one still on
+  // the bike (collared to a stop) brakes to a halt
+  const d = player.dismount;
+  if (d && d.onFoot) { if (d.state === 'FALLING') d.update(dt, null); d.render(dt); }
+  else { player.phys.advance(dt, BRAKE_INPUT); player.phys.sync(); player.group.position.copy(player.phys.pos); }
+  // the pack rides on down the road
+  for (const r of rivals) {
+    if (r.out || r.fighter.down || !r.phys) continue;
+    r.phys.advance(dt, { throttle: true, brake: false, steer: THREE.MathUtils.clamp(-r.phys.lateral * 0.08, -0.3, 0.3), tuck: false });
+    r.applyVisual(dt);
+  }
+  A.update(dt);
+}
+function arrestCamera(dt) {
+  const C = state.arrestCam, A = state.arrest;
+  if (!C || !A) return;
+  C.t += dt;
+  // pull back and up, then a slow orbit round the two of them
+  const k = Math.min(1, C.t / 2.2), e = k * k * (3 - 2 * k);
+  C.ang += dt * 0.22;
+  const tp = A.targetPoint(new THREE.Vector3()), fp = A.focus;
+  const mid = new THREE.Vector3().addVectors(tp, fp).multiplyScalar(0.5);
+  const r = 4.5 + 3.5 * e, h = 1.8 + 2.2 * e;
+  // a longer lens than the drone's wide one: this is a close shot
+  if (Math.abs(camera.fov - 44) > 0.1) { camera.fov += (44 - camera.fov) * Math.min(1, dt * 2); camera.updateProjectionMatrix(); }
+  const want = new THREE.Vector3(mid.x + Math.sin(C.ang) * r, mid.y + h, mid.z + Math.cos(C.ang) * r);
+  camera.position.lerp(want, Math.min(1, dt * 3));
+  camera.lookAt(mid.x, mid.y + 0.8, mid.z);
+}
+// THE COP ARRESTS RIVALS TOO: one he finds down in reach while you are not
+// (that rider is out), played where it happens while the race goes on.
+function maybeArrestRival() {
+  if (state.copArrest || state.arrest) return;
+  const cp = cop.phys;
+  if (Math.hypot(player.phys.s - cp.s, player.phys.lateral - cp.lateral) < 45) return;   // he is after you
+  for (const r of rivals) {
+    if (r.out || !r.fighter.down || !r.phys) continue;
+    if (Math.hypot(r.phys.s - cp.s, r.phys.lateral - cp.lateral) > 28) continue;
+    r.out = true; r.outWhy = 'arrested';
+    state.copArrest = new Arrest(cop, { phys: r.phys, fighter: r.fighter, dismount: r.dismount }, { scene });
+    if (Math.abs(r.phys.s - player.phys.s) < 400) state.warn = `COP ARRESTED ${r.name || 'A RIVAL'}`;
+    if (replay) replay.event('cop', `${r.name || 'RIVAL'} ARRESTED`, r.fighter, 3.5);
+    return;
+  }
+}
+// any key / tap skips the arrest once it has had a second
+addEventListener('keydown', () => { if (state.arrest && state.arrest.total > 1) state.arrest.finish(); });
+addEventListener('pointerdown', () => { if (state.arrest && state.arrest.total > 1) state.arrest.finish(); });
+
 function bustRace() {
   if (replay) { replay.event('cop', 'BUSTED', player.fighter, 5); replay.stop(); }
   document.getElementById('copflag')?.classList.remove('on');
@@ -2253,7 +2343,7 @@ function endRace(pos) {
   const board = world.standings().map((e, i) => {
     const me = e === player;
     const nm = me ? 'YOU' : (e.name || 'RIDER');
-    const down = e.out ? ' · over the edge' : e.fighter && e.fighter.down ? ' · down' : '';
+    const down = e.out ? (e.outWhy === 'arrested' ? ' · arrested' : ' · over the edge') : e.fighter && e.fighter.down ? ' · down' : '';
     return `<tr class="${me ? 'me' : ''}"><td>${names[i] || i + 1}</td><td>${nm}${down}</td></tr>`;
   }).join('');
   const table = `<table class="board">${board}</table>`;
@@ -2443,6 +2533,9 @@ function defendPositions(dt) {
 }
 
 function resetRace() {
+  // an arrest in progress (skipped, quit, restarted): the cop back on his bike
+  for (const k of ['arrest', 'copArrest']) { if (state[k]) { try { state[k].release(); } catch (e) { /* the rig may be gone */ } state[k] = null; } }
+  state.arrestCam = null;
   // The garage's bike is the machine you see: tier -> class (src/kit.js), tier colour.
   try {
     if (player && career.bike) player.setBike(bikeSource(assets, BIKE_FOR_TIER[career.bike.id] || 'sport'), career.bike.colour);

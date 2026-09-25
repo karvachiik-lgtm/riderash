@@ -696,12 +696,53 @@
     #ccard .cc-back { flex-direction:column; }
   }
   /* ==== [npc-persona] END */
+  /* the intro */
+  #intro { position: fixed; inset: 0; z-index: 90; background: #000; display: flex; align-items: center; justify-content: center; transition: opacity .6s ease; }
+  #intro[hidden] { display: none; }
+  #intro.out { opacity: 0; pointer-events: none; }
+  #intro video { width: 100%; height: 100%; object-fit: cover; }
+  #introtitle { position: absolute; left: 0; right: 0; bottom: 12%; text-align: center; font: 800 clamp(34px, 8vw, 96px)/1 ui-sans-serif, system-ui, sans-serif; letter-spacing: .18em; color: #fff; text-shadow: 0 4px 30px rgba(0,0,0,.7); animation: introIn 1.6s ease .6s both; pointer-events: none; }
+  @keyframes introIn { from { opacity: 0; transform: translateY(16px); letter-spacing: .5em; } to { opacity: 1; transform: none; } }
+  #introskip { position: absolute; right: 18px; bottom: 18px; background: rgba(0,0,0,.45); color: #fff; border: 1px solid rgba(255,255,255,.35); border-radius: 999px; padding: 8px 16px; font: 600 12px ui-monospace, monospace; letter-spacing: .12em; cursor: pointer; }
 </style>
 </head>
 <body>
 <noscript><div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#e8e4dc;background:#0a0b0c;font-family:monospace;text-align:center;padding:24px">RIDERASH needs JavaScript and WebGL. Enable JavaScript and reload.</div></noscript>
 <canvas id="c"></canvas>
 
+<!-- THE INTRO: five seconds of the game's promise while it loads (rendered
+     with Atlas from the game's own concept frames; assets/video, ~0.55 MB).
+     Skippable, once a session, never on data-saver or reduced motion. -->
+<div id="intro" hidden>
+  <video id="introv" muted playsinline preload="auto" poster="assets/video/intro_poster.jpg">
+    <source src="assets/video/intro.webm" type="video/webm">
+    <source src="assets/video/intro.mp4" type="video/mp4">
+  </video>
+  <div id="introtitle">RIDERASH</div>
+  <button id="introskip" class="pe">SKIP ›</button>
+</div>
+<script>
+(() => {
+  const el = document.getElementById('intro'), v = document.getElementById('introv');
+  let seen = false; try { seen = sessionStorage.getItem('riderash.intro') === '1'; } catch (e) { /* private mode */ }
+  const saver = navigator.connection && navigator.connection.saveData;
+  const calm = matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (seen || saver || calm || navigator.webdriver || !v.canPlayType) return;   // (and not under test automation)
+  el.hidden = false;
+  const done = () => {
+    if (el.classList.contains('out')) return;
+    try { sessionStorage.setItem('riderash.intro', '1'); } catch (e) { /* private mode */ }
+    el.classList.add('out');
+    setTimeout(() => { el.remove(); }, 700);
+  };
+  v.addEventListener('ended', done);
+  v.addEventListener('error', done, true);
+  document.getElementById('introskip').addEventListener('click', done);
+  addEventListener('keydown', done, { once: true });
+  const p = v.play(); if (p && p.catch) p.catch(done);      // autoplay refused: straight to the game
+  setTimeout(done, 9000);                                    // never stuck on it
+})();
+</script>
 <div id="load">
   <h1>RIDERASH</h1>
   <div class="sub" id="loadsub">COAST ROAD CIRCUIT</div>
@@ -783,11 +824,14 @@
   <p style="font-size:11px;color:#5f646a">
     <kbd>W</kbd>/<kbd>↑</kbd> throttle &nbsp; <kbd>S</kbd>/<kbd>↓</kbd> brake &nbsp;
     <kbd>A</kbd><kbd>D</kbd> steer &nbsp; <kbd>J</kbd> punch &nbsp; <kbd>K</kbd> kick &nbsp;
-    <kbd>L</kbd> chain &nbsp; <kbd>G</kbd> grab/throw &nbsp; <kbd>Shift</kbd> tuck &nbsp; <kbd>Space</kbd> boost &nbsp; <kbd>E</kbd> dodge<br>
+    <kbd>L</kbd> chain &nbsp; <kbd>G</kbd> grab/throw &nbsp; <kbd>Shift</kbd> tuck &nbsp; <kbd>Space</kbd> nitro &nbsp; <kbd>E</kbd> dodge<br>
      <kbd>C</kbd> camera &nbsp; <kbd>1</kbd>-<kbd>7</kbd> views &nbsp; <kbd>M</kbd> mute &nbsp; <kbd>Esc</kbd>/<kbd>P</kbd> pause
   </p>
   <p style="font-size:11px;color:#8b6a5a;letter-spacing:.06em">
     Hear a siren? Stay on the bike. Wreck near a cop and you're <b>BUSTED</b>: fined, and the race doesn't count.
+  </p>
+  <p style="font-size:11px;color:#6fae8a;letter-spacing:.06em">
+    Nitro is <b>earned</b>: take down a cop (+1 charge), knock riders off, thread traffic, draft, pass, hold a clean line through the bends.
   </p>
 </div>
 

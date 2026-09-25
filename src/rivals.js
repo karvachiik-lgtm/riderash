@@ -343,7 +343,7 @@ export class Rival {
   }
 
   reset(opts = {}) {
-    this.out = false; this._pl = null;             // back from over the edge (a cliff course)
+    this.out = false; this._pl = null; this.outWhy = null;   // back from over the edge / an arrest
     if (this.group) this.group.visible = true;
     // Back on the bike before anything else reads the rig.
     if (this.dismount) this.dismount.reset();

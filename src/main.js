@@ -13,6 +13,7 @@ import { setLanePlan } from './lanes.js';
 import { CrossTraffic } from './crosstraffic.js';
 import { setTrafficExtras } from './traffic.js';
 import { DEV, initDevMode } from './devmode.js';
+import { Replay } from './replay.js';
 import { placeHazards, HazardView } from './hazards.js';
 import { Animals, ANIMALS } from './animals.js';
 import { Parked } from './parked.js';
@@ -148,6 +149,7 @@ window.THREE = THREE;
 // the lights first meant they were placed from hand-authored constants and then
 // never reconciled with the sky above them.
 let lights = null;
+let replay = null;         // instant replay (replay.js), created in init()
 
 // Post-processing. renderer.render() is replaced by postfx.render() below, and
 // willReadFrequently stays off: the harness reads pixels back off the canvas, and
@@ -487,6 +489,17 @@ async function init() {
   try { parked = new Parked(scene); window.__PARKED__ = parked; } catch (e) { console.warn('[riderash] parked:', e); }
   try { animals = new Animals(scene); window.__ANIMALS__ = animals; } catch (e) { console.warn('[riderash] animals:', e); }
   try { crossTraffic = new CrossTraffic(scene); window.__CROSS__ = crossTraffic; } catch (e) { console.warn('[riderash] cross traffic:', e); crossTraffic = null; }
+  // INSTANT REPLAY (replay.js): records the race as it is drawn
+  try {
+    replay = new Replay(scene, camera, document.body, {
+      followSun: (p) => { if (lights) followSun(lights.sun, p); },
+      onExit: (from) => {
+        if (from === 'pause') { $('pause').classList.add('on'); hud.show(true); }
+        else $('over').classList.add('on');
+      },
+    });
+    window.__REPLAY__ = replay;
+  } catch (e) { console.warn('[riderash] replay:', e); replay = null; }
   // The AI's traffic look also sees the animals, the parked cars and the cars
   // crossing at the crossroads (see traffic.setTrafficExtras).
   setTrafficExtras((s0, back, fwd) => {
@@ -925,6 +938,24 @@ const _introPos = new THREE.Vector3(), _introLook = new THREE.Vector3(), _introQ
 // setter that queues, and the HUD's island ranks the queue (island.js). A
 // CONTACT written after a COLLARED used to replace it.
 const warnQueue = [];
+// The replay's event log, fed from the same callouts the player sees
+// (replay.js ranks them into highlights). Rival-on-rival action comes from
+// the combat hooks instead, with the rider it concerns.
+const WARN_EVENTS = [
+  [/WIPEOUT|^DOWN$|WENT DOWN|T-BONED$|^HIT A |PARKED CAR/, 'crash', 4],
+  [/^TOOK OUT/, 'crash', 4.5],
+  [/THROWN!|YOU GOT THROWN/, 'grab', 3],
+  [/COLLARED|^GRABBED/, 'grab', 2.5],
+  [/^COPS!|COP DOWN|BUSTED/, 'cop', 3],
+  [/NEAR MISS/, 'good', 1],
+  [/^LEADING/, 'good', 1.5],
+  [/AIRBORNE|HARD LANDING/, 'air', 1.2],
+  [/SIDE-SWIPE|^BUMP$/, 'hit', 0.8],
+];
+function replayEventFromWarn(t) {
+  if (!replay || !replay.recording) return;
+  for (const [re, kind, w] of WARN_EVENTS) if (re.test(t)) { replay.event(kind, t.replace(/\s+—.*$/, ''), player ? player.fighter : null, w); return; }
+}
 const state = {
   ready: false,
   running: false,
@@ -965,7 +996,7 @@ const state = {
   let w = '';
   Object.defineProperty(state, 'warn', {
     get: () => w,
-    set: (v) => { w = v; if (v) { warnQueue.push(String(v)); if (warnQueue.length > 16) warnQueue.shift(); } },
+    set: (v) => { w = v; if (v) { warnQueue.push(String(v)); if (warnQueue.length > 16) warnQueue.shift(); replayEventFromWarn(String(v)); } },
     enumerable: true, configurable: true,
   });
 }
@@ -1029,6 +1060,13 @@ function frame(now) {
   // racing and the rider would keep riding behind the panel.
   if (showroom && showroom.isOpen) {
     showroom.frame(Math.min(0.05, rawDt));
+    return;
+  }
+  // INSTANT REPLAY takes the whole frame: the race stays frozen underneath
+  if (replay && replay.active) {
+    replay.update(Math.min(0.1, rawDt));
+    if (postfx) postfx.render(Math.min(0.05, rawDt), 0); else renderer.render(scene, camera);
+    input.endFrame();
     return;
   }
   // PAUSED: nothing advances and nothing is re-rendered. The canvas keeps the
@@ -1316,6 +1354,9 @@ function stepGame(dt) {
 
   const hooks = {
     onHit(attacker, targets, a) {
+      if (replay && targets && targets[0] && (attacker === player.fighter || targets[0] === player.fighter || Math.abs(attacker.owner.s - player.phys.s) < 150)) {
+        replay.event('hit', a.name === 'chain' ? 'CHAIN HIT' : a.name === 'kick' ? 'KICK' : a.name === 'grapple' ? 'GRAB' : 'PUNCH', targets[0], a.name === 'chain' ? 2 : 1.2);
+      }
       state.hits++;
       state.score += CFG.PTS_PER_HIT * (1 + attacker.combo * CFG.COMBO_MULT) * (a.name === 'chain' ? 1.6 : 1);
       // audio: ONE SOUND PER BLOW. combat.js reports a landed blow twice by
@@ -1376,6 +1417,9 @@ function stepGame(dt) {
       if (target === player.fighter) state.score = Math.max(0, state.score - 30);
     },
     onKnockDown(attacker, target) {
+      if (replay && target && target !== player.fighter && Math.abs(target.owner.s - player.phys.s) < 200) {
+        replay.event('crash', attacker ? 'KNOCKED DOWN' : 'WIPED OUT', target, attacker === player.fighter ? 4.5 : 3);
+      }
       state.knockDowns++;
       state.shake = Math.min(1.4, state.shake + 0.7);
       // THE HITSTOP. Fired here, at the one choke point every wreck passes
@@ -1878,6 +1922,9 @@ function stepGame(dt) {
   } catch (e) { /* the radar must never take the frame down */ }
   updateGaps(dt);
 
+  // INSTANT REPLAY: keep what is drawn (15 Hz, near the player only)
+  if (replay && state.running) { try { replay.capture(dt, player.group.position); } catch (e) { /* never the frame */ } }
+
   hud.update({
     position: world.positionOf(player.phys),
     field: world.parts.length,
@@ -1924,6 +1971,7 @@ const ORDINALS = (() => {
 
 // BUSTED: a wreck with a cop in reach. The race is void and the fine is due.
 function bustRace() {
+  if (replay) { replay.event('cop', 'BUSTED', player.fighter, 5); replay.stop(); }
   document.getElementById('copflag')?.classList.remove('on');
   const ev = career.event;
   const fine = Cop.fine(ev);
@@ -1954,6 +2002,7 @@ function bustRace() {
 let lastResult = null;
 
 function endRace(pos) {
+  if (replay) { replay.event('finish', pos === 1 ? 'THE WIN' : 'FINISH', player.fighter, pos === 1 ? 3 : 1.5); replay.stop(); }
   audio.siren(0);
   document.getElementById('copflag')?.classList.remove('on');
   const names = ORDINALS;
@@ -2058,6 +2107,18 @@ window.__START__ = () => {
   }
   world.raceLen = spine.totalLength;
   resetRace();
+  if (replay) {
+    try {
+      const actor = (name, a) => a && a.group ? { name, group: a.group, bike: a.bike, rider: a.rider, phys: a.phys, fighter: a.fighter } : null;
+      replay.begin({
+        riders: [actor('YOU', player), ...rivals.map((r) => actor(r.name || 'RIDER', r)), actor('POLICE', cop)].filter(Boolean),
+        cars: world.traffic && world.traffic.userData ? world.traffic.userData.cars : [],
+        crossCars: crossTraffic ? crossTraffic.cars : [],
+        animals: animals ? animals.pool : [],
+        flagger: flagger ? { group: flagger.group, body: flagger.body, joints: flagger.joints } : null,
+      });
+    } catch (e) { console.warn('[riderash] replay begin:', e); }
+  }
   state.running = true;
   phone.begin();                 // a real tap on RIDE: allowed to go fullscreen
   // Tilt: a saved preference must be re-granted after a reload, and the RIDE
@@ -2690,6 +2751,17 @@ $('pausebtn').addEventListener('pointerdown', (e) => { e.stopPropagation(); });
 $('pausebtn').addEventListener('click', (e) => { e.stopPropagation(); pauseGame('user'); });
 $('p-restart').addEventListener('click', () => { audio.setPaused(false); window.__START__(); });
 $('p-quit').addEventListener('click', quitToTitle);
+// INSTANT REPLAY: from the pause menu (mid-race) and from the results screen
+function openReplay(mode, from) {
+  if (!replay || !replay.times.length) return;
+  $(from === 'pause' ? 'pause' : 'over').classList.remove('on');
+  hud.show(false);
+  try { document.activeElement?.blur?.(); } catch (e) { /* ignore */ }
+  if (!replay.enter(mode, from)) replay.hooks.onExit(from);
+}
+$('p-replay').addEventListener('click', () => openReplay('full', 'pause'));
+$('rp-watch').addEventListener('click', () => openReplay('full', 'results'));
+$('rp-hl').addEventListener('click', () => openReplay('highlights', 'results'));
 
 // Tab hidden, window blurred or GPU context lost mid-race: pause, never keep
 // simulating a race nobody can see.

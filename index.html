@@ -69,6 +69,53 @@
   .map .bl { display:block; font-size:9px; letter-spacing:.10em; color:#6d737a; }
   .map.sel .bl { color:#9d8b64; }
   .row { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; }
+  /* INSTANT REPLAY (src/replay.js): broadcast-style viewer over the live 3D scene */
+  #replay { position:fixed; inset:0; z-index:40; display:none; pointer-events:none; }
+  #replay.on { display:block; }
+  #replay .rp-view { position:absolute; inset:0 0 120px 0; pointer-events:auto; touch-action:none; cursor:grab; }
+  #replay .rp-badge { position:absolute; left:calc(18px + env(safe-area-inset-left)); top:calc(16px + env(safe-area-inset-top));
+    padding:7px 16px 7px 12px; background:linear-gradient(#e0282d,#a3141a); color:#fff; font-weight:800; font-size:20px;
+    letter-spacing:.12em; font-style:italic; border-radius:8px; border:1px solid rgba(255,255,255,.35);
+    box-shadow:0 0 18px rgba(255,40,40,.55), 0 4px 16px rgba(0,0,0,.5); display:flex; align-items:center; gap:9px; }
+  #replay .rp-badge i { width:9px; height:9px; border-radius:50%; background:#fff; animation:rpRec 1s steps(1) infinite; }
+  #replay .rp-mode { font-size:11px; font-style:normal; letter-spacing:.16em; opacity:.9; }
+  @keyframes rpRec { 50% { opacity:.15; } }
+  #replay .rp-clip { position:absolute; left:0; right:0; bottom:120px; margin:0 auto; width:max-content; max-width:92vw;
+    padding:10px 22px; background:rgba(12,13,15,.86); border-top:3px solid #f0b429; color:#f5f1e8; font-size:19px;
+    letter-spacing:.06em; opacity:0; transform:translateY(10px); transition:opacity .3s, transform .3s; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #replay .rp-clip.on { opacity:1; transform:none; }
+  #replay .rp-clip b { color:#f0b429; }
+  #replay .rp-clip span { color:#9aa0a6; }
+  #replay .rp-bar { position:absolute; left:12px; right:12px; bottom:calc(10px + env(safe-area-inset-bottom)); pointer-events:auto;
+    background:rgba(12,14,17,.86); -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px);
+    border:1px solid rgba(255,255,255,.1); border-radius:14px; padding:10px 14px; box-shadow:0 10px 34px rgba(0,0,0,.55); }
+  #replay .rp-row { display:flex; align-items:center; gap:10px; }
+  #replay .rp-ctl { margin-top:8px; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+  #replay .rp-grp { display:inline-flex; align-items:center; background:rgba(255,255,255,.04); border-radius:8px; padding:2px; }
+  #replay .rp-b { background:none; border:1px solid transparent; color:#aeb3b9; font:inherit; font-size:12px; letter-spacing:.08em;
+    padding:6px 10px; border-radius:6px; cursor:pointer; min-height:32px; }
+  #replay .rp-b:hover { color:#fff; }
+  #replay .rp-b.sel { color:#fff; background:rgba(255,255,255,.1); border-color:rgba(255,255,255,.28); }
+  #replay .rp-play { font-size:16px; color:#fff; min-width:42px; }
+  #replay .rp-tl { position:relative; flex:1; height:30px; display:flex; align-items:center; }
+  #replay .rp-seek { width:100%; accent-color:#f5f1e8; margin:0; }
+  #replay .rp-marks { position:absolute; left:0; right:0; top:0; height:9px; pointer-events:none; }
+  #replay .rp-marks i { position:absolute; top:0; width:3px; height:8px; margin-left:-1px; border-radius:1px; opacity:.9; }
+  #replay .rp-marks i.big { width:7px; height:7px; margin-left:-3px; border-radius:50%; top:1px; box-shadow:0 0 6px currentColor; }
+  #replay .rp-time { font-variant-numeric:tabular-nums; color:#d7d3cb; font-size:13px; min-width:92px; text-align:right; }
+  #replay .rp-name { color:#fff; font-weight:700; letter-spacing:.1em; font-size:13px; min-width:110px; text-align:center; }
+  #replay .rp-hint { position:absolute; left:50%; top:calc(62px + env(safe-area-inset-top)); transform:translateX(-50%);
+    padding:6px 12px; border-radius:8px; background:rgba(12,13,15,.7); color:#d7d3cb; font-size:11px; letter-spacing:.1em;
+    opacity:0; transition:opacity .25s; white-space:nowrap; }
+  #replay.paused .rp-hint { opacity:1; }
+  #replay .rp-hl.sel { color:#f0b429; border-color:rgba(240,180,41,.5); }
+  #replay .rp-exit { color:#ff8a80; }
+  @media (max-width:700px) {
+    #replay .rp-view { bottom:170px; }
+    #replay .rp-clip { bottom:170px; font-size:15px; }
+    #replay .rp-b { padding:5px 7px; font-size:11px; }
+    #replay .rp-name { min-width:80px; }
+  }
   /* developer mode (src/devmode.js) */
   #devsec .setg { grid-template-columns:110px 1fr auto; }
   #devsec .setg select { grid-column:auto; }
@@ -748,6 +795,7 @@
   <h2 id="overh">WIPED OUT</h2>
   <p id="overp"></p>
   <div class="row"><button class="btn pe" id="again">RIDE AGAIN</button><button class="btn pe" id="tomenu">GARAGE &amp; MENU</button></div>
+  <div class="row"><button class="btn pe" id="rp-watch">WATCH REPLAY</button><button class="btn pe" id="rp-hl">HIGHLIGHTS</button></div>
 </div>
 
 <div class="screen" id="pause">
@@ -755,6 +803,7 @@
   <p id="glnote" class="hint" style="display:none"></p>
   <div class="menu" id="pausemenu">
     <button class="btn pe" id="p-resume">RESUME</button>
+    <button class="btn pe" id="p-replay">REPLAY</button>
     <button class="btn pe" id="p-restart">RESTART RACE</button>
     <button class="btn pe" id="p-camera">CAMERA</button>
     <button class="btn pe" id="p-sound">SOUND</button>

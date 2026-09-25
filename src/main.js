@@ -2223,7 +2223,9 @@ function stepGame(dt) {
     warns: warnQueue.splice(0),
     live: {
       cop: cop && cop.state === 'chase' && !cop.fighter.down ? Math.max(0, Math.round(Math.hypot(cop.phys.s - player.phys.s, cop.phys.lateral - player.phys.lateral))) : null,
-      collar: cop && cop.fighter.hold && cop.fighter.hold.target === player.fighter ? player.fighter.breakMeter || 0 : null,
+      // HELD BY ANYONE -- the cop's collar or a rival's grab: the break-free bar
+      collar: player.fighter.heldBy ? player.fighter.breakMeter || 0 : null,
+      holder: player.fighter.heldBy ? (cop && player.fighter.heldBy === cop.fighter ? 'cop' : grabberName(player.fighter.heldBy)) : null,
     },
     swapped: state.swapped,
     // The meter reads what the MACHINE HAS COST so far this race, so a crash is
@@ -2468,6 +2470,12 @@ function weaveFree(dt, inp) {
     if (weaveSide !== 0 && weaveT < WEAVE.GAP) { f.struggle(CFG.GRAPPLE_BREAK * WEAVE.PULL); state.shake = Math.min(1.2, state.shake + 0.05); }
     weaveSide = side; weaveT = 0;
   }
+}
+
+// who has hold of you, by name, for the island's break-free bar
+function grabberName(f) {
+  const r = rivals.find((x) => x.fighter === f);
+  return r ? (r.name || 'A RIVAL') : 'A RIVAL';
 }
 
 function radarActive(live) {

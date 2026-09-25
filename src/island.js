@@ -153,8 +153,10 @@ export class Island {
     const L = this.live;
     let view;
     if (L.collar != null) {
-      view = { mode: 'x', tone: 'danger', icon: 'cop', title: 'PULLING YOU OVER',
-        sub: document.body.classList.contains('touch') ? 'MASH ATTACK OR WEAVE HARD' : 'MASH J K L OR WEAVE HARD', bar: Math.max(0, Math.min(1, L.collar)), key: 'collar' };
+      // the cop's collar or a rival's grab: the bar fills as you break free
+      const cop = !L.holder || L.holder === 'cop';
+      view = { mode: 'x', tone: 'danger', icon: cop ? 'cop' : 'fist', title: cop ? 'PULLING YOU OVER' : `${L.holder} HAS YOU`,
+        sub: document.body.classList.contains('touch') ? 'MASH ATTACK OR WEAVE HARD' : 'MASH J K L OR WEAVE HARD', bar: Math.max(0, Math.min(1, L.collar)), key: 'collar:' + (cop ? 'cop' : L.holder) };
     } else if (this.cur && !(L.cop != null && this.cur.tone === 'info')) {   // a cop on you outranks the tow/air states
       view = { mode: this.cur.tone === 'count' ? 'c' : 'x', ...this.cur };
     } else if (L.cop != null) {

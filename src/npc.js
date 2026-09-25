@@ -108,6 +108,11 @@ function clampNum(v, lo, hi, fallback = 0) {
 const BEHAVIOUR_DEFAULTS = {
   reaction: 0.35, fixate: 0, matchSpeed: false, ram: 0, dwellMul: 1, cooldownMul: 1,
   flee: 0, grudge: 8, draft: false, block: false, avoid: false,
+  // BRAWL: how much a PLAYER close by pulls this rider off the racing line.
+  // The standings decide who is worth a fight (below); brawl is the character
+  // on top of that -- a thug who sees you alongside comes over to swing
+  // whatever the places say, a clean racer never does.
+  brawl: 0.2,
   trafficLook: 1,   // x traffic look-ahead (npc.js _avoidTraffic): reckless < 1 < careful
 };
 const persona = (o) => ({ ...BEHAVIOUR_DEFAULTS, ...o });
@@ -124,7 +129,7 @@ export const PERSONAS = {
     standoff: 1.55,        // metres to the side it prefers when attacking
     speedBias: 1.02,       // PREFERRED pace trim (machine-capped; see assignPace)
     preferredRange: [2.2, 4.6],
-    reaction: 0.3, grudge: 15, trafficLook: 0.75,
+    reaction: 0.3, grudge: 15, trafficLook: 0.75, brawl: 1.0,
   }),
   clean: persona({
     // Races. Avoids fights: side-steps anybody who comes alongside, only swings
@@ -137,7 +142,7 @@ export const PERSONAS = {
     standoff: 1.9,
     speedBias: 1.0,
     preferredRange: [2.6, 5.2],
-    avoid: true, grudge: 4, trafficLook: 1.15,
+    avoid: true, grudge: 4, trafficLook: 1.15, brawl: 0.05,
   }),
   blocker: persona({
     // Does not want a place, it wants YOURS. Sits in front, on your line, and
@@ -150,7 +155,7 @@ export const PERSONAS = {
     standoff: 2.2,
     speedBias: 1.04,
     preferredRange: [1.8, 4.0],
-    block: true, reaction: 0.45, trafficLook: 0.9,
+    block: true, reaction: 0.45, trafficLook: 0.9, brawl: 0.6,
   }),
   rowdy: persona({
     // VIPER. Would rather fight than race. Inside `fixate` metres of the player
@@ -165,7 +170,7 @@ export const PERSONAS = {
     speedBias: 1.0,
     preferredRange: [1.4, 3.0],
     reaction: 0.2, fixate: 15, matchSpeed: true, ram: 0.75,
-    dwellMul: 0.6, cooldownMul: 0.55, grudge: 30, trafficLook: 0.45,
+    dwellMul: 0.6, cooldownMul: 0.55, grudge: 30, trafficLook: 0.45, brawl: 1.3,
   }),
   coward: persona({
     // Races fine while healthy. Hurt below `flee`, he runs from anyone near:
@@ -179,7 +184,7 @@ export const PERSONAS = {
     standoff: 2.4,
     speedBias: 1.0,
     preferredRange: [3.0, 5.5],
-    flee: 0.7, avoid: true, grudge: 0, reaction: 0.25, trafficLook: 1.1,
+    flee: 0.7, avoid: true, grudge: 0, reaction: 0.25, trafficLook: 1.1, brawl: 0,
   }),
   grudge: persona({
     // Races until somebody hits him. Then that rider is the only one in the race.
@@ -191,7 +196,7 @@ export const PERSONAS = {
     standoff: 1.6,
     speedBias: 1.0,
     preferredRange: [2.0, 4.2],
-    grudge: 60, matchSpeed: true, ram: 0.35, cooldownMul: 0.7, trafficLook: 0.7,
+    grudge: 60, matchSpeed: true, ram: 0.35, cooldownMul: 0.7, trafficLook: 0.7, brawl: 0.5,
   }),
   drafter: persona({
     // Wheelsucker. Gets in the tow of the rider ahead, holds ~6 m for a few
@@ -204,7 +209,7 @@ export const PERSONAS = {
     standoff: 2.0,
     speedBias: 1.0,
     preferredRange: [2.4, 4.8],
-    draft: true, reaction: 0.3,
+    draft: true, reaction: 0.3, brawl: 0.15,
   }),
   cop: persona({
     // Reserved for `cops.js`. Picks a target and stays glued to it; near-zero
@@ -217,7 +222,7 @@ export const PERSONAS = {
     standoff: 1.7,
     speedBias: 1.06,
     preferredRange: [2.0, 3.6],
-    grudge: 0,
+    grudge: 0, brawl: 0,
   }),
 };
 
@@ -251,6 +256,8 @@ export const NPC = {
   HP_FLEE: 0.16,               // below this, always evade when hurt
   ATTACK_RANGE: ATTACKS.kick.range + 0.9,
   HUNT_RANGE: 12,              // m along the road within which a victim exists
+  BRAWL_RANGE: 14,             // m: a player this close draws a brawler over
+  BRAWL_LAT: 5,                // m across: ...and on this side of the road
 
   // --- THE COMMIT WINDOW (user, this session) ------------------------------
   //
@@ -739,6 +746,14 @@ export class NpcBrain {
       score -= ad * 0.055;
       // A wounded rider is a place about to be cheap.
       score += wounded * 0.9;
+      // THE PLAYER, CLOSE: character over standings. A brawler alongside you
+      // comes over to swing even if you are a place behind him.
+      if (o.key === 'player' && this.persona.brawl > 0 && ad < NPC.BRAWL_RANGE
+          && Math.abs(num(o.lateral, 0) - lateral) < NPC.BRAWL_LAT) {
+        // (a floor, not a nudge: at 6 m an aggressive rider rates you above
+        // the man he is racing 9 m up the road; a clean one never does)
+        score = Math.max(score, 2.0 + this.persona.brawl * (2.5 - ad * 0.12) * (this.redMistT > 0 ? 1.4 : 1));
+      }
       if (score > victimScore) { victimScore = score; victim = o; }
     }
 
@@ -902,7 +917,10 @@ export class NpcBrain {
       if (!(vHp < 0.6 && num(v.s, 0) > facts.s)) return false;
     }
     // Aggression is the bias; skill makes the decision land more often.
-    const want = P.aggression * (this.redMistT > 0 ? 1.5 : 1) * (0.55 + this.skill * 0.75);
+    let want = P.aggression * (this.redMistT > 0 ? 1.5 : 1) * (0.55 + this.skill * 0.75);
+    // the player right there: a brawler does not deliberate
+    const v = facts.victim;
+    if (v.key === 'player' && Math.abs(num(v.s, 0) - facts.s) < NPC.BRAWL_RANGE) want *= 1 + P.brawl;
     // How likely per decision window. The window is the RACE decide timer, so
     // this is a per-second-ish probability, not per frame — that is what keeps
     // it stable under the harness' low frame rate.

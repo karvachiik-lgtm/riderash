@@ -758,6 +758,21 @@
     #title > h2, #overh { font-size:clamp(34px, 8.5vh, 80px); }
     #title { gap:12px; padding:14px 0; }
   }
+/* TIPS: the rotating strip at the foot of the title screen */
+#tips { margin-top: 18px; display: flex; align-items: center; gap: 12px; max-width: min(760px, 92vw);
+  padding: 9px 10px 9px 0; border-top: 1px solid rgba(255,140,60,.28); border-bottom: 1px solid rgba(255,140,60,.12);
+  background: linear-gradient(90deg, rgba(255,110,30,.10), rgba(0,0,0,0) 70%); cursor: pointer; user-select: none; text-align: left; }
+#tips .tip-k { font-family: var(--display, sans-serif); font-size: 13px; letter-spacing: .12em; color: #111;
+  background: #ff8a2a; padding: 3px 9px 2px; transform: skewX(-12deg); flex: none; }
+#tips .tip-t { flex: 1; font-family: var(--ui, sans-serif); font-weight: 500; font-size: 13.5px; line-height: 1.35; color: #d8d2c8; letter-spacing: .02em; min-height: 2.7em; display: flex; align-items: center; }
+#tips .tip-t b { color: #ffb070; font-weight: 700; }
+#tips .tip-t kbd { font-size: 11px; }
+#tips .tip-t.in { animation: tipIn .45s ease-out; }
+@keyframes tipIn { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: none; } }
+#tips .tip-n { display: flex; gap: 2px; flex: none; }
+#tips .tip-b { background: none; border: 1px solid rgba(255,255,255,.14); color: #c9c1b4; width: 26px; height: 26px; font-size: 17px; line-height: 1; cursor: pointer; padding: 0; }
+#tips .tip-b:hover { border-color: #ff8a2a; color: #ff8a2a; }
+@media (max-width: 520px) { #tips .tip-t { font-size: 12px; } #tips .tip-n { display: none; } }
 </style>
 </head>
 <body>
@@ -854,15 +869,10 @@
   <p style="font-size:11px;color:#5f646a">
     <kbd>W</kbd>/<kbd>↑</kbd> throttle &nbsp; <kbd>S</kbd>/<kbd>↓</kbd> brake &nbsp;
     <kbd>A</kbd><kbd>D</kbd> steer &nbsp; <kbd>J</kbd> punch &nbsp; <kbd>K</kbd> kick &nbsp;
-    <kbd>L</kbd> chain &nbsp; <kbd>G</kbd> grab/throw &nbsp; <kbd>Shift</kbd> tuck &nbsp; <kbd>Space</kbd> nitro &nbsp; <kbd>E</kbd> dodge<br>
+    <kbd>L</kbd> chain &nbsp; <kbd>G</kbd> grab/throw &nbsp; <kbd>Shift</kbd> tuck &nbsp; <kbd>Space</kbd> nitro &nbsp; <kbd>E</kbd> swerve<br>
      <kbd>C</kbd> camera &nbsp; <kbd>1</kbd>-<kbd>7</kbd> views &nbsp; <kbd>M</kbd> mute &nbsp; <kbd>Esc</kbd>/<kbd>P</kbd> pause
   </p>
-  <p style="font-size:11px;color:#8b6a5a;letter-spacing:.06em">
-    Hear a siren? Stay on the bike. Wreck near a cop and you're <b>BUSTED</b>: fined, and the race doesn't count.
-  </p>
-  <p style="font-size:11px;color:#6fae8a;letter-spacing:.06em">
-    Nitro is <b>earned</b>: take down a cop (+1 charge), knock riders off, thread traffic, draft, pass, hold a clean line through the bends.
-  </p>
+  <div id="tips" role="note"></div>
 </div>
 
 <div class="screen" id="over">

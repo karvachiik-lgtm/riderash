@@ -56,6 +56,7 @@ import { Gamepads } from './gamepad.js';
 import { Cop } from './cops.js';
 import { PHYS } from './physics.js';
 import { BIKE_FOR_TIER, bikeSource } from './kit.js';
+import { initTips } from './tips.js';
 
 const canvas = document.getElementById('c');
 // NO WEBGL, NO GAME -- but say so. A constructor that throws here used to leave
@@ -974,6 +975,7 @@ const _introPos = new THREE.Vector3(), _introLook = new THREE.Vector3(), _introQ
 // setter that queues, and the HUD's island ranks the queue (island.js). A
 // CONTACT written after a COLLARED used to replace it.
 const warnQueue = [];
+const warnLog = window.__WARNLOG__ = [];   // harness: the last callouts, unconsumed
 // The replay's event log, fed from the same callouts the player sees
 // (replay.js ranks them into highlights). Rival-on-rival action comes from
 // the combat hooks instead, with the rider it concerns.
@@ -1032,7 +1034,7 @@ const state = {
   let w = '';
   Object.defineProperty(state, 'warn', {
     get: () => w,
-    set: (v) => { w = v; if (v) { warnQueue.push(String(v)); if (warnQueue.length > 16) warnQueue.shift(); replayEventFromWarn(String(v)); } },
+    set: (v) => { w = v; if (v) { warnQueue.push(String(v)); warnLog.push(String(v)); if (warnLog.length > 64) warnLog.shift(); if (warnQueue.length > 16) warnQueue.shift(); replayEventFromWarn(String(v)); } },
     enumerable: true, configurable: true,
   });
 }
@@ -2614,7 +2616,27 @@ window.__GAME__ = {
 // rider to ~80% for the hottest, +10% for losing the LEAD, +/-15% jitter)
 const DEFEND = { EVERY: 0.25, RANGE: 40, BASE: 0.55, AGGRO: 0.45, LEAD: 0.1, LATE: 0.15, JITTER: 0.15, FOR: [8, 16] };
 let defendT = 0, defendRank = new Map(), defendPending = [];
+// A rival locking on to YOU is telegraphed: the island names him, in his own
+// words, so a fight is something you see coming and answer -- not a dice roll.
+const HUNT_CALL = { aggressive: 'COMING FOR YOU', rowdy: 'WANTS A FIGHT', blocker: 'SHUTTING THE DOOR', grudge: 'REMEMBERS YOU', drafter: 'LOOKING FOR A GAP' };
+let huntCallT = 0;
+const huntCalled = new WeakSet();
+function callHunters(dt) {
+  huntCallT -= dt;
+  for (const r of rivals) {
+    const b = r.brain;
+    const on = !!(b && !r.out && !r.fighter.down && (b.state === 'HUNT' || b.state === 'ATTACK') && b.victim && b.victim.key === 'player');
+    if (!on) { huntCalled.delete(r); continue; }
+    if (huntCalled.has(r) || huntCallT > 0 || Math.abs(r.phys.s - player.phys.s) > 25) continue;
+    huntCalled.add(r);
+    huntCallT = 5;
+    const kind = HUNT_CALL[r.personaName] ? r.personaName : 'aggressive';
+    state.warn = `${r.name || 'RIVAL'} ${HUNT_CALL[kind] || HUNT_CALL.aggressive}`;
+  }
+}
+
 function defendPositions(dt) {
+  callHunters(dt);
   for (const d of defendPending) d.t -= dt;
   for (const d of defendPending.filter((x) => x.t <= 0)) {
     const b = d.r.brain;
@@ -3439,6 +3461,8 @@ setInterval(publishState, 50);
 // Chromium suspends an AudioContext created without a gesture. Arm the first
 // real interaction as a fallback, so a player who starts by pressing a key
 // rather than clicking also gets sound.
+try { initTips(document.getElementById('tips')); } catch (e) { console.warn('[riderash] tips:', e); }
+
 // THE SOUNDTRACK (soundtrack.js): the recorded band, loaded once audio is up
 let soundtrack = null;
 function initSoundtrack() {

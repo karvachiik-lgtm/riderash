@@ -516,16 +516,28 @@ export class Flagger {
     restoreRest(b);
     b.position.set(0, 0, 0);
     poseStanding(j, 0, 0);
-    this._body(dt, 1, -1);
+    // A POSE, not a queue stance: all her weight on the right leg, the hip
+    // pushed out over it, the left knee bent and the foot turned out; chest
+    // up, shoulders back. It breathes and sways slowly, never resets.
+    const br = Math.sin(t * 1.3), sw = Math.sin(t * 0.45);
+    contrapposto(j, 1.45 + 0.12 * sw, 'left');
+    confident(j, 1.25);
+    b.position.x = 0.06 + 0.012 * sw;                 // hips over the standing foot
+    if (j.pelvis) j.pelvis.rotation.y += 0.12;        // hips turned a touch off the shoulders
+    if (j.torso) { j.torso.rotation.y -= 0.16; j.torso.rotation.x -= 0.015 * br; }
+    const LL = j.leftLeg;
+    if (LL && LL.thigh) { LL.thigh.rotation.x -= 0.1; LL.thigh.rotation.z -= 0.2; }   // the free knee in, across the standing leg
     // elbow at her side, forearm up by the shoulder, the chain whirling
     // round her finger where the camera can see it
-    this._arm.right.to([-0.25, -0.8, 0.35], [0.3, -0.2, 1], 2.05 + 0.06 * Math.sin(t * 13), 0);
+    this._arm.right.to([-0.32, -0.92, 0.16], [-0.4, 0.3, 1], 2.3 + 0.05 * Math.sin(t * 13), 0);
     if (this.keys) this.keys.userData.arm.rotation.x = -t * 13;
-    this._g = 'hip';                                   // the free hand stays on the hip
-    this._gesture(dt, -1);
+    // the other hand on her hip
+    this._arm.left.to(GESTURES.hip.dir, GESTURES.hip.hint, GESTURES.hip.flex, 0, 6);
     this._arm.right.apply(j, 'right', dt);
     this._arm.left.apply(j, 'left', dt);
-    this._look(dt, -1);
+    // THE LOOK: her body is turned to the middle of the frame; her eyes come
+    // most of the way back to the lens, head tilted, chin a little down
+    if (j.neck) { j.neck.rotation.y -= 0.3 + 0.04 * sw; j.neck.rotation.z += 0.1; j.neck.rotation.x += 0.03; }
     // facing the lens, turned a touch towards the middle of the frame
     const g = this.group;
     g.position.copy(at);

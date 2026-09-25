@@ -19,7 +19,7 @@ const TIPS = [
   'Broken lanes narrow the road to one line. Get there first, or wait behind.',
   'In a tunnel, your eyes need a moment. Hold a line going in and coming out.',
   '<kbd>Shift</kbd> tucks for top speed but you can’t fight tucked. Sit up when a rival closes.',
-  '<kbd>E</kbd> dodges a swing. Timed right, the attacker whiffs and wobbles and he’s open.',
+  '<kbd>E</kbd> + steer is a swerve: a sharp sideways jump. Use it to slip a swing or a car.',
   'A clean line through a run of bends pays nitro. So does every overtake.',
   'Oil and gravel cut your grip. Straighten up across them, don’t steer.',
   'Finish top four to go through. Prize money buys faster bikes, and crash damage costs you. Go broke and your career is over.',

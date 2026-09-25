@@ -756,10 +756,12 @@ export default function (THREE) {
   const hR = S.headR * 0.98 * L.headSize, hy = S.headH * 0.30 * L.headSize;
   if (faceShown) {
     const skull = add(head, mk(new THREE.SphereGeometry(hR, 14, 10), skin, 0, hy, 0));
-    skull.scale.set(0.9, 1.08, 1.0);
-    const jawR = hR * 0.72, jawY = hy - hR * 0.45, jawZ = hR * 0.26;
+    // a woman's face: narrower, a touch longer, the jaw tapering to a chin
+    // (the round male skull on her read as a moon face)
+    skull.scale.set(FEM ? 0.82 : 0.9, FEM ? 1.1 : 1.08, FEM ? 0.96 : 1.0);
+    const jawR = hR * (FEM ? 0.64 : 0.72), jawY = hy - hR * (FEM ? 0.5 : 0.45), jawZ = hR * 0.26;
     const jaw = add(head, mk(new THREE.SphereGeometry(jawR, 12, 8), skin, 0, jawY, jawZ));
-    jaw.scale.set(0.95, 0.82, 0.95);
+    jaw.scale.set(FEM ? 0.78 : 0.95, FEM ? 0.9 : 0.82, FEM ? 0.9 : 0.95);
     const faceZ = (y, x = 0) => {   // skull surface depth at (x, y) relative to its centre
       const nx = x / (hR * 0.9), ny = y / (hR * 1.08);
       return hR * Math.sqrt(Math.max(0.05, 1 - nx * nx - ny * ny));

@@ -1,0 +1,77 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face { font-family:'Anton'; src:url('/assets/fonts/anton-400.woff2') format('woff2'); }
+@font-face { font-family:'Rajdhani'; src:url('/assets/fonts/rajdhani-700.woff2') format('woff2'); font-weight:700; }
+@font-face { font-family:'Rajdhani'; src:url('/assets/fonts/rajdhani-600.woff2') format('woff2'); font-weight:600; }
+html,body { margin:0; width:1920px; height:1080px; overflow:hidden; background:#07080b; }
+.card { position:absolute; inset:0; display:none; overflow:hidden; }
+.card.on { display:block; }
+/* the flag: seven red and six white stripes sweeping in, a blue canton with stars */
+.stripes { position:absolute; inset:0; }
+.stripes i { position:absolute; left:0; right:0; height:calc(100% / 13); }
+.canton { position:absolute; left:0; top:0; width:42%; height:calc(700% / 13); background:#3c3b6e; overflow:hidden; }
+.canton b { position:absolute; color:#fff; font:400 44px/1 serif; }
+.shade { position:absolute; inset:0; background:radial-gradient(ellipse at 50% 55%, rgba(7,8,11,.2), rgba(7,8,11,.92) 70%); }
+.logo { position:absolute; left:0; right:0; top:34%; text-align:center; font:400 250px/1 Anton, Impact, sans-serif; color:#fff;
+        letter-spacing:.06em; text-shadow:0 10px 0 #b22234, 0 20px 0 #0b0b0e, 0 0 60px rgba(0,0,0,.6); }
+.tag { position:absolute; left:0; right:0; top:66%; text-align:center; font:700 44px/1 Rajdhani, sans-serif; letter-spacing:.42em; color:#ffd9a0; }
+.small { position:absolute; left:0; right:0; top:22%; text-align:center; font:700 30px/1 Rajdhani, sans-serif; letter-spacing:.6em; color:#c9ccd3; }
+.big { font:400 150px/1 Anton, Impact, sans-serif; color:#fff; letter-spacing:.03em; text-shadow:0 8px 0 #b22234; }
+.list { font:700 58px/1.35 Rajdhani, sans-serif; color:#fff; letter-spacing:.2em; }
+.list span { color:#e23b3b; } .list em { color:#7fa1ff; font-style:normal; }
+.cta { font:400 110px/1 Anton, Impact, sans-serif; color:#fff; }
+.url { font:700 64px/1 Rajdhani, sans-serif; color:#ffd9a0; letter-spacing:.12em; }
+.foot { font:600 30px/1 Rajdhani, sans-serif; color:#9aa0a8; letter-spacing:.3em; }
+.center { position:absolute; left:0; right:0; text-align:center; }
+.rule { position:absolute; left:50%; height:10px; display:flex; transform:translateX(-50%); }
+.rule i { flex:1; } .rule i:nth-child(1){background:#b22234} .rule i:nth-child(2){background:#fff} .rule i:nth-child(3){background:#3c3b6e}
+</style></head>
+<body>
+<div class="card" id="intro">
+  <div class="stripes" id="stripes"></div>
+  <div class="canton" id="canton"></div>
+  <div class="shade" id="shade"></div>
+  <div class="small" id="pre">A 404 GAME JAM ENTRY</div>
+  <div class="logo" id="logo">RIDERASH</div>
+  <div class="tag" id="tag">100 MPH · NO RULES · ALL-AMERICAN ASPHALT</div>
+</div>
+<div class="card" id="outro">
+  <div class="shade" style="background:radial-gradient(ellipse at 50% 45%, #141824, #07080b 70%)"></div>
+  <div class="center big" id="o1" style="top:14%">MORE COMING SOON</div>
+  <div class="rule" id="orule" style="top:31%;width:520px"><i></i><i></i><i></i></div>
+  <div class="center list" id="o2" style="top:36%"><span>★</span> MULTIPLAYER <em>★</em> NEW STATES <span>★</span> MORE BIKES <em>★</em><br>BIGGER BRAWLS <span>★</span> MEANER COPS</div>
+  <div class="center cta" id="o3" style="top:62%">PLAY FREE NOW</div>
+  <div class="center url" id="o4" style="top:76%">riderash.vercel.app</div>
+  <div class="center foot" id="o5" style="top:88%">#404GAMEJAM · EVERY BIKE, RIDER AND ROAD BUILT IN CODE</div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const clamp = (x) => Math.max(0, Math.min(1, x));
+const ease = (x) => { x = clamp(x); return 1 - Math.pow(1 - x, 3); };
+const back = (x) => { x = clamp(x); const c = 1.9; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
+// build the flag once
+for (let k = 0; k < 13; k++) { const i = document.createElement('i'); i.style.top = `calc(${k} * 100% / 13)`; i.style.background = k % 2 ? '#fff' : '#b22234'; $('stripes').appendChild(i); }
+for (let r = 0; r < 5; r++) for (let c = 0; c < 6; c++) { const b = document.createElement('b'); b.textContent = '★'; b.style.left = (6 + c * 16 + (r % 2) * 8) + '%'; b.style.top = (8 + r * 19) + '%'; $('canton').appendChild(b); }
+// t in seconds within the card
+window.setCard = (name, t) => {
+  for (const c of document.querySelectorAll('.card')) c.classList.toggle('on', c.id === name);
+  if (name === 'intro') {
+    [...$('stripes').children].forEach((s, k) => { const e = ease((t - 0.15 - k * 0.03) / 0.45); s.style.transform = `translateX(${(k % 2 ? 1 : -1) * (1 - e) * 110}%)`; });
+    const ce = ease((t - 0.5) / 0.4); $('canton').style.transform = `translateY(${(1 - ce) * -105}%)`;
+    $('shade').style.opacity = 0.35 + 0.65 * ease((t - 1.15) / 0.5);
+    $('pre').style.opacity = ease((t - 1.3) / 0.4);
+    const ls = back((t - 1.45) / 0.5); $('logo').style.opacity = clamp((t - 1.45) / 0.12);
+    $('logo').style.transform = `scale(${2.4 - 1.4 * ls})`;
+    $('tag').style.opacity = ease((t - 2.1) / 0.4); $('tag').style.transform = `translateY(${(1 - ease((t - 2.1) / 0.4)) * 30}px)`;
+    const out = clamp((t - 3.7) / 0.3); document.body.style.filter = `brightness(${1 - out})`;
+  } else {
+    document.body.style.filter = `brightness(${ease(t / 0.3)})`;
+    const pop = (id, at) => { const e = back((t - at) / 0.45); $(id).style.opacity = clamp((t - at) / 0.15); $(id).style.transform = `scale(${0.6 + 0.4 * e})`; };
+    pop('o1', 0.1); $('orule').style.width = (520 * ease((t - 0.4) / 0.5)) + 'px';
+    $('o2').style.opacity = ease((t - 0.7) / 0.5);
+    pop('o3', 2.3); pop('o4', 2.7); $('o5').style.opacity = ease((t - 3.2) / 0.5);
+  }
+};
+</script>
+</body></html>

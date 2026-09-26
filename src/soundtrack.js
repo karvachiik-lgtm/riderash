@@ -16,6 +16,11 @@
 //
 // Loaded after the game is audible, title first; if anything fails to load the
 // synthesised loops (music.js) and beds (audio_ext.js) simply stay in charge.
+//
+// RACE TRACKS LOAD ON DEMAND: only the one this race plays, when it is picked.
+// All four used to be fetched at boot -- 4.2 MB, when a race hears one -- and
+// that alone put the game over the jam gate's 10 MB transfer budget (measured:
+// 10.2 MB). A track, once loaded, stays for the rest of the session.
 const BASE = './assets/audio/music/';
 const FILES = {
   title: 'title.mp3', race1: 'race1.mp3', race2: 'race2.mp3', race3: 'race3.mp3', race4: 'race4.mp3',
@@ -32,13 +37,18 @@ export class Soundtrack {
     this._uiBound = false;
   }
 
-  async _load(name) {
-    if (this.buf[name]) return this.buf[name];
-    const c = this.audio.ctx;
-    const res = await fetch(BASE + FILES[name]);
-    if (!res.ok) throw new Error(`${name}: ${res.status}`);
-    this.buf[name] = await c.decodeAudioData(await res.arrayBuffer());
-    return this.buf[name];
+  _load(name) {
+    if (this.buf[name]) return Promise.resolve(this.buf[name]);
+    this._inflight = this._inflight || {};
+    // one fetch per track, however many races ask for it while it downloads
+    return this._inflight[name] || (this._inflight[name] = (async () => {
+      try {
+        const res = await fetch(BASE + FILES[name]);
+        if (!res.ok) throw new Error(`${name}: ${res.status}`);
+        this.buf[name] = await this.audio.ctx.decodeAudioData(await res.arrayBuffer());
+        return this.buf[name];
+      } finally { delete this._inflight[name]; }
+    })());
   }
 
   /** After audio.init(): load the title first (it is heard first), then the rest. */
@@ -52,10 +62,11 @@ export class Soundtrack {
       this.ready = true;
       if (a._musicWant === 'menu') a.playMusic('menu', true);
     } catch (e) { console.warn('[soundtrack] title:', e); return; }
-    for (const n of ['select', 'rev', 'win', 'bust', ...RACES]) {
+    for (const n of ['select', 'rev', 'win', 'bust']) {
       try { await this._load(n); } catch (e) { console.warn('[soundtrack]', n, e); }
     }
     this._patchBeds();
+    if (this._wantRace) this.pickRace(this._wantRace);     // a race picked before we were ready
   }
 
   // the synthesised per-map beds sat UNDER the old loops; under a real band
@@ -69,20 +80,29 @@ export class Soundtrack {
     try { x.playBed(null, true); } catch (e) { /* not ready */ }
   }
 
-  hasRace() { return RACES.some((r) => this.buf[r]); }
+  // the recorded tracks are reachable once the title has loaded; the race's
+  // own track may still be on its way (the beds stay quiet for that second)
+  hasRace() { return this.ready; }
 
-  /** Choose this race's track (stable per course key) before playMusic('race'). */
+  /** Choose this race's track (stable per course key) before playMusic('race');
+   *  fetches it if this session has not heard it yet. */
   pickRace(key = '') {
     const a = this.audio;
-    const have = RACES.filter((r) => this.buf[r]);
-    if (!have.length || !a) return;
+    if (!a) return;
+    this._wantRace = key;
+    if (!this.ready) return;                    // init() picks it up once the title is in
     let h = 0; for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
-    const name = have[h % have.length];
-    a.music = a.music || {};
-    if (a.music.race !== this.buf[name]) {
-      a.music.race = this.buf[name];
-      if (a._musicName === 'race') a.playMusic('race', true);
-    }
+    const name = RACES[h % RACES.length];
+    const apply = () => {
+      if (this._wantRace !== key || !this.buf[name]) return;   // another race was picked meanwhile
+      a.music = a.music || {};
+      if (a.music.race !== this.buf[name]) {
+        a.music.race = this.buf[name];
+        if (a._musicName === 'race') a.playMusic('race', true);
+      }
+    };
+    if (this.buf[name]) apply();
+    else this._load(name).then(apply, (e) => console.warn('[soundtrack]', name, e));
   }
 
   /** A one-shot on the music bus (stingers) or the sfx bus (UI, rev). */

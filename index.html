@@ -435,6 +435,11 @@
   body.touch .hb { width:44px; height:44px; border-radius:50%; opacity:.8; background:rgba(12,13,15,.5); }
   body.touch .hud-tl { left:calc(max(12px, env(safe-area-inset-left)) + 56px); }
   body.touch .hud-tl[style*="top:84px"] { left:calc(max(12px, env(safe-area-inset-left)) + 56px); }
+  /* CAM: one tap cycles the view mid-race (the keyboard's C). Under pause in
+     landscape, beside it in portrait, where the dish sits under pause. */
+  #cambtn { display:none; }
+  body.touch #cambtn { display:flex; align-items:center; justify-content:center; }
+  @media (orientation: landscape) { body.touch #hudbtns { flex-direction:column; } }
   /* Touch controls: shown only on coarse pointers (see touchpad.js). Word
      labels, not J/K/L: a phone player has never seen the keyboard legend. */
   #touchpad { display:none; }
@@ -593,8 +598,8 @@
     /* below the target nameplate (at --spd + 130px): at top:30% on an 844 px
        phone it landed ON the rival's name and health bar */
     #warn { top:calc(var(--spd) + 172px + env(safe-area-inset-top)); font-size:14px; }
-    body.touch .hud-tl { left:66px; }
-    body.touch .hud-tl[style*="top:84px"] { left:134px; }
+    body.touch .hud-tl { left:106px; }
+    body.touch .hud-tl[style*="top:84px"] { left:174px; }
     #fpsbox { top:calc(var(--spd) + 122px + env(safe-area-inset-top)); }
 
     /* Thumbs: steering bottom-left, gas/brake bottom-right, the four attacks in
@@ -1310,6 +1315,7 @@ body.cine #hud, body.cine .hud { opacity: 0; transition: opacity .5s; }
   <div id="fpsbox"></div>
   <div id="hudbtns">
     <button id="pausebtn" class="pe hb" aria-label="Pause"><i></i><i></i></button>
+    <button id="cambtn" class="pe hb" aria-label="Change camera"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 8h4l2-3h6l2 3h4v11H3z"/><circle cx="12" cy="13" r="3.5"/></svg></button>
   </div>
   <canvas id="radar" class="hud-bl" width="148" height="148"></canvas>
   <div id="gaps"></div>

@@ -3839,6 +3839,8 @@ $('p-resume').addEventListener('click', resumeGame);
 // event reaching the canvas, where a tap would also register as an attack.
 $('pausebtn').addEventListener('pointerdown', (e) => { e.stopPropagation(); });
 $('pausebtn').addEventListener('click', (e) => { e.stopPropagation(); pauseGame('user'); });
+$('cambtn').addEventListener('pointerdown', (e) => { e.stopPropagation(); });
+$('cambtn').addEventListener('click', (e) => { e.stopPropagation(); if (state.running && !state.paused) setCamera(state.camMode + 1); });
 $('p-restart').addEventListener('click', () => { audio.setPaused(false); window.__START__(); });
 $('p-quit').addEventListener('click', quitToTitle);
 // INSTANT REPLAY: from the pause menu (mid-race) and from the results screen

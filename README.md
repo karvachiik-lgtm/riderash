@@ -9,9 +9,11 @@ Built for the [404 game jam](https://github.com/404-Repo/404-game-jam) with the
 [404 game recipe](https://github.com/404-Repo/404-game-recipe). Three.js, one
 folder, no build step.
 
+**Play it:** https://riderash-deploy-git-main-origin-6fd8.vercel.app/
+
 ## Play
 
-Open `index.html` from any static server (`python3 -m http.server`, then
+To run it yourself, open `index.html` from any static server (`python3 -m http.server`, then
 http://localhost:8000/). It plays on a phone (touch pad on screen), with a
 keyboard, or with a gamepad.
 

@@ -495,6 +495,27 @@
     body.touch .hud-bl[style*="bottom:176px"] { display:none; }
     body.touch .hud-br { display:none; }
   }
+  /* PHONE HUD, A SIZE SMALLER. On a phone the top of the HUD -- position and
+     time, the speedometer, the callout island, health and stamina, the radar
+     and its pill -- took ~45% of a landscape screen and ~30% of a portrait
+     one. Each item shrinks in place (`scale`, anchored at its own corner, so
+     it composes with the transforms that centre them); the speedometer
+     through --spd, so what stacks under it moves up with it. The radar's
+     pill follows: radar.js places it from the dish's on-screen box. */
+  @media (orientation: landscape) and (max-height: 540px) {
+    body.touch { --hudk:.9; }
+    body.touch #hud { --spd:clamp(83px, 24.3vh, 135px); }
+    body.touch #radar.hud-bl { width:99px; height:99px; }
+    body.touch #gaps { top:252px; }
+  }
+  @media (orientation: portrait) and (max-width: 540px) {
+    body.touch { --hudk:.94; }
+    body.touch #hud { --spd:clamp(79px, 25.4vw, 117px); }
+    body.touch #radar.hud-bl { width:86px; height:86px; }
+  }
+  body.touch .hud-tl, body.touch #hudbtns, body.touch #gaps { scale:var(--hudk, 1); transform-origin:top left; }
+  body.touch #boxes, body.touch #healthlab, body.touch #stamlab, body.touch #combobar { scale:var(--hudk, 1); transform-origin:top right; }
+  body.touch #island, body.touch #target, body.touch #copflag { scale:var(--hudk, 1); transform-origin:top center; }
   /* SHORT LANDSCAPE (a phone on its side, ~375px tall). The menus are taller
      than the screen, and a .screen is a fixed flex column that does not
      scroll -- RIDE sat below the bottom edge where nothing could reach it.

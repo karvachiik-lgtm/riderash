@@ -826,7 +826,15 @@ export function buildRoadside(seed = 7) {
       if (r() > 0.62) continue;
       const c = centreAt(z), t = centreTangent(z);
       const nx = -t.z, nz = t.x;
-      const off = s * (edgeAt(Math.max(0, -z), -s) + CFG.KERB_W + 1.8 + r() * 14);
+      // A CLIFF COURSE (the ghat): these clumps sit at road height, and on the
+      // drop side -- a bridge drops on both -- that is air over the valley:
+      // they hung there as floating cones. On the wall side only the flat
+      // shoulder is ground; further out is the rock face. (+s is the rider's
+      // LEFT here, as edgeAt(..., -s) says: the rider's side is -s.)
+      const cliff = PROF.cliff, drop = cliff && cliffDropK(Math.max(0, -z), -s) > 0.02;
+      const spread = r() * 14;
+      if (drop) continue;
+      const off = s * (edgeAt(Math.max(0, -z), -s) + CFG.KERB_W + 1.8 + (cliff ? Math.min(spread, 0.4) : spread));
       const y = c.y - 0.1;
       p.set(c.x + nx * off, y + 0.5, c.z + nz * off);
       q.setFromEuler(new THREE.Euler(0, r() * 6.28, 0));

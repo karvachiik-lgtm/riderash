@@ -503,21 +503,25 @@
      through --spd, so what stacks under it moves up with it. The radar's
      pill follows: radar.js places it from the dish's on-screen box. */
   @media (orientation: landscape) and (max-height: 540px) {
-    body.touch { --hudk:.85; }
+    body.touch { --hudk:.85; --islk:.8; --pillk:.58; }
     body.touch #hud { --spd:clamp(78px, 23vh, 128px); }
     body.touch #radar.hud-bl { width:94px; height:94px; }
     body.touch #gaps { top:248px; }
   }
   @media (orientation: portrait) and (max-width: 540px) {
-    body.touch { --hudk:.9; }
+    body.touch { --hudk:.9; --islk:.85; --pillk:.61; }
     body.touch #hud { --spd:clamp(76px, 24.3vw, 112px); }
     body.touch #radar.hud-bl { width:83px; height:83px; }
   }
   body.touch .hud-tl, body.touch #hudbtns, body.touch #gaps { scale:var(--hudk, 1); transform-origin:top left; }
   body.touch #boxes, body.touch #healthlab, body.touch #stamlab, body.touch #combobar { scale:var(--hudk, 1); transform-origin:top right; }
-  body.touch #island, body.touch #target, body.touch #copflag { scale:var(--hudk, 1); transform-origin:top center; }
-  /* the radar's AUTO / FOCUS / FULL pill: a thumb target, not a headline */
-  body.touch #radarmode { scale:.72; }
+  /* Centred items: `scale` runs AFTER their translate(-50%), so their visual
+     centre is the layout box's left (top-left for the pill) edge -- scale from
+     there, or they slide off-centre as they shrink. */
+  body.touch #target, body.touch #copflag { scale:var(--hudk, 1); transform-origin:left top; }
+  /* the callout island and the radar's AUTO / FOCUS / FULL pill: smaller still */
+  body.touch #island { scale:var(--islk, 1); transform-origin:left top; }
+  body.touch #radarmode { scale:var(--pillk, .72); transform-origin:0 0; }
   /* SHORT LANDSCAPE (a phone on its side, ~375px tall). The menus are taller
      than the screen, and a .screen is a fixed flex column that does not
      scroll -- RIDE sat below the bottom edge where nothing could reach it.

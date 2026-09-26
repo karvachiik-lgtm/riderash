@@ -1,6 +1,6 @@
 // RideRash — the ghat's VALLEY: what you see over the edge.
 //
-// Reference set (Atlas, _refs/ghat/): a turquoise river braided with pale
+// Reference set (Atlas, docs/refs/ghat/): a turquoise river braided with pale
 // sandbanks, bright terraced paddies on its bends, pink and white blossom
 // along the banks, a red-tiled hamlet under palms, waterfalls down the cut
 // rock, mist lying in the valley, and ridge behind ridge fading blue.

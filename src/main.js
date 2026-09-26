@@ -1233,6 +1233,8 @@ function frameBody(dt) {
   if (valleyDress) valleyDress.update(dt);
   if (landmarks) landmarks.update(dt, camera.position);
   stepTunnelLight(dt);
+  // the radar's mode pill follows the dish in menus and cutscenes too (radar.js)
+  try { if (radar) radar.syncPill(dt); } catch (e) { /* never take the frame down */ }
   // COUNTDOWN. A race should begin, not fade in. The world runs -- traffic
   // moves, the pack idles, the camera settles -- but throttle and steering are
   // locked until the lights go out, so nobody is already at 50 m/s when the

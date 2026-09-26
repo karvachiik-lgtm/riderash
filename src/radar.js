@@ -89,10 +89,28 @@ export class Radar {
     this._pillKey = '';
   }
 
+  /** Keep the pill with the dish, 4 times a second. Called every frame by the
+   *  game loop, in races AND menus: it used to be updated only from update(),
+   *  which does not run outside a race, so the pill stayed on screen over the
+   *  intro, the cutscenes and the menus. */
+  syncPill(dt) {
+    this._pillT = (this._pillT || 0) - (dt || 0.016);
+    if (this._pillT <= 0 || !this._pillKey) { this._pillT = 0.25; this._placePill(); }
+  }
+
   /** The pill sits centred on the dish's top edge, wherever CSS put the dish. */
   _placePill() {
-    const r = this.cv.getBoundingClientRect(), shown = r.width > 0 && getComputedStyle(this.cv).visibility !== 'hidden'
-      && getComputedStyle(this.cv).display !== 'none' && !document.body.classList.contains('replaying');
+    // The pill lives on <body> (the HUD layer does not take pointer events), so
+    // it does NOT inherit the HUD's hiding: judge the DISH's real visibility,
+    // ancestors included (the cutscenes fade the HUD by opacity), and hide it
+    // under the intro and the cutscenes outright.
+    const cv = this.cv, r = cv.getBoundingClientRect(), body = document.body;
+    const intro = document.getElementById('intro');
+    const seen = typeof cv.checkVisibility === 'function'
+      ? cv.checkVisibility({ opacityProperty: true, visibilityProperty: true })
+      : getComputedStyle(cv).visibility !== 'hidden' && getComputedStyle(cv).display !== 'none';
+    const shown = r.width > 0 && seen && !body.classList.contains('replaying') && !body.classList.contains('cine')
+      && !(intro && !intro.hidden);
     const key = `${Math.round(r.left)}|${Math.round(r.top)}|${Math.round(r.width)}|${shown}|${this.mode}`;
     if (key === this._pillKey) return;
     this._pillKey = key;
@@ -338,8 +356,7 @@ export class Radar {
     const g = this.ctx, R = this.r, S = this.size;
     // CALM: quick to snap in when something happens, slow to ease out again
     // (placed at 4 Hz: it reads layout, which is not free every frame)
-    this._pillT = (this._pillT || 0) - (dt || 0.016);
-    if (this._pillT <= 0 || !this._pillKey) { this._pillT = 0.25; this._placePill(); }
+    this.syncPill(dt);
     this.quiet = opts.active ? 0 : this.quiet + (dt || 0);
     const calmWant = this.mode === 'auto' && !opts.active && this.quiet > CRUISE.AFTER && !(player.onFoot || (player.fighter && player.fighter.down)) ? 1 : 0;
     this.full += ((this.mode === 'full' ? 1 : 0) - this.full) * Math.min(1, (dt || 0.016) * 6);

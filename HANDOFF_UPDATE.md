@@ -159,6 +159,7 @@ the figures once the cop steps off) and the cliff plunge (bike leaves frame).
 | `icons/` | app icons (PWA) | — |
 | `docs/refs/concepts/`, `docs/refs/ghat/` | small Atlas concept/reference images for the arrest, ghat road, PCH tunnel | Atlas, reference only (never loaded) |
 | `media/riderash-trailer.mp4` | the trailer (branch `trailer`/`handoff`) | rendered from the game |
+| `media/riderash-trailer-audio.m4a`, `.mp3` | the trailer's mixed soundtrack alone (race1 bed + rev + win stinger), 40.6 s (branch `trailer-audio`) | extracted from the trailer |
 | `assetlib.js`, `rig.js`, `surfaces.js` | the recipe's loader, rig and procedural-surface helpers | 404 recipe |
 
 Deleted in PR #1 (still in git history before `952f35f`): `_shots/`,

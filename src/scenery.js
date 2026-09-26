@@ -463,6 +463,9 @@ export class Scenery {
     // cliff.side + is the rider's RIGHT.
     const CL = roadProfile().cliff;
     const CT0 = CL ? edgeAt(0, 1) + CFG.KERB_W + 2.2 : T0;
+    // the terrain skirt's columns (section 9); props on a cliff course are
+    // seated on the triangles these make (groundY)
+    const COLS = CL ? [CT0, CT0 + 1.5, CT0 + 3.5, CT0 + 6, CT0 + 9, CT0 + 13, CT0 + 18, CT0 + 26, 40, 60, 90, 140, 220, 330, 480, 650] : TCOLS;
     // Which side drops changes along the course (ghatdesign.js): the terrain
     // morphs between the drop and the wall through each change (cliffDropK),
     // and where a lane has collapsed the drop starts at the broken edge.
@@ -586,8 +589,78 @@ export class Scenery {
     };
     const groundY = (s, lat, tb, f) => {
       if (Math.abs(lat) <= CT0) return f.cy - 0.06;
+      // A CLIFF COURSE'S FACES ARE PUSHED SIDEWAYS (disp's dl, up to 5.5 m along
+      // the road normal): the skirt vertex computed for `lat` is DRAWN at
+      // lat + dl. Seated at the height of its own lat, a prop on a slope that
+      // climbs or falls tens of metres in a few floated over the ground as drawn
+      // (the ghat's shrubs and trees hanging over the valley). Find the vertex
+      // that actually lands under the prop -- a couple of fixed-point steps --
+      // and take ITS height, so the prop stands on the surface you see.
+      if (CL) {
+        let src = lat;
+        const sg = Math.sign(lat) || 1;
+        for (let it = 0; it < 3; it++) {
+          const q = placeXZ(s, src, f);
+          src = lat - sg * disp(q.x, q.z, Math.abs(src)).dl;
+          if (Math.abs(src) < CT0) { src = sg * CT0; break; }
+        }
+        return meshY(s, src);
+      }
       const xz = placeXZ(s, lat, f);
       return f.cy - 0.06 + reliefAt(s, lat, tb) - 0.04 + disp(xz.x, xz.z, Math.abs(lat)).dh;
+    };
+    // THE GROUND AS DRAWN. The skirt samples reliefAt on a grid (rows every
+    // ~4 m, the COLS columns) and draws flat triangles between. On a cliff
+    // course the mountainside's ridged noise varies over ~35 m while the outer
+    // columns are 110-170 m apart, so the analytic height a prop was seated on
+    // could be 300 m from the triangle actually drawn there (MEASURED: 3.8k
+    // trees, shrubs and rocks on the ghat hanging in the air, up to 344 m).
+    // Evaluate exactly what section 9 builds: the chunk's row grid, the column
+    // pair, the same vertex heights, the same diagonal split.
+    let meshGrade = 0, meshInside = true;
+    const meshY = (s, lat) => {
+      const a = Math.abs(lat), sg = Math.sign(lat) || 1;
+      let k = 0; while (k < COLS.length - 2 && COLS[k + 1] < a) k++;
+      const a0 = COLS[k], a1 = COLS[k + 1], u = Math.max(0, Math.min(1, (a - a0) / (a1 - a0)));
+      const ci = Math.max(0, Math.min(nChunks - 1, Math.floor((s + PRE) / CHUNK)));
+      const c0 = -PRE + ci * CHUNK, c1 = Math.min(sEnd + 40, c0 + CHUNK);
+      const rows = Math.max(1, Math.ceil((c1 - c0) / 4)), dr = (c1 - c0) / rows;
+      const r = Math.max(0, Math.min(rows - 1, Math.floor((s - c0) / dr)));
+      const sa = c0 + r * dr, v = Math.max(0, Math.min(1, (s - sa) / dr));
+      const P = [];                                   // the four corners' map positions
+      const H = (ss, aa) => {
+        const fr = frame(ss), lt = sg * aa, q = placeXZ(ss, lt, fr);
+        P.push(q.x, q.z);
+        return fr.cy - 0.1 + reliefAt(ss, lt, themeAt(ss)) + disp(q.x, q.z, aa).dh;
+      };
+      const ha = H(sa, a0), hb = H(sa, a1), hc = H(sa + dr, a0), hd = H(sa + dr, a1);
+      // ...and is the prop really over that triangle? Round the ghat's tight
+      // hairpins the wide outer cells fold, and a prop's map position can lie
+      // outside the triangle it was seated on -- floating hundreds of metres
+      // over the valley (MEASURED: 354 m). Test it in map space.
+      const fp = frame(s), me = placeXZ(s, lat, fp), mx = me.x, mz = me.z;
+      const tri = u + v <= 1 ? [0, 1, 2] : [1, 3, 2];     // corner ids: a=0 b=1 c=2 d=3
+      const [i0, i1, i2] = tri;
+      const x0 = P[i0 * 2], z0 = P[i0 * 2 + 1], x1 = P[i1 * 2], z1 = P[i1 * 2 + 1], x2 = P[i2 * 2], z2 = P[i2 * 2 + 1];
+      const den = (z1 - z2) * (x0 - x2) + (x2 - x1) * (z0 - z2);
+      const l0 = ((z1 - z2) * (mx - x2) + (x2 - x1) * (mz - z2)) / den, l1 = ((z2 - z0) * (mx - x2) + (x0 - x2) * (mz - z2)) / den;
+      meshInside = Math.abs(den) > 1e-6 && l0 > -0.05 && l1 > -0.05 && 1 - l0 - l1 > -0.05;
+      // ...and is that triangle the right way up? A folded cell is turned over
+      // (drawn back-face-on, so invisible) while its footprint still covers the
+      // prop. Compare its winding with the road-edge cell, which never folds.
+      const cr = (ax, az, bx, bz, cx2, cz2) => (bx - ax) * (cz2 - az) - (bz - az) * (cx2 - ax);
+      const fr0 = frame(sa), e0 = placeXZ(sa, sg * CT0, fr0), e0x = e0.x, e0z = e0.z;
+      const e1 = placeXZ(sa, sg * (CT0 + 1.5), fr0), e1x = e1.x, e1z = e1.z;
+      const fr1 = frame(sa + dr), e2 = placeXZ(sa + dr, sg * CT0, fr1);
+      const ref = Math.sign(cr(e0x, e0z, e1x, e1z, e2.x, e2.z));
+      const t1 = Math.sign(cr(P[0], P[1], P[2], P[3], P[4], P[5]));      // a, b, c
+      const t2 = Math.sign(cr(P[6], P[7], P[4], P[5], P[2], P[3]));      // d, c, b (the same sense)
+      if (t1 !== ref || t2 !== ref) meshInside = false;
+      // how sheer this cell is: its steepest edge's rise over run
+      const wl = a1 - a0;
+      meshGrade = Math.max(Math.abs(hb - ha) / wl, Math.abs(hd - hc) / wl, Math.abs(hc - ha) / dr, Math.abs(hd - hb) / dr);
+      // quads split along (row r, col k+1)-(row r+1, col k), as the index buffer does
+      return u + v <= 1 ? ha + (hb - ha) * u + (hc - ha) * v : hd + (hc - hd) * (1 - u) + (hb - hd) * (1 - v);
     };
 
     // Occupancy: building footprints, so trees do not grow through barns.
@@ -616,9 +689,22 @@ export class Scenery {
       if (Math.abs(lat) < 230 && crossingNear(s, 24)) return;
       if (Math.abs(lat) < KERB + 2.2 && !o.allowNear) return;    // never on the road or shoulder
       if (isDrop(s, lat)) return;                                   // nothing stands over the drop
+      // ...nor where the ground is turning into it: through a drop/wall change
+      // the height swings by a hundred metres within a few rows of the skirt,
+      // and a prop there hung in the air over the valley (MEASURED on the ghat)
+      if (CL && cliffDropK(s, riderSide(lat)) > 0.02) return;
+      // ...nor on the shoulder of a bridge or a collapsed lane: groundY puts the
+      // strip inside the first skirt column at deck height, and there it is
+      // air over the gorge (MEASURED: shrubs 53-70 m above the ground)
+      if (CL && Math.abs(lat) <= CT0 + 2 && (cliffBridgeK(s) > 0 || ghatBrokenAt(Math.max(0, s), riderSide(lat)))) return;
       const tb = o.tb || themeAt(s);
       const f = frame(s);
+      meshGrade = 0; meshInside = true;
       const y = (o.y !== undefined ? o.y : groundY(s, lat, tb, f)) - (o.sink || 0);
+      // nothing grows on a sheer face: a skirt cell steeper than ~50 deg is
+      // cliff, and a prop seated on it hung off the face or over the drop
+      // below (MEASURED on the ghat)
+      if (CL && (meshGrade > 1.2 || !meshInside)) return;
       const xz = placeXZ(s, lat, f);
       _p.set(xz.x, y, xz.z);
       _e.set(o.tilt || 0, o.yaw || 0, o.roll || 0, 'YXZ'); _q.setFromEuler(_e);
@@ -898,7 +984,6 @@ export class Scenery {
 
     // ---- 9. Terrain skirt, per chunk. (A cliff course packs its columns at the
     // road, where the face and the wall are.)
-    const COLS = CL ? [CT0, CT0 + 1.5, CT0 + 3.5, CT0 + 6, CT0 + 9, CT0 + 13, CT0 + 18, CT0 + 26, 40, 60, 90, 140, 220, 330, 480, 650] : TCOLS;
     const ROCK = new THREE.Color(0x76695c), ROCK2 = new THREE.Color(0x5f5a52);   // grey-brown basalt (Atlas refs, docs/refs/ghat)
     const terrainGeos = [];
     for (let ci = 0; ci < nChunks; ci++) {

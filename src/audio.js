@@ -25,6 +25,7 @@ import { renderMusic } from './music.js';
 // over the sounding part): horn -2.7 dBFS (a near-square wave -- the loudest
 // thing in the game at amp 0.55), boost -11.5, crash -15.7, skid -10.7,
 // swing -19.0, impact -16.5 (but only ~40 ms long, so it reads quieter).
+const HORN_MAX_S = 2.0;       // no single horn blast sounds longer than this
 const TRIM = { horn: 0.42, boost: 0.8, skid: 0.8, swing: 0.9, crash: 1.0, impact: 1.0, shift: 0.45,
   // finish stings (Atlas ElevenLabs SFX, measured below): cheer -14.3,
   // stinger -23.6 (a hit and a ringing chord), fail -10.2 dB active RMS.
@@ -514,6 +515,16 @@ export class Audio {
       this.nodes.siren = { gain, pn };
     }
     const sn = this.nodes.siren;
+    this._sirenAt = level > 0 ? performance.now() : 0;
+    if (level > 0 && !this._sirenDog) {
+      // WATCHDOG. The chase refreshes the wail every frame; a code path that
+      // stops calling siren() (a restart mid-chase, a map with no cop, a frame
+      // that threw) must not leave it wailing for the rest of the session.
+      this._sirenDog = setInterval(() => {
+        if (this._sirenAt && performance.now() - this._sirenAt > 500) this.siren(0);
+        if (!this._sirenAt) { clearInterval(this._sirenDog); this._sirenDog = null; }
+      }, 250);
+    }
     // 0.095 (was 0.07): measured, the old level put the wail at the engine's
     // own level; this sits it ~3 dB over the bike and still under the horn.
     sn.gain.gain.setTargetAtTime(Math.max(0, Math.min(1, level)) * 0.095, t, 0.12);
@@ -521,7 +532,7 @@ export class Audio {
   }
 
   // Engine and scrape to silence, for the title and results screens.
-  idle() { this.update({ speed: 0, silent: true }); this.siren(0); }
+  idle() { this.update({ speed: 0, silent: true }); this.siren(0); this.stopHorns(); }
 
   /**
    * One-shot from any loaded buffer. `impact()` predates this and is kept
@@ -541,7 +552,33 @@ export class Audio {
     src.connect(g).connect(this.nodes.impactGain);
     src.start(0, this.offsets[name] || 0);
     if (name === 'crash') this._duck(a);
+    if (name === 'horn') this._trackHorn(src, g);
     return src;
+  }
+
+  /**
+   * HORNS NEVER OUTSTAY THEIR WELCOME. A horn is a short blast: at most two
+   * sound at once (a third steals the oldest), each is hard-stopped after
+   * HORN_MAX_S whatever its buffer or rate, and stopHorns() cuts them all when
+   * the race stops, restarts or pauses.
+   */
+  _trackHorn(src, g) {
+    const hs = this._horns || (this._horns = []);
+    hs.push({ src, g });
+    src.onended = () => { const i = hs.findIndex((h) => h.src === src); if (i >= 0) hs.splice(i, 1); };
+    while (hs.length > 2) this._killHorn(hs.shift());
+    const t = this.ctx.currentTime;
+    g.gain.setValueAtTime(g.gain.value, t + HORN_MAX_S - 0.08);
+    g.gain.linearRampToValueAtTime(0.0001, t + HORN_MAX_S);
+    try { src.stop(t + HORN_MAX_S + 0.02); } catch (e) { /* already stopped */ }
+  }
+  _killHorn(h) {
+    const t = this.ctx.currentTime;
+    try { h.g.gain.cancelScheduledValues(t); h.g.gain.setTargetAtTime(0, t, 0.02); h.src.stop(t + 0.1); } catch (e) { /* already stopped */ }
+  }
+  stopHorns() {
+    if (!this.ctx || !this._horns) return;
+    for (const h of this._horns.splice(0)) this._killHorn(h);
   }
 
   impact(intensity = 1, kind = 'hit') {

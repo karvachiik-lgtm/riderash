@@ -2037,6 +2037,23 @@ function stepGame(dt) {
     else if (p.slipstream > 0.55) state.warn = 'SLIPSTREAM';
   }
 
+  // HORN BUDGET. A car stuck behind the bike, or pacing it in the next lane,
+  // met the time-to-contact test every 2.4 s for as long as it stayed there --
+  // a horn that ran for the rest of the race. Each car gets two blasts until it
+  // falls out of range (re-armed below), and the whole road at most three in
+  // any eight seconds.
+  const hornOk = (u) => {
+    const now = state.time;
+    state.hornLog = (state.hornLog || []).filter((t) => now - t < 8);
+    if ((u.honks || 0) >= 2 || state.hornLog.length >= 3) return false;
+    u.honks = (u.honks || 0) + 1; state.hornLog.push(now);
+    return true;
+  };
+  {
+    const cars = world.traffic && world.traffic.userData ? world.traffic.userData.cars : null;
+    if (cars) for (const car of cars) { const u = car.userData; if (u.honks && Math.abs(u.s - player.phys.s) > 250) u.honks = 0; }
+  }
+
   // ---- ONCOMING, IN YOUR LANE (Road Rash): an oncoming driver who sees a
   // bike on their side of the road leans on the horn early -- 1.5 to 4 s out,
   // a long blast, once per car -- and the HUD calls it. It is the warning to
@@ -2056,8 +2073,11 @@ function stepGame(dt) {
         if (Math.abs(u.at - p.lateral) > u.halfW + 1.0) continue;
         u.warnedOncoming = true;
         if (state.oncomingCd <= 0) {
-          audio.oneShot('horn', 0.75, (u.hornPitch || 1) * 0.98);
-          setTimeout(() => audio.oneShot('horn', 0.7, (u.hornPitch || 1) * 0.98), 160);   // a long blast
+          if (hornOk(u)) {
+            audio.oneShot('horn', 0.75, (u.hornPitch || 1) * 0.98);
+            const race = state.raceId;
+            setTimeout(() => { if (state.raceId === race && state.running && !state.raceOver && !state.paused) audio.oneShot('horn', 0.7, (u.hornPitch || 1) * 0.98); }, 160);   // a long blast
+          }
           state.warn = 'ONCOMING!';
           state.oncomingCd = 1.5;
         }
@@ -2091,7 +2111,7 @@ function stepGame(dt) {
       const ttc = (Math.abs(d) - u.halfL - 1) / close;
       if (ttc > 0 && ttc < 1.4) {
         state.hornCd = 2.4;
-        audio.oneShot('horn', 0.6, (u.hornPitch || 1) * (0.96 + Math.random() * 0.08));
+        if (hornOk(u)) audio.oneShot('horn', 0.6, (u.hornPitch || 1) * (0.96 + Math.random() * 0.08));
         break;
       }
     }
@@ -3161,7 +3181,8 @@ function resetRace() {
   pf.resetCombat();
   pf.frail = raceBike().frail || 1;       // the one-wheeler goes down easier
   pf.hasWeapon = true;
-  state.carHitCd = 0; state.hornCd = 0;
+  state.carHitCd = 0; state.hornCd = 0; state.hornLog = []; state.raceId = (state.raceId || 0) + 1;
+  audio.siren(0); audio.stopHorns();
   state.countdown = CFG.COUNTDOWN;
   player.phys.sync();
   rivals.forEach((r, i) => {
@@ -3779,6 +3800,7 @@ function pauseGame(reason = 'user') {
   state.paused = true;
   input.down = Object.create(null);          // no key is "still held" on resume
   if (touchpad) touchpad.reset();            // nor any on-screen button
+  audio.stopHorns();
   audio.setPaused(true);
   $('pause').classList.add('on');
   refreshPauseItems();

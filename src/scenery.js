@@ -83,7 +83,10 @@ const FAR_LAT = 80;         // props further than this from the centreline alway
 // Per tier: draw distance, full-detail distance, density of small props.
 export const SCENERY_TIERS = {
   high:   { visR: VIS_R, nearR: 300, density: 1.0,  grass: 1.0 },
-  medium: { visR: 950,   nearR: 220, density: 0.75, grass: 0.45 },
+  // medium = phones and the jam gate's phone profile: the start grid peaked at
+  // 901 draws against the gate's 900 (MEASURED on an M4); this scenery is
+  // what brought the grid to ~840 (-7%). Desktop 'high' keeps the full dress.
+  medium: { visR: 700,   nearR: 150, density: 0.5,  grass: 0 },
   low:    { visR: 700,   nearR: 150, density: 0.5,  grass: 0 },       // mobile: no grass at all
 };
 const PRE = 800;            // dress this far BEHIND the start line (matches the road's 800 m)

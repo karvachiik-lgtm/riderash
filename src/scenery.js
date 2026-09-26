@@ -896,7 +896,7 @@ export class Scenery {
     // ---- 9. Terrain skirt, per chunk. (A cliff course packs its columns at the
     // road, where the face and the wall are.)
     const COLS = CL ? [CT0, CT0 + 1.5, CT0 + 3.5, CT0 + 6, CT0 + 9, CT0 + 13, CT0 + 18, CT0 + 26, 40, 60, 90, 140, 220, 330, 480, 650] : TCOLS;
-    const ROCK = new THREE.Color(0x76695c), ROCK2 = new THREE.Color(0x5f5a52);   // grey-brown basalt (Atlas refs, _refs/ghat)
+    const ROCK = new THREE.Color(0x76695c), ROCK2 = new THREE.Color(0x5f5a52);   // grey-brown basalt (Atlas refs, docs/refs/ghat)
     const terrainGeos = [];
     for (let ci = 0; ci < nChunks; ci++) {
       const s0 = -PRE + ci * CHUNK, s1 = Math.min(sEnd + 40, s0 + CHUNK);

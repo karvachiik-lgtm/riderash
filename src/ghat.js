@@ -4,7 +4,7 @@
 // too close to the edge put you out of the race. The layout is ghatdesign.js
 // (which flank drops, the swirls, cuttings, the tunnel, bridges, collapsed
 // lanes, concrete repairs); this builds the dressing that reads it, from the
-// Atlas reference set (_refs/ghat/):
+// Atlas reference set (docs/refs/ghat/):
 //
 //   - on the drop side, a W-beam guard rail on the sweepers and a low stone
 //     PARAPET painted in black-and-white bands on the swirls

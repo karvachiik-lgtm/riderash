@@ -1,0 +1,7 @@
+# debug captures and harness output stay out of the repo
+_shots/
+_playtest/
+.playwright-mcp/
+_jam/
+node_modules/
+.DS_Store

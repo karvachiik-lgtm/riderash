@@ -2,7 +2,7 @@
 //
 // The music used to be synthesised at load (music.js): honest, file-free, and
 // soulless -- a sine-and-noise rock kit. These are ORIGINAL instrumental
-// recordings generated for this game (Atlas; see _refs/audio_briefs.md for the
+// recordings generated for this game (Atlas; see docs/refs/audio_briefs.md for the
 // briefs), in the register of 90s bike-combat racers: a riff-led hard-rock title
 // theme, fast hard rock, bluesy stoner rock, double-kick metal and a grungy
 // biker groove -- generated with the model's instrumental flag ON (no vocals),
